@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {SAMPLE_ROSTER,simulation,chooseGame,involved,parseRoster,safeVideo} from '../web/director.js';
+import {SAMPLE_ROSTER,simulation} from './fixtures/simulation.js';
+import {chooseGame,involved,parseRoster,safeVideo} from '../web/director.js';
 import {normalizeScoreboard} from '../web/adapters.js';
 test('rehearsal follows three roster offenses, then the closest scoring threat, then a quiet window',()=>{
  const expected=['test-0','test-1','test-2','test-3',undefined,'test-0'];

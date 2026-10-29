@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {scenarios,SOURCES} from '../web/replays.js';
+import {scenarios,SOURCES} from './fixtures/replays.js';
 import {chooseGame} from '../web/director.js';
 const roster=[{name:'Receiver',team:'PHI',position:'WR'},{name:'Runner',team:'IND',position:'RB'}];
 test('real replay fixture directs roster, fallback, quiet highlight window and priority return',()=>{

@@ -57,3 +57,8 @@ test('upstream access denial, network failure and timeout are distinct',async()=
 test('cross-origin posts cannot consume the saved connection',async()=>{
  const r=req('123');r.headers.set('Origin','https://unrelated.example');assert.equal((await leagueAPI(r,env)).status,403);
 });
+test('replay import requests the selected historical scoring week for all franchises',async()=>{
+ const r=req('123');const replay=new Request(r.url,{method:'POST',headers:r.headers,body:JSON.stringify({leagueId:'123',season:2026,week:7})});
+ const response=await leagueAPI(replay,env,async(url)=>{assert.equal(new URL(url).searchParams.get('scoringPeriodId'),'7');return Response.json({...raw,scoringPeriodId:7,teams:[...raw.teams,{...raw.teams[0],id:2,name:'Second franchise',owners:['OTHER']} ]});});
+ const data=await response.json();assert.equal(data.week,7);assert.equal(data.teams.length,2);assert.equal(data.teams[1].name,'Second franchise');
+});

@@ -21,13 +21,15 @@ export async function leagueAPI(request,env={},fetcher=fetch){
  let data;try{if(Number(request.headers.get('Content-Length')||0)>1024)return json({error:'Request too large.'},413);const text=await request.text();if(text.length>1024)return json({error:'Request too large.'},413);data=JSON.parse(text);}catch{return json({error:'Enter a valid league ID.'},400);}
  const id=String(data.leagueId||'');const now=new Date();const season=now.getUTCFullYear()-(now.getUTCMonth()<5?1:0);const year=Number(data.season||season);
  if(!/^\d{1,12}$/.test(id)||!Number.isInteger(year)||year<2018||year>season+1)return json({error:'Enter a numeric ESPN league ID.'},400);
+ const week=data.week==null?null:Number(data.week);
+ if(week!==null&&(!Number.isInteger(week)||week<1||week>25))return json({error:'Choose a valid scoring week.'},400);
  const owner=isOwner(request,env);
  if(id===env.ESPN_LEAGUE_ID&&!owner)return json({error:'The saved ESPN connection is not linked to this signed-in session.',code:'CONNECTION_IDENTITY'},403);
  const useSaved=!!(owner&&id===env.ESPN_LEAGUE_ID&&env.ESPN_SWID&&env.ESPN_S2);
  if(owner&&id===env.ESPN_LEAGUE_ID&&!useSaved)return json({error:'The saved ESPN connection is missing its access credentials.',code:'CONNECTION_MISSING'},503);
  const headers={Accept:'application/json'};if(useSaved)headers.Cookie=`SWID=${env.ESPN_SWID}; espn_s2=${env.ESPN_S2}`;
  // Workers throws synchronously for redirect:'error'. Manual also prevents cookie forwarding.
- try{const response=await fetcher(`https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/${year}/segments/0/leagues/${id}?view=mRoster&view=mTeam&view=mSettings`,{headers,redirect:'manual',signal:AbortSignal.timeout(12000)});
+ try{const response=await fetcher(`https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/${year}/segments/0/leagues/${id}?view=mRoster&view=mTeam&view=mSettings${week===null?'':'&scoringPeriodId='+week}`,{headers,redirect:'manual',signal:AbortSignal.timeout(12000)});
  if(response.status>=300&&response.status<400)return json({error:'ESPN redirected the roster request. Your saved ESPN login may need refreshing.',code:'ESPN_REDIRECT'},502);
  if([401,403,404].includes(response.status))return json({error:useSaved?'ESPN could not open this league with the saved access. The login may have expired, or the league/season is unavailable.':'This league is private or unavailable. League ID alone works for public leagues; private leagues need an ESPN connection.'},response.status===404?404:401);
  if(!response.ok)return json({error:'ESPN is temporarily unavailable. Please try again.'},502);
