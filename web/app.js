@@ -8,6 +8,7 @@ const BASE='https://site.api.espn.com/apis/site/v2/sports/football/nfl/';
 let saved={roster:SAMPLE,teamName:'Sample roster',streams:{},leagueId:'',teamId:'',season:2026};
 try{const old=JSON.parse(localStorage.getItem('fd-simple-v2')||'null');if(old){saved={...saved,...old};saved.roster=parseRoster(old.roster.map(p=>`${p.name}, ${p.team}, ${p.position}`).join('\n'));saved.streams=Object.fromEntries(Object.entries(old.streams||{}).map(([key,v])=>[key,safeVideo(v)]));}}catch{}
 let state={mode:'replay',step:0,running:false,auto:true,games:[],currentId:'replay-phi',loaded:'',playerStarted:false,clip:null,clipManual:false,clips:[],played:new Set(),quietAt:null,lastClip:-Infinity,changedAt:0,lastFeed:0,feedError:'',generation:0,pendingLeague:null,failedURL:'',side:'games'};
+let importInFlight=false;
 let testTimer,feedTimer,clipTimer,clipTimeout,toastTimer,feedController,clipController;
 state.games=scenarios(0);
 function persist(){try{localStorage.setItem('fd-simple-v2',JSON.stringify(saved));}catch{notice('Settings are applied for this visit; browser storage is unavailable.');}}
@@ -17,17 +18,17 @@ function showSide(name){state.side=name;for(const n of ['games','roster','clips'
 for(const name of ['games','roster','clips']){$(name+'Tab').onclick=()=>showSide(name);$(name+'Tab').onkeydown=e=>{if(!['ArrowLeft','ArrowRight'].includes(e.key))return;e.preventDefault();const tabs=['games','roster','clips'];const next=tabs[(tabs.indexOf(name)+(e.key==='ArrowRight'?1:2))%3];showSide(next);$(next+'Tab').focus();};}
 $('connectionButton').onclick=()=>{$('connectBar').hidden=!$('connectBar').hidden;if(!$('connectBar').hidden)$('leagueId').focus();};
 $('leagueId').value=saved.leagueId;if(saved.teamId)$('connectBar').hidden=true;
-async function importLeague(refresh=false){const leagueId=refresh?saved.leagueId:$('leagueId').value.trim();if(!/^\d{1,12}$/.test(leagueId)){$('importStatus').textContent='Enter the numeric league ID from ESPN.';return;}
- $('importButton').disabled=true;$('refreshRoster').disabled=true;$('importButton').textContent='Importing…';$('importStatus').textContent='Getting your teams from ESPN…';$('teamPicker').hidden=true;
- try{const response=await fetch('/api/league',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leagueId}),signal:AbortSignal.timeout(15000)});const data=await response.json();if(!response.ok)throw new Error(data.error||'Could not import this league.');state.pendingLeague=data;
+async function importLeague(refresh=false){if(importInFlight)return;const leagueId=refresh?saved.leagueId:$('leagueId').value.trim();if(!/^\d{1,12}$/.test(leagueId)){$('importStatus').textContent='Enter the numeric league ID from ESPN.';return;}
+ importInFlight=true;$('leagueForm').setAttribute('aria-busy','true');$('importStatus').classList.remove('error');$('importButton').disabled=true;$('refreshRoster').disabled=true;$('importButton').textContent='Importing…';$('importStatus').textContent='Getting your teams from ESPN…';$('teamPicker').hidden=true;
+ try{const response=await fetch('/api/league',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leagueId}),signal:AbortSignal.timeout(15000)});const type=response.headers.get('Content-Type')||'';if(!type.includes('application/json'))throw new Error('Your session needs refreshing. Reload this page, then import again.');const data=await response.json();if(!response.ok)throw new Error(data.error||'Could not import this league.');state.pendingLeague=data;
  const selected=data.teams.find(t=>t.id===(leagueId===saved.leagueId?saved.teamId:null))||data.teams.find(t=>t.id===data.ownedTeamId)||(data.teams.length===1?data.teams[0]:null);
  if(selected){applyTeam(data,selected);return;}
  $('teamSelect').innerHTML=data.teams.map(t=>`<option value="${escape(t.id)}">${escape(t.name)}</option>`).join('');$('teamPicker').hidden=false;$('importStatus').textContent=`${data.teams.length} teams found. Choose yours once.`;
- }catch(e){$('connectBar').hidden=false;$('importStatus').textContent=e.name==='TimeoutError'?'ESPN took too long. Please try again.':e.message;}
- finally{$('importButton').disabled=false;$('refreshRoster').disabled=false;$('importButton').textContent='Import roster';}}
+ }catch(e){$('connectBar').hidden=false;$('importStatus').classList.add('error');$('importStatus').textContent=e.name==='TimeoutError'?'ESPN took too long. Please try again.':e.message;}
+ finally{importInFlight=false;$('leagueForm').setAttribute('aria-busy','false');$('importButton').disabled=false;$('refreshRoster').disabled=false;$('importButton').textContent='Import roster';}}
 $('leagueForm').onsubmit=e=>{e.preventDefault();importLeague();};$('refreshRoster').onclick=()=>importLeague(true);
 $('useTeam').onclick=()=>{const data=state.pendingLeague;const team=data?.teams.find(t=>t.id===$('teamSelect').value);if(team)applyTeam(data,team);};
-function applyTeam(data,team){saved={...saved,roster:team.players,teamName:team.name,leagueId:data.leagueId,season:data.season,teamId:team.id};persist();$('connectBar').hidden=true;$('teamPicker').hidden=true;$('importStatus').textContent=`${team.players.length} starters imported.`;state.pendingLeague=null;direct();render();showSide('roster');notice(`${team.name}: ${team.players.length} starters imported.`);}
+function applyTeam(data,team){$('leagueId').value=data.leagueId;saved={...saved,syncedAt:Date.now(),roster:team.players,teamName:team.name,leagueId:data.leagueId,season:data.season,teamId:team.id};persist();$('connectBar').hidden=true;$('teamPicker').hidden=true;$('importStatus').textContent=`${team.players.length} starters imported.`;state.pendingLeague=null;direct();render();showSide('roster');notice(`${team.name}: ${team.players.length} starters imported.`);}
 function unload(video){video.pause();video.removeAttribute('src');video.load();video.hidden=true;}
 function clearGame(){if($('gameFrame').hasAttribute('src'))$('gameFrame').removeAttribute('src');$('gameFrame').hidden=true;if($('gameVideo').hasAttribute('src'))unload($('gameVideo'));state.loaded='';}
 async function startVideo(video){video.muted=true;try{await video.play();$('playVideo').hidden=true;}catch{$('playVideo').hidden=false;}}
@@ -62,7 +63,7 @@ function render(){const g=activeGame(),test=state.mode==='replay',players=g?invo
  $('gameTitle').textContent=state.clip?state.clip.title:g?(test?g.name:g.name.replace(' @ ',' at ')):'No game selected';
  $('reason').textContent=state.clip?'The game returns when this highlight ends.':!g?'Waiting for the NFL slate.':!state.auto?'Pinned to this game. Turn Auto director on to follow the action.':players.length?`${players.map(p=>p.name).join(', ')} · ${players[0].position==='D/ST'?'defense':'offense'} has possession.`:g.statusName==='STATUS_HALFTIME'?'Quiet moment. A highlight can play here.':g.state!=='in'?g.detail:`Roster quiet · ${g.yardsToGoal??'unknown'} yards to the end zone.`;
  $('connectionButton').textContent=saved.teamId?saved.teamName:'Connect roster';$('connectionButton').title=saved.teamName;
- $('teamName').textContent=saved.teamName;$('refreshRoster').hidden=!saved.teamId;$('rosterNote').textContent=saved.teamId?`${saved.roster.length} starters · ESPN league ${saved.leagueId}`:saved.teamName==='Sample roster'?'Import your team above to replace these players.':'Your manually entered starters.';
+ $('teamName').textContent=saved.teamName;$('refreshRoster').hidden=!saved.teamId;$('rosterNote').textContent=saved.teamId?`${saved.roster.length} starters · League ${saved.leagueId}${saved.syncedAt?' · Synced '+new Date(saved.syncedAt).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}):''}`:saved.teamName==='Sample roster'?'Import your team above to replace these players.':'Your manually entered starters.';
  $('rosterList').innerHTML=saved.roster.map(p=>`<div class="roster-item ${players.some(a=>a.name===p.name)?'active':''}"><span class="position">${escape(p.position)}</span><div><strong>${escape(p.name)}</strong><small>${escape(p.team)}</small></div></div>`).join('')||'<p class="empty-list">No starters selected. Auto director will follow scoring threats.</p>';
  $('gamesHeading').textContent=test?'Test games':'NFL games';$('feedStatus').textContent=test?'Week 7 replays':state.feedError?'Feed unavailable':!state.lastFeed?'Loading…':stale()?'Stale data':'ESPN';
  $('gameList').innerHTML=state.games.map(game=>`<button class="game" data-game="${escape(game.id)}" aria-pressed="${state.currentId===game.id}"><strong>${escape(test?game.name:game.name)}</strong><span class="game-meta">${test?'Full-game replay · Week 7':escape(game.detail)+' · '+game.teams.map(t=>escape(t.score)).join(' – ')}</span><span class="game-state">${game.id===state.currentId?'Selected':test?'Replay ready':game.redZone?'Red zone':game.state==='in'?'In progress':'Scheduled'}</span></button>`).join('')||'<p class="empty-list">No games available. Replay test works any day.</p>';
@@ -100,3 +101,17 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden)clearTimeou
 window.addEventListener('pagehide',()=>{stopNetwork();clearTimeout(testTimer);clearTimeout(clipTimeout);clearGame();$('clipVideo').pause();});
 window.addEventListener('pageshow',e=>{if(e.persisted){state.generation++;if(state.mode==='live')livePoll(state.generation);fetchClips(state.generation);loadPlayer();scheduleTest();}});
 render();fetchClips(state.generation);
+// Restore a saved team or import the owner's configured connection on a fresh visit.
+// Only the server can advertise a private connection, after checking the signed-in visitor.
+async function restoreConnection(){
+ try{
+  const response=await fetch('/api/session',{cache:'no-store',signal:AbortSignal.timeout(5000)});
+  if(!response.ok)return;const session=await response.json();
+  if(importInFlight)return;
+  if(saved.teamId&&saved.leagueId){await importLeague(true);return;}
+  if(session.savedLeagueId&&!$('leagueId').value&&saved.teamName==='Sample roster'){
+   $('leagueId').value=session.savedLeagueId;await importLeague();
+  }
+ }catch{/* The form remains available if session discovery is interrupted. */}
+}
+restoreConnection();
