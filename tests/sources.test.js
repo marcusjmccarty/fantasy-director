@@ -1,20 +1,19 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parseReplayMetadata,replaySourceAPI,decodeAttribute,publicReplayURL} from '../server/media.js';
+import {replaySourceAPI} from '../server/media.js';
 import {SourceCatalog,chooseSource} from '../web/sources.js';
 import {parseNFLPublicConfig,nflSourceAPI,nflMediaURL} from '../server/nfl.js';
 import {rankNFLClips} from '../web/nfl-sources.js';
-const page=(metadata)=>'<div data-options="'+JSON.stringify({flashvars:{metadata:JSON.stringify(metadata)}}).replace(/&/g,'&amp;').replace(/"/g,'&quot;')+'"></div>';
-const metadata={movie:{duration:'7800'},videos:[{name:'sd',url:'https://a.vkuser.net/?expires=9999999999999&sig=unchanged%2Fab%3D&type=4'},{name:'mobile',url:'https://a.vkuser.net/?expires=9999999999999&sig=mobile&type=4'}]};
-test('public metadata sources preserve encoded signatures and decode HTML exactly once',()=>{
- const parsed=parseReplayMetadata(page(metadata),1000);assert.equal(parsed.sources[0].url,metadata.videos[0].url);assert.equal(parsed.duration,7800);assert.equal(parsed.expiresAt,301000);
- assert.equal(decodeAttribute('&amp;quot;'),'&quot;');assert.equal(publicReplayURL('https://attacker.example/video.mp4'),null);assert.equal(publicReplayURL('https://u:p@a.vkuser.net/x'),null);
+test('replay source rejects arbitrary embeds and unsupported request methods',async()=>{
+ const games=[{id:'bad',embed:'https://attacker.example/videoembed/1234'}];
+ assert.equal((await replaySourceAPI(new Request('https://site.test/api/replay-source?id=bad'),games)).status,404);
+ assert.equal((await replaySourceAPI(new Request('https://site.test/api/replay-source?id=bad',{method:'POST'}),games)).status,405);
 });
-test('replay resolver is confined to known catalog pages and never retrieves media bytes',async()=>{
- const games=[{id:'test-source-1',embed:'https://ok.ru/videoembed/1234',page:'https://nfl-video.com/game',name:'A at B'}];let calls=0;
- const fetcher=async(url,options)=>{calls++;assert.equal(url,games[0].embed);assert.equal(options.redirect,'manual');assert.equal(options.credentials,'omit');assert.equal(options.headers.Cookie,undefined);return new Response(page(metadata));};
- const response=await replaySourceAPI(new Request('https://site.test/api/replay-source?id=test-source-1'),games,fetcher);assert.equal(response.status,200);assert.equal((await response.json()).sources.length,2);
- assert.equal((await replaySourceAPI(new Request('https://site.test/api/replay-source?id=https://attacker.example/'),games,fetcher)).status,404);assert.equal(calls,1);
+test('replay resolver returns the original player without issuing transferable media URLs',async t=>{
+ const games=[{id:'test-source-1',embed:'https://ok.ru/videoembed/1234',page:'https://nfl-video.com/game',name:'A at B',recordingDuration:7800}];let calls=0;
+ const original=globalThis.fetch;globalThis.fetch=async()=>{calls++;throw new Error('Replay delivery must stay inside the provider.');};t.after(()=>{globalThis.fetch=original;});
+ const response=await replaySourceAPI(new Request('https://site.test/api/replay-source?id=test-source-1'),games);assert.equal(response.status,200);const body=await response.json();assert.equal(body.sources[0].type,'provider/ok');assert.equal(body.sources[0].url,games[0].embed);assert.equal(body.duration,7800);
+ assert.equal((await replaySourceAPI(new Request('https://site.test/api/replay-source?id=https://attacker.example/'),games)).status,404);assert.equal(calls,0);
 });
 test('source import is bounded, coalesces requests, and refreshes ephemeral URLs',async()=>{
  let now=1000,calls=0,inFlight=0,max=0;const catalog=new SourceCatalog({now:()=>now,fetcher:async url=>{calls++;max=Math.max(max,++inFlight);await new Promise(r=>setImmediate(r));inFlight--;return new Response(JSON.stringify({id:new URL('https://x'+url).searchParams.get('id'),sources:[{quality:'sd',url:'https://a.vkuser.net/x'}],expiresAt:now+100}),{headers:{'Content-Type':'application/json'}});}});

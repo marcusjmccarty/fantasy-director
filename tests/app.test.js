@@ -6,7 +6,12 @@ class Element {
  setAttribute(k,v){this.attributes[k]=v;} hasAttribute(k){return k in this.attributes;} removeAttribute(k){delete this.attributes[k];}
  focus(){} append(child){if(child.parent)child.parent.children=child.parent.children.filter(c=>c!==child);this.children.push(child);child.parent=this;} remove(){if(this.parent)this.parent.children=this.parent.children.filter(c=>c!==this);} replaceChildren(){this.children=[];} querySelectorAll(){return [];} showModal(){this.open=true;} close(){this.open=false;this.onclose?.();}
 }
-let holdFrames=false,denyPlayback=false;
+let holdFrames=false,denyPlayback=false,providerMode=false;
+const messageListeners=new Set();
+class Frame extends Element {
+ constructor(){super();this.messages=[];this.contentWindow={postMessage:(data,origin)=>this.messages.push({data,origin})};}
+ send(data){for(const callback of messageListeners)callback({origin:'https://ok.ru',source:this.contentWindow,data});}
+}
 class Video extends Element {
  constructor(){super();this.currentTime=0;this.duration=12000;this.readyState=3;this.seeking=false;this.paused=true;this.events={};this.frames=[];this.hold=holdFrames;this.buffered={length:1,start:()=>0,end:()=>this.duration};}
  set src(value){this.source=value;this.duration=value.includes('highlight')?13:12000;} get src(){return this.source;}
@@ -19,13 +24,13 @@ const archive=JSON.parse(readFileSync(new URL('../web/week7.json',import.meta.ur
 const catalog=JSON.parse(readFileSync(new URL('../web/nfl-highlights.json',import.meta.url)));
 const league={leagueId:'28375786',season:2026,week:7,ownedTeamId:'1',teams:[{id:'1',name:'Owner franchise',players:[{name:'Taylor',team:'IND',position:'RB'}]},{id:'2',name:'Other franchise',players:[{name:'Flowers',team:'BAL',position:'WR'}]}]};
 const storage=new Map(),listeners={};
-globalThis.document={getElementById:el,createElement:tag=>tag==='video'?new Video():new Element(),addEventListener(){},hidden:false,body:new Element()};
-globalThis.window={addEventListener:(name,fn)=>{listeners[name]=fn;}};
+globalThis.document={getElementById:el,createElement:tag=>tag==='video'?new Video():tag==='iframe'?new Frame():new Element(),addEventListener(){},hidden:false,body:new Element()};
+globalThis.window={addEventListener:(name,fn)=>{if(name==='message')messageListeners.add(fn);else listeners[name]=fn;},removeEventListener:(name,fn)=>{if(name==='message')messageListeners.delete(fn);}};
 globalThis.localStorage={getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)};
 let animation;globalThis.requestAnimationFrame=callback=>{animation=callback;};
 globalThis.fetch=async url=>{
  let data=url==='/week7.json'?archive:url==='/nfl-highlights.json'?catalog:url==='/api/session'?{savedLeagueId:league.leagueId}:league;
- if(url.startsWith('/api/replay-source')){const id=new URL('https://x'+url).searchParams.get('id'),game=archive.games.find(g=>g.id===id);data={id,duration:(game.end-game.start)*.7,expiresAt:Date.now()+300000,sources:[{quality:'sd',url:'https://a.vkuser.net/replay-'+id+'.mp4',type:'video/mp4'}]};}
+ if(url.startsWith('/api/replay-source')){const id=new URL('https://x'+url).searchParams.get('id'),game=archive.games.find(g=>g.id===id);data={id,duration:providerMode?game.recordingDuration:(game.end-game.start)*.7,expiresAt:Date.now()+300000,sources:[providerMode?{quality:'provider',url:game.embed,type:'provider/ok'}:{quality:'sd',url:'https://a.vkuser.net/replay-'+id+'.mp4',type:'video/mp4'}]};}
  if(url.startsWith('/api/nfl-source'))data={url:'https://dcs-vod.mp.lura.live/highlight.m3u8',type:'application/vnd.apple.mpegurl',duration:13,expiresAt:Date.now()+300000};
  return new Response(JSON.stringify(data),{headers:{'Content-Type':'application/json'}});
 };
@@ -66,4 +71,17 @@ test('startup failure replaces the preparing screen and a user retry can recover
  assert.equal(el('splashTitle').textContent,'Couldn’t start this replay');assert.match(el('splashDetail').textContent,/AUTOPLAY/);assert.equal(el('splashPlay').hidden,false);assert.equal(visible(),undefined);
  const count=el('mediaDeck').children.length;animation(performance.now()+1000);await settled();assert.equal(el('mediaDeck').children.length,count);assert.equal(count,1);
  denyPlayback=false;el('retryVideo').onclick();await settled();assert.ok(visible());assert.equal(el('playerSplash').hidden,true);assert.equal(el('playButton').textContent,'Pause');listeners.pagehide();
+});
+
+test('provider playback exposes the first player, drives shared seeks, and keeps the old picture until progress',async t=>{
+ elements.clear();providerMode=true;await import('../web/app.js?provider-controls');await settled();
+ t.after(()=>{listeners.pagehide();providerMode=false;});
+ const until=async predicate=>{const deadline=Date.now()+1500;while(!predicate()){assert.ok(Date.now()<deadline,'application did not reach the expected playback state');await new Promise(r=>setTimeout(r,10));}};
+ const confirm=async frame=>{frame.send({event:'inited'});await until(()=>frame.messages.some(m=>m.data.action==='seek'));const at=frame.messages.findLast(m=>m.data.action==='seek').data.time;frame.send({event:'started'});frame.send({event:'timeupdate',time:at,duration:12000});frame.send({event:'timeupdate',time:at+.2,duration:12000});};
+ el('splashPlay').onclick();await settled();const first=el('mediaDeck').children[0];assert.ok(first instanceof Frame);assert.equal(el('playerSplash').hidden,true);assert.ok(first.classes.has('interactive'));assert.equal(visible(),undefined);
+ await confirm(first);await until(()=>visible()===first);assert.equal(el('playButton').textContent,'Pause');
+ const next=Number(el('timeline').value)+900;el('timeline').onchange({target:{value:String(next)}});await settled();
+ const second=el('mediaDeck').children.find(frame=>frame!==first);assert.ok(second instanceof Frame);assert.equal(visible(),first);assert.equal(first.messages.at(-1).data.action,'pause');assert.equal(second.classes.has('interactive'),false);
+ await confirm(second);await until(()=>visible()===second);assert.equal(el('mediaDeck').children.filter(v=>v.classes.has('active')).length,1);assert.ok(second.messages.some(m=>m.data.action==='seek'&&m.data.time>0));assert.equal(Number(el('timeline').value),next);
+ el('playButton').onclick();assert.ok(second.messages.some(m=>m.data.action==='pause'));assert.equal(el('playButton').textContent,'Play replay');
 });

@@ -2,6 +2,7 @@
 let hlsModule;
 async function hls(){hlsModule??=import('/hls.light.mjs');return (await hlsModule).default;}
 export async function attachMediaSource(video,source,onFatal=()=>{}){
+ if(source.type==='provider/ok'){video.src=source.url;video.load();return null;}
  const isHLS=/mpegurl/i.test(source.type||'')||/\.m3u8(?:\?|$)/i.test(source.url);
  if(!isHLS||video.canPlayType('application/vnd.apple.mpegurl')){video.src=source.url;video.load();return null;}
  const Hls=await hls();if(!Hls.isSupported())throw new Error('HLS is unavailable in this browser.');

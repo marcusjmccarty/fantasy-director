@@ -1,9 +1,11 @@
 import {attachMediaSource} from './stream-loader.js';
+import {ProviderPlayer} from './provider-player.js';
 export function bufferedAhead(video,at=video.currentTime){
  for(let i=0;i<video.buffered.length;i++)if(video.buffered.start(i)<=at+.08&&video.buffered.end(i)>at)return video.buffered.end(i)-at;
  return 0;
 }
 export function readyToCut(video,target,lead=8){
+ if(video.kind==='provider')return video.readyAt(target);
  const needed=Number.isFinite(video.duration)?Math.min(lead,Math.max(0,video.duration-target-.1)):lead;
  return !video.seeking&&video.readyState>=3&&Math.abs(video.currentTime-target)<.8&&bufferedAhead(video,target)>=needed;
 }
@@ -18,16 +20,17 @@ const mediaFailure=video=>{const code=video.error?.code;return failure('MEDIA_'+
 const frameCount=video=>video.getVideoPlaybackQuality?.().totalVideoFrames??video.webkitDecodedFrameCount??0;
 const targetValue=(slot)=>{const n=Math.max(0,Number(typeof slot.target==='function'?slot.target():slot.target)||0);return Number.isFinite(slot.video.duration)?Math.min(n,Math.max(0,slot.video.duration-.2)):n;};
 export class MediaDeck{
- constructor(host,{onCommit=()=>{},onStatus=()=>{},onEnd=()=>{},onStall=()=>{},attachSource=attachMediaSource,lead=8,timeouts={}}={}){
-  Object.assign(this,{host,onCommit,onStatus,onEnd,onStall,attachSource,lead});this.slots=new Map();this.gate=new CutGate();this.active=null;this.activeSlot=null;this.muted=true;this.running=false;this.rate=1;this.sequence=0;this.cooldowns=new Map();this.history=[];this.stalls=0;this.controls=false;this.failures=[];this.timeouts={attach:8000,metadata:8000,buffer:12000,play:5000,frame:1500,total:25000,poll:50,frameFallback:250,...timeouts};
+ constructor(host,{onCommit=()=>{},onStatus=()=>{},onEnd=()=>{},onStall=()=>{},onRecover=()=>{},attachSource=attachMediaSource,lead=8,timeouts={}}={}){
+  Object.assign(this,{host,onCommit,onStatus,onEnd,onStall,onRecover,attachSource,lead});this.slots=new Map();this.gate=new CutGate();this.active=null;this.activeSlot=null;this.muted=true;this.running=false;this.rate=1;this.sequence=0;this.cooldowns=new Map();this.history=[];this.stalls=0;this.controls=false;this.failures=[];this.timeouts={attach:8000,metadata:8000,buffer:12000,play:5000,frame:1500,total:25000,providerTotal:45000,providerMetadata:20000,providerPlay:20000,providerFrame:12000,poll:50,frameFallback:250,...timeouts};
  }
  ensure(key,url,{fresh=false,type=''}={}){
   let slot=this.slots.get(key);if(slot&&slot.url===url&&!slot.failed&&!fresh){slot.used=++this.sequence;return slot;}
   if(slot&&slot!==this.activeSlot)this.dispose(slot);
-  const video=document.createElement('video');video.className='media-layer';video.playsInline=true;video.preload='auto';video.muted=true;video.controls=false;video.setAttribute('aria-label',key);this.host.append(video);
+  const video=type==='provider/ok'?new ProviderPlayer():document.createElement('video');video.className='media-layer';video.userInteractable=!this.activeSlot;video.playsInline=true;video.preload='auto';video.muted=true;video.controls=false;video.setAttribute('aria-label',key);this.host.append(video.element||video);
   slot={key,url,type,video,target:0,used:++this.sequence,operation:0,decoded:false,failed:false,prepared:false,preparing:null,frameAt:0,controller:null,phase:'source',failure:null,deadline:Infinity,frameEvidence:null};this.slots.set(key,slot);
   video.addEventListener('error',()=>{slot.failed=true;if(slot===this.activeSlot){this.onStatus('The source stopped. Looking for another ready game.');if(this.running)this.onStall(key);}});
   video.addEventListener('waiting',()=>{if(slot===this.activeSlot&&this.running){this.stalls++;this.onStall(key);}});
+  video.addEventListener('timeupdate',()=>{if(video.kind==='provider'&&!this.activeSlot&&['failed','cancelled'].includes(slot.phase)&&video.progress>=2&&!video.paused)this.onRecover(key);});
   video.addEventListener('ended',()=>{if(slot===this.activeSlot)this.onEnd(key);});
   slot.attached=Promise.resolve(this.attachSource(video,{url,type},()=>{slot.failed=true;})).then(controller=>{if(this.slots.get(key)!==slot){controller?.destroy?.();return;}slot.controller=controller;}).catch(()=>{slot.failed=true;});
   this.prune();return slot;
@@ -43,7 +46,7 @@ export class MediaDeck{
  requiredLead(){return (this.activeSlot?this.lead:Math.min(2,this.lead))*Math.max(1,this.rate);}
  phase(slot,phase){
   slot.phase=phase;
-  if(this.gate.pending?.key===slot.key){const messages={source:'Connecting to the recording…',metadata:'Loading video metadata…',buffer:'Buffering the next picture…',play:'Starting video playback…',frame:'Checking the first picture…'};this.onStatus(messages[phase]||phase);}
+  if(this.gate.pending?.key===slot.key){const messages={source:'Connecting to the recording…',metadata:'Loading video metadata…',buffer:'Buffering the next picture…',play:slot.video.kind==='provider'&&!this.activeSlot?'Starting replay · press Play inside the video if prompted.':'Starting video playback…',frame:'Checking the first picture…'};this.onStatus(messages[phase]||phase);}
  }
  waitFor(slot,predicate,timeout,current){return new Promise((resolve,reject)=>{
   const start=performance.now();const check=()=>{
@@ -68,6 +71,7 @@ export class MediaDeck{
   Promise.resolve(promise).then(value=>{if(!current())finish(failure('CANCELLED','Cancelled'));else if(slot.failed||slot.video.error)finish(mediaFailure(slot.video));else finish(null,value);},error=>finish(error));check();
  });}
  async decode(slot,current){
+  if(slot.video.kind==='provider'){slot.decoded=slot.video.readyAt(targetValue(slot));slot.frameEvidence='provider-playback-progress';return;}
   const v=slot.video,started=performance.now(),initialTime=v.currentTime,initialFrames=frameCount(v);let handle,fallbackTimer;
   slot.decoded=false;slot.frameEvidence=null;
   const frame=new Promise(resolve=>{
@@ -92,9 +96,15 @@ export class MediaDeck{
   if(slot.prepared&&!slot.failed&&readyToCut(slot.video,targetValue(slot),this.requiredLead()))return slot;
   const operation=++slot.operation,current=()=>this.slots.get(slot.key)===slot&&slot.operation===operation;
   const task=(async()=>{
-   slot.deadline=performance.now()+this.timeouts.total;slot.failure=null;
+   slot.deadline=performance.now()+(slot.video.kind==='provider'?this.timeouts.providerTotal:this.timeouts.total);slot.failure=null;
    this.phase(slot,'source');await this.bounded(slot,slot.attached,this.timeouts.attach,current);
-   this.phase(slot,'metadata');await this.waitFor(slot,()=>slot.video.readyState>0,this.timeouts.metadata,current);
+   this.phase(slot,'metadata');await this.waitFor(slot,()=>slot.video.readyState>0,slot.video.kind==='provider'?this.timeouts.providerMetadata:this.timeouts.metadata,current);
+   if(slot.video.kind==='provider'){
+    const v=slot.video;if(v.readyAt(targetValue(slot))){slot.decoded=true;slot.frameEvidence='provider-playback-progress';slot.prepared=true;slot.phase='ready';return slot;}this.phase(slot,'play');v.muted=slot!==this.activeSlot||this.muted;v.currentTime=targetValue(slot);
+    await this.bounded(slot,v.play(),this.timeouts.providerPlay,current);this.phase(slot,'frame');
+    await this.waitFor(slot,()=>v.readyAt(targetValue(slot)),this.timeouts.providerFrame,current);
+    slot.decoded=true;slot.frameEvidence='provider-playback-progress';slot.prepared=true;slot.phase='ready';if(!this.running)v.pause();return slot;
+   }
    const v=slot.video;v.playbackRate=this.rate;if(slot!==this.activeSlot)v.muted=true;
    for(let attempt=0;attempt<3;attempt++){
     v.pause();this.phase(slot,'buffer');const loadingAt=targetValue(slot);
@@ -117,7 +127,7 @@ export class MediaDeck{
  recordFailure(slot,error){
   const cancelled=error.code==='CANCELLED'||error.message==='Cancelled';
   if(cancelled||slot.phase==='failed'&&slot.failure)return;
-  const record={id:slot.key,code:error.code||error.name||'PLAYBACK',phase:slot.phase,readyState:slot.video.readyState,networkState:slot.video.networkState??null,mediaError:slot.video.error?.code??null,bufferSeconds:Math.round(bufferedAhead(slot.video)*10)/10};
+  const record={id:slot.key,code:error.code||error.name||'PLAYBACK',phase:slot.phase,readyState:slot.video.readyState,networkState:slot.video.networkState??null,mediaError:slot.video.error?.code??null,bufferSeconds:slot.video.kind==='provider'?null:Math.round(bufferedAhead(slot.video)*10)/10};
   slot.failure=record;slot.phase='failed';slot.prepared=false;slot.operation++;slot.video.pause();
   this.failures.push(record);this.failures=this.failures.slice(-20);
  }
@@ -137,11 +147,11 @@ export class MediaDeck{
     if(this.gate.pending===ticket)this.gate.cancel();return false;
    }
    const previous=this.activeSlot;
-   if(previous&&previous!==slot){previous.video.muted=true;previous.video.pause();previous.video.classList.toggle('active',false);previous.video.controls=false;}
-   slot.video.classList.toggle('active',true);slot.video.controls=this.controls;slot.video.muted=this.muted;this.active=key;this.activeSlot=slot;
+   if(previous&&previous!==slot){previous.video.userInteractable=false;previous.video.muted=true;previous.video.pause();previous.video.classList.toggle('active',false);previous.video.controls=false;}
+   slot.video.userInteractable=true;slot.video.classList.toggle('active',true);slot.video.controls=this.controls;slot.video.muted=this.muted;this.active=key;this.activeSlot=slot;
    if(this.running)slot.video.play().catch(()=>{});else slot.video.pause();
    if(previous&&this.slots.get(previous.key)!==previous)this.dispose(previous);
-   this.history.push({from:previous?.key||null,to:key,waitMs:Math.round(performance.now()-started),bufferSeconds:Math.round(bufferedAhead(slot.video)*10)/10,mediaTime:Math.round(slot.video.currentTime*10)/10,decoded:true,frameEvidence:slot.frameEvidence});this.history=this.history.slice(-50);
+   this.history.push({from:previous?.key||null,to:key,waitMs:Math.round(performance.now()-started),bufferSeconds:slot.video.kind==='provider'?null:Math.round(bufferedAhead(slot.video)*10)/10,mediaTime:Math.round(slot.video.currentTime*10)/10,decoded:slot.video.kind==='provider'?null:true,frameEvidence:slot.frameEvidence});this.history=this.history.slice(-50);
    this.onStatus('Playing · next sources prepare in the background');this.onCommit(key);this.prune();return true;
   }catch(error){if(this.gate.pending===ticket){this.gate.cancel();this.recordFailure(slot,error);this.cooldowns.set(key+'|'+url,performance.now()+15000);this.onStatus(error.message);}return false;}
  }
@@ -156,7 +166,7 @@ export class MediaDeck{
   if(slot.video.paused)slot.video.play().catch(()=>{});
  }
  ready(key,target){const slot=this.slots.get(key);return !!slot?.prepared&&!slot.failed&&readyToCut(slot.video,target??targetValue(slot),this.requiredLead());}
- snapshot(){return {active:this.active,pending:this.gate.pending?.key||null,stalls:this.stalls,cuts:this.history.slice(),failures:this.failures.slice(),players:[...this.slots.values()].map(s=>({id:s.key,ready:this.ready(s.key),bufferSeconds:Math.round(bufferedAhead(s.video)*10)/10,mediaTime:Math.round(s.video.currentTime*10)/10,failed:s.failed,phase:s.phase,readyState:s.video.readyState,networkState:s.video.networkState??null,mediaError:s.video.error?.code??null,failure:s.failure,active:s===this.activeSlot}))};}
+ snapshot(){return {active:this.active,pending:this.gate.pending?.key||null,stalls:this.stalls,cuts:this.history.slice(),failures:this.failures.slice(),players:[...this.slots.values()].map(s=>({id:s.key,ready:this.ready(s.key),bufferSeconds:s.video.kind==='provider'?null:Math.round(bufferedAhead(s.video)*10)/10,provider:s.video.kind==='provider',mediaTime:Math.round(s.video.currentTime*10)/10,failed:s.failed,phase:s.phase,readyState:s.video.readyState,networkState:s.video.networkState??null,mediaError:s.video.error?.code??null,failure:s.failure,active:s===this.activeSlot}))};}
  cancelPending(){this.gate.cancel();for(const slot of this.slots.values()){slot.operation++;slot.preparing=null;if(slot!==this.activeSlot){slot.prepared=false;slot.video.pause();slot.phase='cancelled';}}}
  retry(){this.cooldowns.clear();}
  setControls(value){this.controls=value;if(this.activeSlot)this.activeSlot.video.controls=value;}

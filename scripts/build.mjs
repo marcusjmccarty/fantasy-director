@@ -2,7 +2,7 @@ import {readFile,readdir,mkdir,rm,writeFile} from 'node:fs/promises';
 const files={};for(const name of await readdir('web'))if(/\.(html|css|js|json)$/.test(name))files['/'+(name==='index.html'?'':name)]={type:name.endsWith('.html')?'text/html':name.endsWith('.css')?'text/css':name.endsWith('.json')?'application/json':'text/javascript',body:await readFile('web/'+name,'utf8')};
 const api=(await readFile('server/api.js','utf8')).replaceAll('export ','');
 const media=(await readFile('server/media.js','utf8')).replaceAll('export ','');
-const replayCatalog=JSON.parse(await readFile('web/week7.json','utf8')).games.map(({id,name,embed,page})=>({id,name,embed,page}));
+const replayCatalog=JSON.parse(await readFile('web/week7.json','utf8')).games.map(({id,name,embed,page,recordingDuration})=>({id,name,embed,page,recordingDuration}));
 const nfl=(await readFile('server/nfl.js','utf8')).replaceAll('export ','');
 const teamMap=Object.fromEntries(JSON.parse(await readFile('web/week7.json','utf8')).games.flatMap(g=>g.teams.map(t=>[t.name,t.abbreviation])));Object.assign(teamMap,{'Buffalo Bills':'BUF','Jacksonville Jaguars':'JAC','Los Angeles Chargers':'LAC','Washington Commanders':'WAS'});
 const nflCatalog=JSON.parse(await readFile('web/nfl-highlights.json','utf8')).clips;

@@ -28,7 +28,7 @@ const deck=new MediaDeck($('mediaDeck'),{onCommit:key=>{
  state.displayed=key;state.switches++;state.returningTitle=null;
  if(state.clockWait){state.clockWait=false;clock.setRunning(state.intentRunning,performance.now());deck.setRunning(state.intentRunning);}
  renderNow();
-},onStatus:status,onEnd:key=>{if(key.startsWith('clip:')){if(state.pendingClip){deck.activeSlot?.video.pause();return;}finishHighlight();}else if(state.mode==='replay'){const game=state.archive.games.find(g=>g.id===key);if(game){clock.seek(Math.min(clock.end,game.end+1),performance.now());state.games=state.archive.sample(clock.at);if(clock.at>=clock.end){setRunning(false);status('Replay day complete. Choose another day or seek back.');}else{state.requestTag=null;direct(true);}}}},onStall:()=>{
+},onRecover:key=>{if(state.playbackFailure?.id===key){state.playbackFailure=null;state.requestTag=null;state.retryAt=0;state.intentRunning=true;state.clockWait=true;deck.retry();deck.setRunning(true);showPicture();}},onStatus:status,onEnd:key=>{if(key.startsWith('clip:')){if(state.pendingClip){deck.activeSlot?.video.pause();return;}finishHighlight();}else if(state.mode==='replay'){const game=state.archive.games.find(g=>g.id===key);if(game){clock.seek(Math.min(clock.end,game.end+1),performance.now());state.games=state.archive.sample(clock.at);if(clock.at>=clock.end){setRunning(false);status('Replay day complete. Choose another day or seek back.');}else{state.requestTag=null;direct(true);}}}},onStall:()=>{
  if(!state.auto)return;
  const alternative=rankGames(state.games,saved.roster).find(({game})=>game.id!==deck.active&&deck.ready(game.id,targetFor(game)));
  if(alternative){state.selected=alternative.game.id;state.requestTag=null;showPicture();}else status('The current source slowed down. Keeping the picture while the next game prepares.');
@@ -99,7 +99,7 @@ $('playButton').onclick=()=>setRunning(!state.intentRunning);
 $('skipBack').onclick=()=>seekAll(clock.at-30);
 $('restartTest').onclick=()=>seekAll(session().start);
 $('nextSwitch').onclick=()=>{state.auto=true;$('autoDirector').checked=true;state.started=true;seekAll(state.archive.nextSwitch(clock.at,saved.roster,state.selected,session().end));};
-$('playbackRate').onchange=e=>{clock.tick(performance.now());clock.rate=Number(e.target.value);if(state.picture==='native'&&clock.rate>4){clock.rate=4;e.target.value='4';notice('Synced recordings support up to 4×. Timeline tests support 60×.');}deck.setRate(clock.rate);};
+$('playbackRate').onchange=e=>{if(state.picture==='native'&&state.mode==='replay'&&!videoFor(activeGame())){e.target.value='1';clock.rate=1;deck.setRate(1);notice('Full-game provider replays run at 1×. Data-only tests support faster speeds.');return;}clock.tick(performance.now());clock.rate=Number(e.target.value);if(state.picture==='native'&&clock.rate>4){clock.rate=4;e.target.value='4';notice('Synced recordings support up to 4×. Timeline tests support 60×.');}deck.setRate(clock.rate);};
 $('muteButton').onclick=()=>{saved.muted=!saved.muted;deck.setMuted(saved.muted);persist();renderNow();};
 function configFor(game){
  const config=saved.recordings[game.id]||{},slot=deck.slots.get(game.id);
@@ -133,7 +133,7 @@ function failPlayback(game,tag,attempt,message,code='SOURCE'){
 function showPicture(){
  const game=activeGame();if(!game||state.clip)return;
  const picture=state.mode==='live'?'native':state.picture;
- $('signal').hidden=picture!=='signal';$('mediaDeck').hidden=picture!=='native';$('externalFrame').hidden=picture!=='external';$('playerSplash').hidden=picture!=='native'||!!deck.active;
+ $('signal').hidden=picture!=='signal';$('mediaDeck').hidden=picture!=='native';$('externalFrame').hidden=picture!=='external';$('playerSplash').hidden=picture!=='native'||!!deck.active||deck.slots.get(game.id)?.video.kind==='provider';
  if(picture==='signal'){state.displayed=game.id;status(`Recorded feed · 14 games · ${state.switches} switches`);return;}
  if(picture==='external'){
   if(state.externalId!==game.id){$('externalFrame').src=game.embed;state.externalId=game.id;state.displayed=game.id;}
@@ -145,14 +145,15 @@ function showPicture(){
  const tag=[state.generation,state.seekVersion,game.id,state.quality].join(':');
  if(state.requestTag===tag||performance.now()<state.retryAt)return;
  if(!state.forceSeek&&state.mode==='replay'&&!clock.running&&!state.clockWait&&deck.active===game.id)return;
- const force=state.forceSeek;state.forceSeek=false;state.requestTag=tag;const attempt=++state.loadAttempt;clearTimeout(state.loadWatchdog);state.loadWatchdog=setTimeout(()=>failPlayback(game,tag,attempt,'The recording did not start within 35 seconds. Retry or choose another game.','START_TIMEOUT'),35000);
- if(!deck.active){$('splashTitle').textContent='Preparing your replay';$('splashDetail').textContent='Loading a buffered picture before the test clock starts.';}
+ const force=state.forceSeek;state.forceSeek=false;state.requestTag=tag;const attempt=++state.loadAttempt;clearTimeout(state.loadWatchdog);state.loadWatchdog=setTimeout(()=>failPlayback(game,tag,attempt,'The recording did not start within 50 seconds. Retry or choose another game.','START_TIMEOUT'),50000);
+ if(!deck.active){$('splashTitle').textContent='Preparing your replay';$('splashDetail').textContent='Opening the recording before the test clock starts.';}
  (async()=>{
   try{
-   const source=await resolveVideo(game);if(state.requestTag!==tag||state.loadAttempt!==attempt||state.clip||state.selected!==game.id)return;
+   const source=await resolveVideo(game);if(source.type==='provider/ok'&&clock.rate!==1){clock.rate=1;deck.setRate(1);$('playbackRate').value='1';}if(state.requestTag!==tag||state.loadAttempt!==attempt||state.clip||state.selected!==game.id)return;
+   if(source.type==='provider/ok')$('playerSplash').hidden=true;
    const ready=await deck.request(game.id,source.url,()=>targetFor(game),{force,type:source.type});
    if(state.requestTag!==tag||state.loadAttempt!==attempt)return;
-   if(!ready&&!deck.gate.pending){const failed=deck.slots.get(game.id);if(failed?.failed&&state.mode==='replay'&&!videoFor(game))sources.invalidate(game.id);const code=failed?.failure?.code||'NOT_READY';failPlayback(game,tag,attempt,code==='AUTOPLAY'?'Your browser blocked playback. Press Retry replay.':'The recording did not produce a ready picture. Retry or choose another game.',code);}
+   if(!ready&&!deck.gate.pending){const failed=deck.slots.get(game.id);if(failed?.failed&&state.mode==='replay'&&!videoFor(game))sources.invalidate(game.id);const code=failed?.failure?.code||'NOT_READY';failPlayback(game,tag,attempt,failed?.video.kind==='provider'?(failed.video.error?.message||'The provider has not confirmed playback yet. Press Play inside the video; the shared clock will start when footage is playing.'):code==='AUTOPLAY'?'Your browser blocked playback. Press Retry replay.':'The recording did not produce a ready picture. Retry or choose another game.',code);}
    else if(ready&&state.clockWait){state.clockWait=false;clock.setRunning(state.intentRunning,performance.now());deck.setRunning(state.intentRunning);}
   }catch(error){failPlayback(game,tag,attempt,error.message,error.code||'SOURCE');}
   finally{if(state.loadAttempt===attempt)clearTimeout(state.loadWatchdog);}
@@ -204,7 +205,7 @@ function renderNow(){
  $('autoDirector').checked=state.auto;$('playButton').textContent=state.intentRunning?'Pause':'Play replay';$('muteButton').textContent=saved.muted?'Unmute':'Mute';$('muteButton').setAttribute('aria-pressed',String(saved.muted));
  $('returnGame').hidden=!state.clip;$('sourceLink').hidden=state.mode!=='replay'||!game;if(game?.page)$('sourceLink').href=game.page;$('returnGame').hidden=!state.clip;$('prepStatus').textContent=preparationLabel();
  if(!state.scrubbing){$('timeline').value=String(clock.at);$('timelineTime').textContent=state.archive?timeLabel(clock.at)+' ET':'—';}
- $('playbackNote').textContent=state.mode==='live'?'Feed timing follows ESPN. The next picture is prepared before each cut.':state.picture==='external'?'This is the original provider player. Choose Replay video to use the shared seek bar and buffered switching.':state.picture==='native'?(game&&configFor(game).marks?.length?'Video follows your saved sync points. The current picture stays until the next frame is ready.':'Videos follow one clock. Alignment is estimated because commercial breaks were edited out. Save sync points in Sources & sync to align observed plays.'):'Recorded play-by-play only. Choose Replay video to test the footage.';
+ $('playbackNote').textContent=state.mode==='live'?'Feed timing follows ESPN. The next picture is prepared before each cut.':state.picture==='external'?'This is the original provider player. Choose Replay video to use the shared seek bar and buffered switching.':state.picture==='native'?(game&&configFor(game).marks?.length?'Video follows your saved sync points. The current picture stays until the next frame is ready.':'Shared seek controls drive the original replay players. Cuts wait for confirmed playback; the provider does not report buffered seconds. Play alignment is estimated until you save sync points.'):'Recorded play-by-play only. Choose Replay video to test the footage.';
  renderSignal();
 }
 function renderGames(){
@@ -308,7 +309,7 @@ document.addEventListener('fullscreenchange',()=>{if(document.fullscreenElement)
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('watchRoom').classList.contains('theater')){$('watchRoom').classList.remove('theater');document.body.style.overflow='';fullscreenLabel();}});
 function preparationLabel(){
  const ready=deck.snapshot().players.filter(p=>p.ready&&!p.active),imported=sources.records.size;
- return `${state.mode==='replay'?imported+'/14 replays imported · ':''}${ready.length} ready ahead${ready.length?' · '+Math.floor(Math.min(...ready.map(p=>p.bufferSeconds)))+'s buffered':''}`;
+ const native=ready.filter(p=>Number.isFinite(p.bufferSeconds));return `${state.mode==='replay'?imported+'/14 replays imported · ':''}${ready.length} ready ahead${native.length?' · '+Math.floor(Math.min(...native.map(p=>p.bufferSeconds)))+'s buffered':ready.length?' · playback confirmed':''}`;
 }
 async function warmAhead(){
  if(state.mode!=='replay'||state.picture!=='native'||!state.started||!state.archive||!deck.active||state.clockWait||state.playbackFailure)return;
@@ -322,9 +323,8 @@ async function warmAhead(){
 }
 $('retryVideo').onclick=()=>{state.playbackFailure=null;state.requestTag=null;state.retryAt=0;deck.cancelPending();deck.retry();if(activeGame()&&state.mode==='replay')sources.invalidate(activeGame().id);if(!deck.active)setRunning(true);else showPicture();};
 $('splashPlay').onclick=()=>setRunning(true);
-$('qualitySelect').onchange=e=>{state.playbackFailure=null;state.quality=e.target.value;state.seekVersion++;state.requestTag=null;state.forceSeek=true;state.retryAt=0;deck.retry();showPicture();};
 $('downloadDiagnostics').onclick=()=>{
- const report={version:'startup-recovery-1',failure:state.playbackFailure,week:7,at:clock.at,franchise:saved.teamName,imported:sources.records.size,alignment:state.archive.games.map(g=>({id:g.id,points:configFor(g).marks||[],estimated:!configFor(g).marks?.length})),...deck.snapshot()};
+ const report={version:'provider-playback-1',failure:state.playbackFailure,week:7,at:clock.at,franchise:saved.teamName,imported:sources.records.size,alignment:state.archive.games.map(g=>({id:g.id,points:configFor(g).marks||[],estimated:!configFor(g).marks?.length})),...deck.snapshot()};
  const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='fantasy-director-playback.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 };
 function tick(now){
