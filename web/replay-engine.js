@@ -28,8 +28,8 @@ export class ReplayArchive{
   this.transitions=[...new Set(this.games.flatMap(g=>g.plays.flatMap(p=>[0,8,26].map(delta=>Math.min(g.end,g.start+p[0]+delta)))))].sort((a,b)=>a-b);
  }
  sample(at){return this.games.map(g=>sampleGame(g,at,this.types));}
- nextSwitch(at,roster,currentId,end=Infinity){
-  for(const event of this.transitions){if(event<=at+1||event>end)continue;const best=chooseGame(this.sample(event),roster,currentId,0,event*1000);if(best&&best.game.id!==currentId)return event;}
+ nextSwitch(at,roster,currentId,end=Infinity,options={}){
+  for(const event of this.transitions){if(event<=at+1||event>end)continue;const best=chooseGame(this.sample(event),roster,currentId,0,event*1000,options);if(best&&best.game.id!==currentId)return event;}
   return Math.min(end,at+30);
  }
 }
@@ -64,9 +64,9 @@ export function wallTime(game,media,config={}){
  const right=marks.findIndex(m=>m.media>=media);if(right<0){const m=marks.at(-1);return game.start+m.wall+media-m.media;}
  const a=marks[right-1],b=marks[right],span=b.media-a.media;return game.start+a.wall+(span>0?(media-a.media)/span:0)*(b.wall-a.wall);
 }
-export function forecastGames(archive,at,roster,currentId,horizon=75){
+export function forecastGames(archive,at,roster,currentId,horizon=75,options={}){
  const result=[],seen=new Set([currentId]);
- for(const event of archive.transitions){if(event<=at||event>at+horizon)continue;const pick=chooseGame(archive.sample(event),roster,null,0,event*1000);if(pick&&!seen.has(pick.game.id)){seen.add(pick.game.id);result.push({...pick,at:event});if(result.length===2)break;}}
+ for(const event of archive.transitions){if(event<=at||event>at+horizon)continue;const pick=chooseGame(archive.sample(event),roster,null,0,event*1000,options);if(pick&&!seen.has(pick.game.id)){seen.add(pick.game.id);result.push({...pick,at:event});if(result.length===2)break;}}
  return result;
 }
 

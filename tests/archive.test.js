@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {ReplayArchive,ReplayClock,mediaTime,addSyncMark} from '../web/replay-engine.js';
-import {chooseGame,involved} from '../web/director.js';
+import {StreamDirector,chooseGame,involved,rankGames,rosterForGame} from '../web/director.js';
 const data=JSON.parse(await readFile(new URL('../web/week7.json',import.meta.url),'utf8'));
 const archive=new ReplayArchive(data);
 test('all 14 real games have imported replay sources and sorted recorded events',()=>{
@@ -48,4 +48,16 @@ test('edited recordings share a reversible clock and retain explicit calibration
 test('forecasting exposes upcoming game candidates before their switching events',()=>{
  const at=archive.sessions[1].start+4*3600,result=forecastGames(archive,at,[],null,300);
  assert.ok(result.length>0);assert.ok(result.every(x=>x.at>at&&x.at<=at+300));assert.equal(new Set(result.map(x=>x.game.id)).size,result.length);
+});
+
+test('a complete Sunday rehearsal reduces unnecessary cuts and preserves roster priority',()=>{
+ const day=archive.sessions.find(s=>s.label.startsWith('Sunday')),roster=[{name:'Taylor',team:'IND',position:'RB'},{name:'Flowers',team:'BAL',position:'WR'},{name:'Williams',team:'CHI',position:'QB'}],director=new StreamDirector(),locked=new StreamDirector();
+ let current=null,previous=null,lockedId=null,cuts=0,previousCuts=0;
+ for(let at=day.start;at<=day.end;at+=2){
+  const games=archive.sample(at),next=director.choose(games,roster,{currentId:current,now:at*1000}),before=chooseGame(games,roster,previous,0,at*1000),only=locked.choose(games,roster,{currentId:lockedId,now:at*1000,rosterOnly:true});
+  if(next&&next.game.id!==current){assert.ok(next.players.length||!rankGames(games,roster).some(x=>x.players.length),'fallback cut while roster action was available');current=next.game.id;director.commit(at*1000);cuts++;}
+  if(before&&before.game.id!==previous){previous=before.game.id;previousCuts++;}
+  if(only){assert.ok(rosterForGame(only.game,roster).length);if(only.game.id!==lockedId){lockedId=only.game.id;locked.commit(at*1000);}}
+ }
+ assert.ok(cuts>0&&cuts<previousCuts);
 });

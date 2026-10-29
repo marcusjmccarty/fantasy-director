@@ -68,3 +68,11 @@ test('a warm candidate uses its existing media element at the cut',async t=>{
  const deck=harness(t);await deck.request('a','a.mp4',0);await deck.warm('b','b.mp4',20);const warmed=deck.slots.get('b').video;
  await deck.request('b','b.mp4',20);assert.equal(deck.activeSlot.video,warmed);assert.equal(deck.snapshot().cuts.at(-1).decoded,true);assert.ok(deck.snapshot().cuts.at(-1).bufferSeconds>=8);deck.destroy();
 });
+test('a prepared source cannot commit after the selected franchise or requested target changes',async t=>{
+ const deck=harness(t);await deck.request('a','a.mp4',0);const b=deck.ensure('b','b.mp4');b.video.autoFrame=false;let current=true;
+ const pending=deck.request('b','b.mp4',20,{isCurrent:()=>current});await flush();current=false;b.video.decoded();assert.equal(await pending,false);assert.equal(deck.active,'a');assert.equal(b.video.classes.has('active'),false);deck.destroy();
+});
+test('resuming playback does not restart every hidden prepared stream',async t=>{
+ const deck=harness(t);await deck.request('a','a.mp4',0);await deck.warm('b','b.mp4',20,{hold:true});deck.setRunning(false);deck.setRunning(true);
+ assert.equal(deck.activeSlot.video.paused,false);assert.equal(deck.slots.get('b').video.paused,true);deck.destroy();
+});

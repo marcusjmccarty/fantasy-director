@@ -7,7 +7,7 @@ const request=(data,headers={})=>new Request('https://site.test/api/playback-hea
 test('playback health reports only bounded catalog and readiness fields',async()=>{
  const logs=[],logger={error:value=>logs.push(JSON.parse(value)),info:value=>logs.push(JSON.parse(value))};
  const result=await playbackHealthAPI(request({event:'failed',game:'game-1',code:'TIMEOUT_PLAY',phase:'play',imported:14,readyState:1,providerInitialized:true,providerProgress:0,credentials:'must-not-log',url:'https://example.test/private-token',message:'must-not-log'}),catalog,env,logger);
- assert.equal(result.status,200);assert.deepEqual(logs,[{kind:'playback-health',build:'browser-fetch-2',event:'failed',game:'game-1',code:'TIMEOUT_PLAY',phase:'play',imported:14,readyState:1,networkState:0,providerInitialized:true,providerProgress:0}]);
+ assert.equal(result.status,200);assert.deepEqual(logs,[{kind:'playback-health',build:'fantasy-stream-3',event:'failed',game:'game-1',code:'TIMEOUT_PLAY',phase:'play',imported:14,readyState:1,networkState:0,providerInitialized:true,providerProgress:0}]);
 });
 
 test('playback health rejects other identities, origins, invalid games and oversized reports',async()=>{

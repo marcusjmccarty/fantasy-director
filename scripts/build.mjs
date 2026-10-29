@@ -1,5 +1,5 @@
 import {readFile,readdir,mkdir,rm,writeFile} from 'node:fs/promises';
-const files={};for(const name of await readdir('web'))if(/\.(html|css|js|json)$/.test(name))files['/'+(name==='index.html'?'':name)]={type:name.endsWith('.html')?'text/html':name.endsWith('.css')?'text/css':name.endsWith('.json')?'application/json':'text/javascript',body:await readFile('web/'+name,'utf8')};
+const files={};for(const name of await readdir('web'))if(/\.(html|css|js|json|svg)$/.test(name))files['/'+(name==='index.html'?'':name)]={type:name.endsWith('.svg')?'image/svg+xml':name.endsWith('.html')?'text/html':name.endsWith('.css')?'text/css':name.endsWith('.json')?'application/json':'text/javascript',body:await readFile('web/'+name,'utf8')};
 const api=(await readFile('server/api.js','utf8')).replaceAll('export ','');
 const media=(await readFile('server/media.js','utf8')).replaceAll('export ','');
 const replayCatalog=JSON.parse(await readFile('web/week7.json','utf8')).games.map(({id,name,embed,page,recordingDuration})=>({id,name,embed,page,recordingDuration}));

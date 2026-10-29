@@ -63,6 +63,12 @@ test('franchise, shared footage seek, and prepared highlight return work through
  el('syncQuarter').value=String(play[1]);el('syncGameClock').value=play[2];gameVideo.currentTime=73.25;el('addSync').onclick();
  assert.equal(JSON.parse(storage.get('fd-simple-v2')).recordings[game.id].marks[0].media,73.25);
  el('closeSettings').onclick();assert.equal(el('mediaDeck').parent,el('player'));assert.equal(gameVideo.controls,false);
+ // Roster-only is persistent, and a day without that roster shows a clear standby.
+ el('focusSelect').onchange({target:{value:'roster'}});assert.equal(JSON.parse(storage.get('fd-simple-v2')).rosterOnly,true);
+ el('sessionSelect').onchange({target:{value:String(archive.games.reduce((set,g)=>set.add(new Date(g.date).toDateString()),new Set()).size-1)}});await settled();assert.equal(el('splashTitle').textContent,'Your roster is between games');
+ // An explicit manual selection can still watch the full test slate.
+ const monday=archive.games.at(-1);el('gameList').onclick({target:{closest:()=>({dataset:{game:monday.id}})}});await settled();assert.equal(el('playerSplash').hidden,true);assert.equal(el('autoDirector').checked,false);
+ el('focusSelect').onchange({target:{value:'redzone'}});
  listeners.pagehide();
 });
 

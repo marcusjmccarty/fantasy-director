@@ -20,18 +20,21 @@ const mediaFailure=video=>{const code=video.error?.code;return failure('MEDIA_'+
 const frameCount=video=>video.getVideoPlaybackQuality?.().totalVideoFrames??video.webkitDecodedFrameCount??0;
 const targetValue=(slot)=>{const n=Math.max(0,Number(typeof slot.target==='function'?slot.target():slot.target)||0);return Number.isFinite(slot.video.duration)?Math.min(n,Math.max(0,slot.video.duration-.2)):n;};
 export class MediaDeck{
- constructor(host,{onCommit=()=>{},onStatus=()=>{},onEnd=()=>{},onStall=()=>{},onRecover=()=>{},attachSource=attachMediaSource,lead=8,timeouts={}}={}){
-  Object.assign(this,{host,onCommit,onStatus,onEnd,onStall,onRecover,attachSource,lead});this.slots=new Map();this.gate=new CutGate();this.active=null;this.activeSlot=null;this.muted=true;this.running=false;this.rate=1;this.sequence=0;this.cooldowns=new Map();this.history=[];this.stalls=0;this.controls=false;this.failures=[];this.timeouts={attach:8000,metadata:8000,buffer:12000,play:5000,frame:1500,total:25000,providerTotal:45000,providerMetadata:20000,providerPlay:20000,providerFrame:12000,poll:50,frameFallback:250,...timeouts};
+ constructor(host,{onCommit=()=>{},onStatus=()=>{},onEnd=()=>{},onStall=()=>{},onRecover=()=>{},onBreak=()=>{},attachSource=attachMediaSource,lead=8,timeouts={}}={}){
+  Object.assign(this,{host,onCommit,onStatus,onEnd,onStall,onRecover,onBreak,attachSource,lead});this.slots=new Map();this.gate=new CutGate();this.active=null;this.activeSlot=null;this.muted=true;this.running=false;this.rate=1;this.sequence=0;this.cooldowns=new Map();this.history=[];this.stalls=0;this.controls=false;this.failures=[];this.timeouts={attach:8000,metadata:8000,buffer:12000,play:5000,frame:1500,total:25000,providerTotal:90000,providerMetadata:20000,providerPlay:60000,providerFrame:30000,poll:50,frameFallback:250,...timeouts};
  }
- ensure(key,url,{fresh=false,type=''}={}){
+ ensure(key,url,{fresh=false,type='',duration=0}={}){
   let slot=this.slots.get(key);if(slot&&slot.url===url&&!slot.failed&&!fresh){slot.used=++this.sequence;return slot;}
   if(slot&&slot!==this.activeSlot)this.dispose(slot);
   const video=type==='provider/ok'?new ProviderPlayer():document.createElement('video');video.className='media-layer';video.userInteractable=!this.activeSlot;video.playsInline=true;video.preload='auto';video.muted=true;video.controls=false;video.setAttribute('aria-label',key);this.host.append(video.element||video);
+  if(video.kind==='provider'&&duration>0)video.duration=duration;
   slot={key,url,type,video,target:0,used:++this.sequence,operation:0,decoded:false,failed:false,prepared:false,preparing:null,frameAt:0,controller:null,phase:'source',failure:null,deadline:Infinity,frameEvidence:null};this.slots.set(key,slot);
   video.addEventListener('error',()=>{slot.failed=true;if(slot===this.activeSlot){this.onStatus('The source stopped. Looking for another ready game.');if(this.running)this.onStall(key);}});
   video.addEventListener('waiting',()=>{if(slot===this.activeSlot&&this.running){this.stalls++;this.onStall(key);}});
-  video.addEventListener('timeupdate',()=>{if(video.kind==='provider'&&!this.activeSlot&&['failed','cancelled'].includes(slot.phase)&&video.progress>=2&&!video.paused)this.onRecover(key);});
+  video.addEventListener('timeupdate',()=>{if(video.kind==='provider'&&!video.inAd&&video.progress>=2&&!video.seeking){if(slot===this.activeSlot)slot.prepared=true;if(slot.backgroundAd){slot.backgroundAd=false;if(slot!==this.activeSlot&&!slot.preparing)video.pause();}}if(video.kind==='provider'&&!this.activeSlot&&['failed','cancelled'].includes(slot.phase)&&video.progress>=2&&!video.paused)this.onRecover(key);});
   video.addEventListener('ended',()=>{if(slot===this.activeSlot)this.onEnd(key);});
+  video.addEventListener('adstart',()=>{slot.prepared=false;slot.decoded=false;this.onBreak(key,true);});
+  video.addEventListener('adend',()=>this.onBreak(key,false));
   slot.attached=Promise.resolve(this.attachSource(video,{url,type},()=>{slot.failed=true;})).then(controller=>{if(this.slots.get(key)!==slot){controller?.destroy?.();return;}slot.controller=controller;}).catch(()=>{slot.failed=true;});
   this.prune();return slot;
  }
@@ -100,10 +103,17 @@ export class MediaDeck{
    this.phase(slot,'source');await this.bounded(slot,slot.attached,this.timeouts.attach,current);
    this.phase(slot,'metadata');await this.waitFor(slot,()=>slot.video.readyState>0,slot.video.kind==='provider'?this.timeouts.providerMetadata:this.timeouts.metadata,current);
    if(slot.video.kind==='provider'){
-    const v=slot.video;if(v.readyAt(targetValue(slot))){slot.decoded=true;slot.frameEvidence='provider-playback-progress';slot.prepared=true;slot.phase='ready';return slot;}this.phase(slot,'play');v.muted=slot!==this.activeSlot||this.muted;v.currentTime=targetValue(slot);
-    await this.bounded(slot,v.play(),this.timeouts.providerPlay,current);this.phase(slot,'frame');
-    await this.waitFor(slot,()=>v.readyAt(targetValue(slot)),this.timeouts.providerFrame,current);
-    slot.decoded=true;slot.frameEvidence='provider-playback-progress';slot.prepared=true;slot.phase='ready';if(!this.running)v.pause();return slot;
+    const v=slot.video;if(v.readyAt(targetValue(slot))){slot.decoded=true;slot.frameEvidence='provider-playback-progress';slot.prepared=true;slot.phase='ready';return slot;}
+    slot.prepared=false;slot.decoded=false;v.muted=true;
+    for(let attempt=0;attempt<3;attempt++){
+     // Finish loading one position before correcting drift. Re-seeking every
+     // poll aborts delivery; never correcting leaves a warm stream behind forever.
+     this.phase(slot,'play');v.currentTime=targetValue(slot);await this.bounded(slot,v.play(),this.timeouts.providerPlay,current);this.phase(slot,'frame');
+     await this.waitFor(slot,()=>v.readyAt(v.currentTime),this.timeouts.providerFrame,current);
+     if(v.readyAt(targetValue(slot))){slot.decoded=true;slot.frameEvidence='provider-playback-progress';slot.prepared=true;slot.phase='ready';break;}
+    }
+    if(!slot.prepared)throw failure('TARGET_MOVED','The shared timeline moved before this replay caught up. Retry video.');
+    if(!this.running)v.pause();return slot;
    }
    const v=slot.video;v.playbackRate=this.rate;if(slot!==this.activeSlot)v.muted=true;
    for(let attempt=0;attempt<3;attempt++){
@@ -131,23 +141,24 @@ export class MediaDeck{
   slot.failure=record;slot.phase='failed';slot.prepared=false;slot.operation++;slot.video.pause();
   this.failures.push(record);this.failures=this.failures.slice(-20);
  }
- async request(key,url,target,{force=false,type=''}={}){
+ async request(key,url,target,{force=false,type='',duration=0,isCurrent=()=>true}={}){
   const current=this.slots.get(key),value=Number(typeof target==='function'?target():target)||0;
-  if(!force&&this.activeSlot===current&&current?.url===url&&!current.failed&&!this.gate.pending&&Math.abs(current.video.currentTime-value)<.8)return true;
+  if(!force&&this.activeSlot===current&&current?.url===url&&!current.failed&&!current.video.inAd&&!current.video.seeking&&!this.gate.pending&&Math.abs(current.video.currentTime-value)<.8)return true;
   if(!force&&this.gate.pending?.key===key)return false;
   if(this.cooldowns.get(key+'|'+url)>performance.now())return false;
   const ticket=this.gate.request(key),started=performance.now();
-  const fresh=current===this.activeSlot&&(force||Math.abs(current.video.currentTime-value)>=.8);
-  const slot=this.ensure(key,url,{fresh,type});this.onStatus(this.activeSlot?'Preparing the next picture…':'Preparing the replay…');
+  const fresh=current===this.activeSlot&&current.video.kind!=='provider'&&(force||Math.abs(current.video.currentTime-value)>=.8);
+  const slot=this.ensure(key,url,{fresh,type,duration});this.onStatus(this.activeSlot?'Preparing the next picture…':'Preparing the replay…');
   try{
    await this.prepare(slot,target);
    if(this.gate.pending!==ticket)return false;
+   if(!isCurrent()){this.gate.cancel();if(slot!==this.activeSlot)slot.video.pause();return false;}
    if(this.running&&slot.video.paused){this.phase(slot,'play');await this.bounded(slot,slot.video.play(),this.timeouts.play,()=>this.gate.pending===ticket&&this.slots.get(key)===slot);}
-   if(!this.gate.commit(ticket,slot.decoded&&readyToCut(slot.video,targetValue(slot),this.requiredLead()))){
+   if(!this.gate.commit(ticket,isCurrent()&&slot.decoded&&readyToCut(slot.video,targetValue(slot),this.requiredLead()))){
     if(this.gate.pending===ticket)this.gate.cancel();return false;
    }
    const previous=this.activeSlot;
-   if(previous&&previous!==slot){previous.video.userInteractable=false;previous.video.muted=true;previous.video.pause();previous.video.classList.toggle('active',false);previous.video.controls=false;}
+   if(previous&&previous!==slot){previous.video.userInteractable=false;previous.video.muted=true;previous.backgroundAd=this.running&&previous.video.inAd===true;if(!previous.backgroundAd)previous.video.pause();previous.video.classList.toggle('active',false);previous.video.controls=false;}
    slot.video.userInteractable=true;slot.video.classList.toggle('active',true);slot.video.controls=this.controls;slot.video.muted=this.muted;this.active=key;this.activeSlot=slot;
    if(this.running)slot.video.play().catch(()=>{});else slot.video.pause();
    if(previous&&this.slots.get(previous.key)!==previous)this.dispose(previous);
@@ -155,9 +166,9 @@ export class MediaDeck{
    this.onStatus('Playing · next sources prepare in the background');this.onCommit(key);this.prune();return true;
   }catch(error){if(this.gate.pending===ticket){this.gate.cancel();this.recordFailure(slot,error);this.cooldowns.set(key+'|'+url,performance.now()+15000);this.onStatus(error.message);}return false;}
  }
- warm(key,url,target,{type='',hold=false}={}){
+ warm(key,url,target,{type='',hold=false,duration=0}={}){
   if(key===this.active||this.cooldowns.get(key+'|'+url)>performance.now())return Promise.resolve(false);
-  const slot=this.ensure(key,url,{type});
+  const slot=this.ensure(key,url,{type,duration});
   return this.prepare(slot,target).then(()=>{if(hold&&slot!==this.activeSlot)slot.video.pause();return true;}).catch(error=>{if(error.message!=='Cancelled'){this.recordFailure(slot,error);this.cooldowns.set(key+'|'+url,performance.now()+15000);}return false;});
  }
  sync(target){
@@ -166,11 +177,12 @@ export class MediaDeck{
   if(slot.video.paused)slot.video.play().catch(()=>{});
  }
  ready(key,target){const slot=this.slots.get(key);return !!slot?.prepared&&!slot.failed&&readyToCut(slot.video,target??targetValue(slot),this.requiredLead());}
- snapshot(){return {active:this.active,pending:this.gate.pending?.key||null,stalls:this.stalls,cuts:this.history.slice(),failures:this.failures.slice(),players:[...this.slots.values()].map(s=>({id:s.key,ready:this.ready(s.key),bufferSeconds:s.video.kind==='provider'?null:Math.round(bufferedAhead(s.video)*10)/10,provider:s.video.kind==='provider',mediaTime:Math.round(s.video.currentTime*10)/10,failed:s.failed,phase:s.phase,readyState:s.video.readyState,networkState:s.video.networkState??null,mediaError:s.video.error?.code??null,failure:s.failure,active:s===this.activeSlot}))};}
+ snapshot(){return {active:this.active,pending:this.gate.pending?.key||null,stalls:this.stalls,cuts:this.history.slice(),failures:this.failures.slice(),players:[...this.slots.values()].map(s=>({id:s.key,ready:this.ready(s.key),bufferSeconds:s.video.kind==='provider'?null:Math.round(bufferedAhead(s.video)*10)/10,provider:s.video.kind==='provider',ad:s.video.inAd===true,mediaTime:Math.round(s.video.currentTime*10)/10,failed:s.failed,phase:s.phase,readyState:s.video.readyState,networkState:s.video.networkState??null,mediaError:s.video.error?.code??null,failure:s.failure,active:s===this.activeSlot}))};}
  cancelPending(){this.gate.cancel();for(const slot of this.slots.values()){slot.operation++;slot.preparing=null;if(slot!==this.activeSlot){slot.prepared=false;slot.video.pause();slot.phase='cancelled';}}}
  retry(){this.cooldowns.clear();}
+ cancelRequest(){const pending=this.gate.pending;this.gate.cancel();if(pending){const slot=this.slots.get(pending.key);if(slot&&slot!==this.activeSlot){slot.operation++;slot.preparing=null;slot.backgroundAd=this.running&&slot.video.inAd===true;if(slot.backgroundAd)slot.video.muted=true;else slot.video.pause();slot.phase='cancelled';slot.prepared=false;}}}
  setControls(value){this.controls=value;if(this.activeSlot)this.activeSlot.video.controls=value;}
- setRunning(value){this.running=value;for(const slot of new Set([...this.slots.values(),this.activeSlot].filter(Boolean))){if(value&&slot.prepared)slot.video.play().catch(()=>{});else if(!value)slot.video.pause();}}
+ setRunning(value){this.running=value;for(const slot of new Set([...this.slots.values(),this.activeSlot].filter(Boolean))){if(value&&(slot===this.activeSlot&&(slot.prepared||slot.video.inAd)||slot.backgroundAd&&slot.video.inAd))slot.video.play().catch(()=>{});else if(!value)slot.video.pause();}}
  setMuted(value){this.muted=value;for(const slot of new Set([...this.slots.values(),this.activeSlot].filter(Boolean)))slot.video.muted=slot!==this.activeSlot||value;}
  setRate(rate){this.rate=Math.min(4,Math.max(.5,rate));for(const slot of this.slots.values())slot.video.playbackRate=this.rate;}
  suspend(){this.cancelPending();for(const slot of new Set([...this.slots.values(),this.activeSlot].filter(Boolean)))slot.video.pause();}

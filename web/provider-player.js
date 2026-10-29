@@ -9,7 +9,7 @@ export class ProviderPlayer{
  constructor({createFrame=()=>document.createElement('iframe'),events=window,now=()=>performance.now()}={}){
   this.kind='provider';this.element=createFrame();this.events=events;this.now=now;this.listeners=new Map();this.pendingPlay=[];
   this.readyState=0;this.networkState=0;this.duration=NaN;this.error=null;this.seeking=false;this.paused=true;this.initialized=false;this.progress=0;this.lastTime=0;this.lastProgress=-Infinity;this.lastAdvance=-Infinity;this.wantsPlay=false;this._muted=true;this._target=null;this._src='';this.userInteractable=false;this._seekSent=false;
-  this.buffered={length:0};this.element.title='Full-game replay · provider player';this.element.allow='autoplay; fullscreen; picture-in-picture';this.element.allowFullscreen=true;this.element.referrerPolicy='strict-origin-when-cross-origin';
+  this.inAd=false;this.buffered={length:0};this.element.title='Full-game replay · provider player';this.element.allow='autoplay; fullscreen; picture-in-picture';this.element.allowFullscreen=true;this.element.referrerPolicy='strict-origin-when-cross-origin';
   this.message=event=>this.receive(event);events.addEventListener('message',this.message);
  }
  get classList(){return this.element.classList;}set className(value){this.element.className=value;}
@@ -24,11 +24,12 @@ export class ProviderPlayer{
  set muted(value){this._muted=!!value;this.send(value?'mute':'unmute');this.send('volume',{value:value?0:1});}
  get muted(){return this._muted;}
  set controls(value){}set playsInline(value){}set preload(value){}set playbackRate(value){}get playbackRate(){return 1;}
- get currentTime(){const elapsed=this.paused?0:Math.min(2.5,Math.max(0,(this.now()-this.lastProgress)/1000));return this.lastTime+elapsed;}
- set currentTime(value){this._target=Math.max(0,Number(value)||0);this.seeking=true;this.progress=0;this.seekAt=this.now();this._seekSent=false;this._startedSeek=false;if(this.initialized){this.send('seek',{time:this._target});this._seekSent=true;}}
+ get currentTime(){const elapsed=this.paused||this.inAd?0:Math.min(2.5,Math.max(0,(this.now()-this.lastProgress)/1000));return this.lastTime+elapsed;}
+ set currentTime(value){this._target=Math.max(0,Number(value)||0);this.seeking=true;this.progress=0;this.seekAt=this.now();this._seekSent=false;this._startedSeek=false;if(this.initialized&&!this.inAd){this.send('seek',{time:this._target});this._seekSent=true;}}
  stopTimer(){clearInterval(this.bootstrap);this.bootstrap=null;}
  start(){
   if(!this.initialized||!this.wantsPlay)return;
+  if(this.inAd){this.send('play');return;}
   this.send(this._muted?'mute':'unmute');if(this._muted)this.send('volume',{value:0});this.send('play');
   if(this._target!==null&&this.seeking&&!this._seekSent){this.send('seek',{time:this._target});this._seekSent=true;}
  }
@@ -40,7 +41,8 @@ export class ProviderPlayer{
   return promise;
  }
  pause(){this.wantsPlay=false;this.paused=true;this.stopTimer();this.send('pause');const pending=this.pendingPlay.splice(0);for(const p of pending)p.reject(new DOMException('Playback paused','AbortError'));}
- readyAt(target){return this.progress>=2&&!this.seeking&&!this.error&&this.now()-this.lastAdvance<3000&&Math.abs(this.currentTime-target)<3;}
+ readyAt(target){return !this.inAd&&this.progress>=2&&!this.seeking&&!this.error&&this.now()-this.lastAdvance<3000&&Math.abs(this.currentTime-target)<3;}
+ checkStall(){if(this.wantsPlay&&!this.paused&&!this.seeking&&!this.inAd&&this.progress>=2&&this.now()-this.lastAdvance>6000&&!this.stalled){this.stalled=true;this.emit('waiting');}}
  receive(event){
   if(event.origin!=='https://ok.ru'||event.source!==this.element.contentWindow||!event.data||typeof event.data!=='object')return;
   const data=event.data;
@@ -48,10 +50,13 @@ export class ProviderPlayer{
   if(data.event==='error'){const messages={100:'This recording is still processing.',101:'This recording was removed.',102:'The provider blocked this recording.',103:'The provider could not find this recording.',150:'The provider restricted this recording.',151:'The provider denied access to this recording.',152:'The provider disabled embedded playback.',153:'This recording is unavailable in your region.'};this.error={code:'PROVIDER_'+String(data.code??0),message:(messages[data.code]||'The replay provider could not start this recording.')+' Choose another game.'};this.readyState=0;this.stopTimer();for(const p of this.pendingPlay.splice(0))p.reject(new Error(this.error.message));this.emit('error');return;}
   if(data.event==='paused'){this.paused=true;return;}
   if(data.event==='ended'){this.paused=true;this.emit('ended');return;}
-  if(data.event==='adShown'){this.progress=0;this.readyState=1;return;}
-  if(data.event==='started'||data.event==='resumed'){if(this.userInteractable)this.wantsPlay=true;this.send(this._muted?'mute':'unmute');if(this.seeking&&!this._startedSeek){this._startedSeek=true;this.send('seek',{time:this._target});}return;}
+  if(data.event==='adShown'){this.inAd=true;this.progress=0;this.readyState=1;this.emit('adstart');return;}
+  if(data.event==='started'||data.event==='resumed'){if(this.inAd)return;if(this.userInteractable)this.wantsPlay=true;this.send(this._muted?'mute':'unmute');if(this.seeking&&!this._startedSeek){this._startedSeek=true;this.send('seek',{time:this._target});}return;}
   if(data.event!=='timeupdate'&&data.event!=='rewound')return;
   if(typeof data.time!=='number'||!Number.isFinite(data.time)||data.time<0)return;
+  // Ad resume/pause messages are ambiguous. Only a content timeupdate matching
+  // the recording duration can clear the ad latch; ad progress never drives sync.
+  if(this.inAd){if(data.event!=='timeupdate'||!Number.isFinite(this.duration)||typeof data.duration!=='number'||Math.abs(data.duration-this.duration)>5)return;this.inAd=false;this.progress=0;this.emit('adend');if(this.seeking){this.send('seek',{time:this._target});this._seekSent=true;}}
   if(typeof data.duration==='number'&&data.duration>0)this.duration=data.duration;
   if(this.seeking){
    // A rewind acknowledgement alone is not proof of delivered video.
@@ -60,7 +65,7 @@ export class ProviderPlayer{
   }
   if(data.event!=='timeupdate')return;
   const advanced=data.time>this.lastTime+.025;
-  if(this.progress===0||advanced)this.lastAdvance=this.now();
+  if(this.progress===0||advanced){this.lastAdvance=this.now();this.stalled=false;}
   this.progress=this.progress===0?1:advanced?this.progress+1:this.progress;
   this.lastTime=data.time;this.lastProgress=this.now();this.paused=!this.wantsPlay;this.readyState=this.progress>=2?3:2;
   if(this.wantsPlay){this.stopTimer();for(const p of this.pendingPlay.splice(0))p.resolve();}

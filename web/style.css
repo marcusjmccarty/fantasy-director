@@ -8,3 +8,5 @@
 
 /* The first provider player must accept a gesture before it is ready to commit. */
 .media-layer.interactive{pointer-events:auto}
+
+.director-controls{display:flex;flex-direction:column;align-items:flex-end;gap:8px}.director-controls select{font-size:12px;padding:6px 8px;max-width:210px}.player iframe{color-scheme:dark}@media(max-width:780px){.now{flex-wrap:wrap}.director-controls{align-items:flex-start}.director-controls select{max-width:100%}}
