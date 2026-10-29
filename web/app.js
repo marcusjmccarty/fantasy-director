@@ -19,12 +19,20 @@ const clock=new ReplayClock();
 let feedTimer,clipTimer,feedController,clipController,seekTimer,highlightTimer;
 const sources=new SourceCatalog({onUpdate:()=>{if(state.archive)renderGames();}});
 const nflSources=new NFLSourceCatalog();
+const healthReports=new Set();
+function reportPlayback(event,game,code='READY'){
+ const key=[event,game,code].join(':');if(healthReports.has(key)||healthReports.size>=20)return;healthReports.add(key);
+ const slot=deck.slots.get(game),video=slot?.video;
+ const report={event,game,code,phase:slot?.failure?.phase||slot?.phase||'source',imported:sources.records.size,readyState:video?.readyState||0,networkState:video?.networkState||0,providerInitialized:video?.initialized===true,providerProgress:video?.progress||0};
+ try{Promise.resolve(globalThis.fetch('/api/playback-health',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(report),keepalive:true})).catch(()=>{});}catch{}
+}
 function persist(){try{localStorage.setItem('fd-simple-v2',JSON.stringify(saved));}catch{notice('Browser storage is unavailable. Your changes work for this visit.');}}
 function notice(message){$('roomNotice').textContent=message;$('roomNotice').hidden=false;clearTimeout(state.noticeTimer);state.noticeTimer=setTimeout(()=>$('roomNotice').hidden=true,6000);}
 function status(message){if(state.playbackFailure)message=state.playbackFailure.message;$('playbackStatus').textContent=message;if(state.started&&!deck.active&&!state.playbackFailure)$('splashDetail').textContent=message;}
 const deck=new MediaDeck($('mediaDeck'),{onCommit:key=>{
  $('playerSplash').hidden=true;
  if(key.startsWith('clip:'))return;
+ if(state.mode==='replay')reportPlayback('ready',key);
  state.displayed=key;state.switches++;state.returningTitle=null;
  if(state.clockWait){state.clockWait=false;clock.setRunning(state.intentRunning,performance.now());deck.setRunning(state.intentRunning);}
  renderNow();
@@ -125,6 +133,7 @@ function changePicture(picture){
 $('pictureMode').onchange=e=>changePicture(e.target.value);
 function failPlayback(game,tag,attempt,message,code='SOURCE'){
  if(state.requestTag!==tag||state.loadAttempt!==attempt)return;
+ if(state.mode==='replay')reportPlayback('failed',game.id,code);
  clearTimeout(state.loadWatchdog);state.loadAttempt++;deck.cancelPending();
  state.playbackFailure={id:game.id,code,message:message+' ['+code+']'};state.clockWait=false;
  if(!deck.active){state.intentRunning=false;clock.setRunning(false,performance.now());deck.setRunning(false);}
@@ -324,7 +333,7 @@ async function warmAhead(){
 $('retryVideo').onclick=()=>{state.playbackFailure=null;state.requestTag=null;state.retryAt=0;deck.cancelPending();deck.retry();if(activeGame()&&state.mode==='replay')sources.invalidate(activeGame().id);if(!deck.active)setRunning(true);else showPicture();};
 $('splashPlay').onclick=()=>setRunning(true);
 $('downloadDiagnostics').onclick=()=>{
- const report={version:'provider-playback-1',failure:state.playbackFailure,week:7,at:clock.at,franchise:saved.teamName,imported:sources.records.size,alignment:state.archive.games.map(g=>({id:g.id,points:configFor(g).marks||[],estimated:!configFor(g).marks?.length})),...deck.snapshot()};
+ const report={version:'browser-fetch-2',failure:state.playbackFailure,week:7,at:clock.at,franchise:saved.teamName,imported:sources.records.size,sourceErrors:[...sources.errors].map(([id,error])=>({id,message:error.message})),pendingSources:[...sources.pending.keys()],alignment:state.archive.games.map(g=>({id:g.id,points:configFor(g).marks||[],estimated:!configFor(g).marks?.length})),...deck.snapshot()};
  const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='fantasy-director-playback.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 };
 function tick(now){

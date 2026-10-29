@@ -28,7 +28,8 @@ globalThis.document={getElementById:el,createElement:tag=>tag==='video'?new Vide
 globalThis.window={addEventListener:(name,fn)=>{if(name==='message')messageListeners.add(fn);else listeners[name]=fn;},removeEventListener:(name,fn)=>{if(name==='message')messageListeners.delete(fn);}};
 globalThis.localStorage={getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)};
 let animation;globalThis.requestAnimationFrame=callback=>{animation=callback;};
-globalThis.fetch=async url=>{
+globalThis.fetch=async function(url){
+ assert.ok(this===undefined||this===globalThis,'Browser fetch received an incompatible receiver');
  let data=url==='/week7.json'?archive:url==='/nfl-highlights.json'?catalog:url==='/api/session'?{savedLeagueId:league.leagueId}:league;
  if(url.startsWith('/api/replay-source')){const id=new URL('https://x'+url).searchParams.get('id'),game=archive.games.find(g=>g.id===id);data={id,duration:providerMode?game.recordingDuration:(game.end-game.start)*.7,expiresAt:Date.now()+300000,sources:[providerMode?{quality:'provider',url:game.embed,type:'provider/ok'}:{quality:'sd',url:'https://a.vkuser.net/replay-'+id+'.mp4',type:'video/mp4'}]};}
  if(url.startsWith('/api/nfl-source'))data={url:'https://dcs-vod.mp.lura.live/highlight.m3u8',type:'application/vnd.apple.mpegurl',duration:13,expiresAt:Date.now()+300000};

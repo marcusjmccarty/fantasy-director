@@ -1,13 +1,13 @@
 export class NFLSourceCatalog{
- constructor({fetcher=fetch,now=()=>Date.now()}={}){this.fetcher=fetcher;this.now=now;this.records=new Map();this.pending=new Map();this.failures=new Map();}
+ constructor({fetcher=fetch,now=()=>Date.now()}={}){this.fetcher=fetcher.bind(globalThis);this.now=now;this.records=new Map();this.pending=new Map();this.failures=new Map();}
  get(id){const record=this.records.get(id);return record?.expiresAt>this.now()?record:null;}
  async resolve(clip){
   const record=this.get(clip.id);if(record)return record;if(this.pending.has(clip.id))return this.pending.get(clip.id);
   if(this.failures.get(clip.id)>this.now())throw new Error('Highlight temporarily unavailable.');
-  const promise=(async()=>{try{
+  const promise=Promise.resolve().then(async()=>{try{
    const response=await this.fetcher('/api/nfl-source?id='+encodeURIComponent(clip.id),{cache:'no-store',signal:AbortSignal.timeout(35000)});const data=await response.json();
    if(!response.ok||!data.url)throw new Error(data.error||'Highlight unavailable.');this.records.set(clip.id,data);return data;
-  }catch(error){this.failures.set(clip.id,this.now()+60000);throw error;}finally{this.pending.delete(clip.id);}})();this.pending.set(clip.id,promise);return promise;
+  }catch(error){this.failures.set(clip.id,this.now()+60000);throw error;}finally{this.pending.delete(clip.id);}});this.pending.set(clip.id,promise);return promise;
  }
 }
 const normalize=value=>String(value||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();

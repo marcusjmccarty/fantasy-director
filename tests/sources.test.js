@@ -3,7 +3,26 @@ import assert from 'node:assert/strict';
 import {replaySourceAPI} from '../server/media.js';
 import {SourceCatalog,chooseSource} from '../web/sources.js';
 import {parseNFLPublicConfig,nflSourceAPI,nflMediaURL} from '../server/nfl.js';
-import {rankNFLClips} from '../web/nfl-sources.js';
+import {NFLSourceCatalog,rankNFLClips} from '../web/nfl-sources.js';
+
+test('browser fetch receives the global receiver for every replay and highlight request',async t=>{
+ const original=globalThis.fetch;let calls=0;
+ globalThis.fetch=function(url){
+  if(this!==globalThis)throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
+  calls++;return Promise.resolve(Response.json({sources:[{url:'https://ok.ru/videoembed/123',type:'provider/ok'}],url:'https://example.test/highlight.m3u8',expiresAt:Date.now()+300000}));
+ };
+ t.after(()=>{globalThis.fetch=original;});
+ const replays=new SourceCatalog(),highlights=new NFLSourceCatalog();await replays.importAll(Array.from({length:14},(_,i)=>({id:String(i)})));
+ assert.equal(replays.records.size,14);assert.equal(replays.errors.size,0);await highlights.resolve({id:'clip'});assert.equal(calls,15);
+});
+
+test('a synchronous request failure clears pending state so replay and highlight retries recover',async()=>{
+ for(const Catalog of [SourceCatalog,NFLSourceCatalog]){
+  let attempts=0,now=1000;const catalog=new Catalog({now:()=>now,fetcher:()=>{if(++attempts===1)throw new TypeError('Request setup failed');return Promise.resolve(Response.json({sources:[{url:'https://ok.ru/videoembed/123'}],url:'https://example.test/highlight.m3u8',expiresAt:999999}));}});
+  await assert.rejects(catalog.resolve({id:'one'}),/Request setup failed/);assert.equal(catalog.pending.size,0);
+  now+=61000;await catalog.resolve({id:'one'});assert.equal(attempts,2);assert.equal(catalog.pending.size,0);assert.ok(catalog.get('one'));
+ }
+});
 test('replay source rejects arbitrary embeds and unsupported request methods',async()=>{
  const games=[{id:'bad',embed:'https://attacker.example/videoembed/1234'}];
  assert.equal((await replaySourceAPI(new Request('https://site.test/api/replay-source?id=bad'),games)).status,404);
