@@ -1,6 +1,7 @@
-import {ReplayArchive,ReplayClock,timeLabel,mediaTime,addSyncMark} from './replay-engine.js';
+import {ReplayArchive,ReplayClock,timeLabel,mediaTime,addSyncMark,wallTime,forecastGames,observedPlay} from './replay-engine.js';
 import {MediaDeck} from './media-deck.js';
-import {HighlightPlayer} from './highlight-player.js';
+import {SourceCatalog,chooseSource} from './sources.js';
+import {NFLSourceCatalog,rankNFLClips} from './nfl-sources.js';
 import {normalizeScoreboard} from './adapters.js';
 import {normalizeHighlights,playable} from './highlights.js';
 import {chooseGame,rankGames,involved,parseRoster,safeVideo,gameKey} from './director.js';
@@ -13,17 +14,25 @@ try{
  const old=JSON.parse(localStorage.getItem('fd-simple-v2')||'null');
  if(old&&Array.isArray(old.roster)){saved={...saved,...old};saved.roster=parseRoster(old.roster.map(p=>`${p.name}, ${p.team}, ${p.position}`).join('\n'));saved.recordings=old.recordings||{};}
 }catch{}
-const state={mode:'replay',picture:'signal',archive:null,session:0,games:[],selected:null,displayed:null,auto:true,started:false,league:saved.leagueCache,loadingLeague:false,side:'games',generation:0,lastFeed:0,feedError:'',clip:null,manualClip:false,clips:[],stories:[],played:new Set(),quietAt:null,lastClip:-Infinity,changedAt:0,switches:0,externalId:null,noticeTimer:null,lastRender:0,lastWarm:0,lastDecision:0,forceSeek:false};
+const state={mode:'replay',picture:'native',archive:null,session:0,games:[],selected:null,displayed:null,auto:true,started:false,league:saved.leagueCache,loadingLeague:false,side:'games',generation:0,lastFeed:0,feedError:'',clip:null,manualClip:false,clips:[],stories:[],played:new Set(),quietAt:null,lastClip:-Infinity,changedAt:0,switches:0,externalId:null,noticeTimer:null,lastRender:0,lastWarm:0,lastDecision:0,forceSeek:false,intentRunning:false,clockWait:false,seekVersion:0,requestTag:null,retryAt:0,pendingClip:null,highlightGeneration:0,returningTitle:null,quality:'auto',scrubbing:false,gamesMarkup:''};
 const clock=new ReplayClock();
-let feedTimer,clipTimer,feedController,clipController,seekTimer;
+let feedTimer,clipTimer,feedController,clipController,seekTimer,highlightTimer;
+const sources=new SourceCatalog({onUpdate:()=>{if(state.archive)renderGames();}});
+const nflSources=new NFLSourceCatalog();
 function persist(){try{localStorage.setItem('fd-simple-v2',JSON.stringify(saved));}catch{notice('Browser storage is unavailable. Your changes work for this visit.');}}
 function notice(message){$('roomNotice').textContent=message;$('roomNotice').hidden=false;clearTimeout(state.noticeTimer);state.noticeTimer=setTimeout(()=>$('roomNotice').hidden=true,6000);}
 function status(message){$('playbackStatus').textContent=message;}
 const deck=new MediaDeck($('mediaDeck'),{onCommit:key=>{
+ $('playerSplash').hidden=true;
  if(key.startsWith('clip:'))return;
- state.displayed=key;state.switches++;renderNow();
-},onStatus:status,onEnd:key=>{if(key.startsWith('clip:'))finishHighlight();}});
-const highlight=new HighlightPlayer($('highlightHost'),{ended:()=>finishHighlight(),status});
+ state.displayed=key;state.switches++;state.returningTitle=null;
+ if(state.clockWait){state.clockWait=false;clock.setRunning(state.intentRunning,performance.now());deck.setRunning(state.intentRunning);}
+ renderNow();
+},onStatus:status,onEnd:key=>{if(key.startsWith('clip:')){if(state.pendingClip){deck.activeSlot?.video.pause();return;}finishHighlight();}else if(state.mode==='replay'){const game=state.archive.games.find(g=>g.id===key);if(game){clock.seek(Math.min(clock.end,game.end+1),performance.now());state.games=state.archive.sample(clock.at);if(clock.at>=clock.end){setRunning(false);status('Replay day complete. Choose another day or seek back.');}else{state.requestTag=null;direct(true);}}}},onStall:()=>{
+ if(!state.auto)return;
+ const alternative=rankGames(state.games,saved.roster).find(({game})=>game.id!==deck.active&&deck.ready(game.id,targetFor(game)));
+ if(alternative){state.selected=alternative.game.id;state.requestTag=null;showPicture();}else status('The current source slowed down. Keeping the picture while the next game prepares.');
+}});
 function activeGame(){return state.games.find(g=>g.id===state.selected);}
 function displayedGame(){return state.games.find(g=>g.id===state.displayed)||activeGame();}
 function showSide(name){state.side=name;for(const n of ['games','roster','clips']){$(n+'Panel').hidden=n!==name;$(n+'Tab').setAttribute('aria-selected',String(n===name));}if(name==='clips')renderClips();}
@@ -69,57 +78,85 @@ function setSession(index,{seek=true}={}){
  state.session=index;const s=session();if(!s)return;$('sessionSelect').value=String(index);clock.end=s.end;$('timeline').min=s.start;$('timeline').max=s.end;$('timelineEnd').textContent=timeLabel(s.end)+' ET';if(seek)seekAll(s.start);
 }
 function setRunning(running){
- state.started=state.started||running;if(running)deck.retry();clock.setRunning(running,performance.now());deck.setRunning(running);if(!running)highlight.pause();if(running&&state.clip?.youtubeId)finishHighlight();direct();render();
+ state.started=state.started||running;state.intentRunning=running;deck.retry();state.retryAt=0;
+ if(!running){clock.setRunning(false,performance.now());deck.setRunning(false);state.clockWait=false;}
+ else if(state.picture==='signal'||state.mode==='live'){clock.setRunning(state.mode==='replay',performance.now());deck.setRunning(true);}
+ else if(deck.active===state.selected&&deck.ready(state.selected,targetFor(activeGame()))){clock.setRunning(true,performance.now());deck.setRunning(true);}
+ else{state.clockWait=true;clock.setRunning(false,performance.now());deck.setRunning(true);state.requestTag=null;}
+ direct();render();
 }
 function seekAll(at){
- const s=session();if(!s)return;finishHighlight();deck.cancelPending();deck.retry();state.forceSeek=true;clock.seek(Math.max(s.start,Math.min(s.end,at)),performance.now());state.played.clear();state.quietAt=null;state.lastClip=-Infinity;state.games=state.archive.sample(clock.at);
- direct(true);render();if(state.picture==='external')status('Timeline moved. The external replay cannot seek with it.');
+ const day=session();if(!day)return;finishHighlight({restore:false});state.seekVersion++;state.requestTag=null;state.retryAt=0;deck.cancelPending();deck.retry();
+ state.returningTitle=null;state.forceSeek=true;clock.setRunning(false,performance.now());deck.setRunning(false);state.clockWait=state.intentRunning;
+ clock.seek(Math.max(day.start,Math.min(day.end,at)),performance.now());state.played.clear();state.quietAt=null;state.lastClip=-Infinity;state.games=state.archive.sample(clock.at);
+ if(state.picture==='signal')clock.setRunning(state.intentRunning,performance.now());direct(true);render();
 }
 $('sessionSelect').onchange=e=>setSession(Number(e.target.value));
-$('timeline').oninput=e=>{$('timelineTime').textContent=timeLabel(Number(e.target.value))+' ET';clearTimeout(seekTimer);seekTimer=setTimeout(()=>seekAll(Number(e.target.value)),120);};
-$('timeline').onchange=e=>{clearTimeout(seekTimer);seekAll(Number(e.target.value));};
-$('playButton').onclick=()=>setRunning(!clock.running);
+$('timeline').oninput=e=>{state.scrubbing=true;$('timelineTime').textContent=timeLabel(Number(e.target.value))+' ET';};
+$('timeline').onchange=e=>{state.scrubbing=false;seekAll(Number(e.target.value));};
+$('playButton').onclick=()=>setRunning(!state.intentRunning);
 $('skipBack').onclick=()=>seekAll(clock.at-30);
 $('restartTest').onclick=()=>seekAll(session().start);
 $('nextSwitch').onclick=()=>{state.auto=true;$('autoDirector').checked=true;state.started=true;seekAll(state.archive.nextSwitch(clock.at,saved.roster,state.selected,session().end));};
 $('playbackRate').onchange=e=>{clock.tick(performance.now());clock.rate=Number(e.target.value);if(state.picture==='native'&&clock.rate>4){clock.rate=4;e.target.value='4';notice('Synced recordings support up to 4×. Timeline tests support 60×.');}deck.setRate(clock.rate);};
-$('muteButton').onclick=()=>{saved.muted=!saved.muted;deck.setMuted(saved.muted);highlight.setMuted(saved.muted);persist();renderNow();};
-function configFor(game){return saved.recordings[game.id]||{};}
-function videoFor(game){return state.mode==='replay'?configFor(game).url:saved.streams[gameKey(game)];}
+$('muteButton').onclick=()=>{saved.muted=!saved.muted;deck.setMuted(saved.muted);persist();renderNow();};
+function configFor(game){
+ const config=saved.recordings[game.id]||{},slot=deck.slots.get(game.id);
+ const duration=config.url?(Number.isFinite(slot?.video.duration)?slot.video.duration:0):sources.records.get(game.id)?.duration||0;
+ return {...config,duration};
+}
+function videoFor(game){return state.mode==='replay'?(saved.recordings[game.id]?.url||''):saved.streams[gameKey(game)];}
 function targetFor(game){return state.mode==='replay'?mediaTime(game,clock.at,configFor(game)):deck.slots.get(game.id)?.video.currentTime||0;}
+async function resolveVideo(game){
+ const custom=videoFor(game);if(custom)return {url:custom,type:/\.m3u8(?:\?|$)/i.test(custom)?'application/vnd.apple.mpegurl':'video/mp4'};
+ if(state.mode==='live')throw new Error('Add your live source in Sources & sync.');
+ return chooseSource(await sources.resolve(game),state.quality);
+}
 function stopExternal(){if($('externalFrame').hasAttribute('src'))$('externalFrame').removeAttribute('src');$('externalFrame').hidden=true;state.externalId=null;}
 function changePicture(picture){
- finishHighlight();deck.destroy();stopExternal();state.picture=picture;state.displayed=null;
- if(picture==='native'&&clock.rate>4){clock.rate=1;$('playbackRate').value='1';}deck.setRate(clock.rate);deck.setRunning(clock.running);deck.setMuted(saved.muted);
- if(picture==='external'){state.auto=false;$('autoDirector').checked=false;setRunning(false);notice('External replays are manual. Their player cannot report readiness or follow the shared seek bar.');}
+ finishHighlight({restore:false});deck.destroy();stopExternal();state.picture=picture;state.displayed=null;state.requestTag=null;state.retryAt=0;
+ if(picture==='native'&&clock.rate>4){clock.rate=1;$('playbackRate').value='1';}deck.setRate(clock.rate);deck.setMuted(saved.muted);
+ if(picture==='external'){state.auto=false;$('autoDirector').checked=false;setRunning(false);}
+ else if(state.intentRunning)setRunning(true);
  showPicture();render();
 }
 $('pictureMode').onchange=e=>changePicture(e.target.value);
 function showPicture(){
  const game=activeGame();if(!game||state.clip)return;
  const picture=state.mode==='live'?'native':state.picture;
- $('signal').hidden=picture!=='signal';$('mediaDeck').hidden=picture!=='native';$('externalFrame').hidden=picture!=='external';
- if(picture==='signal'){state.displayed=game.id;status(`Recorded feed · ${state.archive?.data.coverage.games||14} games · ${state.switches} switches`);return;}
+ $('signal').hidden=picture!=='signal';$('mediaDeck').hidden=picture!=='native';$('externalFrame').hidden=picture!=='external';$('playerSplash').hidden=picture!=='native'||!!deck.active;
+ if(picture==='signal'){state.displayed=game.id;status(`Recorded feed · 14 games · ${state.switches} switches`);return;}
  if(picture==='external'){
   if(state.externalId!==game.id){$('externalFrame').src=game.embed;state.externalId=game.id;state.displayed=game.id;}
-  status('External player · manual seek · playback readiness unavailable');return;
+  status('Original provider player · use Replay video for shared controls');return;
  }
- const url=videoFor(game);
- if(!url){$('signal').hidden=false;$('mediaDeck').hidden=!deck.active;status('Add a direct recording in Sources & sync to enable synchronized video.');return;}
- if(!state.started){$('signal').hidden=false;$('mediaDeck').hidden=true;status('Press Play test to prepare synchronized video.');return;}
- if(state.mode==='replay'&&!clock.running&&deck.active===game.id&&!state.forceSeek)return;
- state.forceSeek=false;deck.request(game.id,url,()=>targetFor(game));
+ $('splashPlay').hidden=state.started;
+ if(!state.started){$('splashTitle').textContent='Your roster. One feed.';$('splashDetail').textContent='All 14 games are importing. Press Play to prepare the first replay.';return;}
+ const tag=[state.generation,state.seekVersion,game.id,state.quality].join(':');
+ if(state.requestTag===tag||performance.now()<state.retryAt)return;
+ if(!state.forceSeek&&state.mode==='replay'&&!clock.running&&!state.clockWait&&deck.active===game.id)return;
+ const force=state.forceSeek;state.forceSeek=false;state.requestTag=tag;
+ if(!deck.active){$('splashTitle').textContent='Preparing your replay';$('splashDetail').textContent='Loading a buffered picture before the test clock starts.';}
+ (async()=>{
+  try{
+   const source=await resolveVideo(game);if(state.requestTag!==tag||state.clip||state.selected!==game.id)return;
+   const ready=await deck.request(game.id,source.url,()=>targetFor(game),{force,type:source.type});
+   if(state.requestTag!==tag)return;
+   if(!ready&&!deck.gate.pending){if(deck.slots.get(game.id)?.failed&&state.mode==='replay'&&!videoFor(game))sources.invalidate(game.id);state.retryAt=performance.now()+15000;state.requestTag=null;if(!deck.active)$('splashDetail').textContent='The replay host has not provided a ready picture. Retry or choose another game.';}
+   else if(ready&&state.clockWait){state.clockWait=false;clock.setRunning(state.intentRunning,performance.now());deck.setRunning(state.intentRunning);}
+  }catch(error){if(state.requestTag===tag){state.requestTag=null;state.retryAt=performance.now()+15000;status(error.message);if(!deck.active)$('splashDetail').textContent=error.message;}}
+ })();
 }
 function direct(force=false){
  if(state.auto&&(state.mode==='replay'||Date.now()-state.lastFeed<20000)){
   const pick=chooseGame(state.games,saved.roster,force?null:state.selected,state.changedAt,performance.now());
-  if(pick&&pick.game.id!==state.selected){state.selected=pick.game.id;state.changedAt=performance.now();if(state.picture==='signal')state.switches++;}
+  if(pick&&pick.game.id!==state.selected){state.requestTag=null;state.retryAt=0;state.selected=pick.game.id;state.changedAt=performance.now();if(state.picture==='signal')state.switches++;}
  }
  if(!activeGame())state.selected=state.games.find(g=>g.state==='in')?.id||state.games[0]?.id;
  const pick=rankGames(state.games,saved.roster)[0];
- if(pick?.urgent){state.quietAt=null;if(state.clip&&!state.manualClip)finishHighlight();}else if(state.quietAt===null)state.quietAt=performance.now();
- if(state.auto&&state.started&&(state.mode==='live'||clock.running)&&!document.hidden&&(state.mode==='live'||clock.rate<=4)&&$('autoClips').checked&&!state.clip&&state.quietAt!==null&&performance.now()-state.quietAt>5000&&performance.now()-state.lastClip>120000){
-  const clip=state.clips.find(c=>!state.played.has(c.id)&&(c.youtubeId||playable(c)));
+ if(pick?.urgent){state.quietAt=null;if(state.pendingClip&&!state.pendingClip.manual){state.highlightGeneration++;state.pendingClip=null;}if(state.clip&&!state.manualClip)finishHighlight();}else if(state.quietAt===null)state.quietAt=performance.now();
+ if(state.auto&&state.started&&(state.mode==='live'||clock.running)&&!document.hidden&&(state.mode==='live'||clock.rate<=4)&&$('autoClips').checked&&!state.clip&&!state.pendingClip&&state.quietAt!==null&&performance.now()-state.quietAt>5000&&performance.now()-state.lastClip>45000){
+  const clip=rankNFLClips(state.clips,saved.roster,state.played).find(c=>c.kind==='nfl'&&c.short||playable(c));
   if(clip)playHighlight(clip,false);
  }
  if(!state.clip)showPicture();
@@ -131,9 +168,9 @@ $('autoDirector').onchange=e=>{
 };
 $('gameList').onclick=e=>{
  const b=e.target.closest('[data-game]');if(!b)return;const game=state.games.find(g=>g.id===b.dataset.game);if(!game)return;
- state.auto=false;state.started=true;finishHighlight();state.selected=game.id;
+ state.auto=false;state.started=true;finishHighlight({restore:false});state.selected=game.id;state.requestTag=null;state.retryAt=0;
  if(state.mode==='replay'&&(clock.at<game.start||clock.at>game.end)){
-  const index=state.archive.sessions.findIndex(s=>s.gameIds.includes(game.id));setSession(index,{seek:false});clock.seek(game.start,performance.now());state.games=state.archive.sample(clock.at);
+  const index=state.archive.sessions.findIndex(s=>s.gameIds.includes(game.id));setSession(index,{seek:false});seekAll(game.start);return;
  }
  showPicture();render();
 };
@@ -150,22 +187,22 @@ function renderSignal(){
 }
 function renderNow(){
  const game=displayedGame(),roster=game?involved(game,saved.roster):[];
- $('gameTitle').textContent=state.clip?state.clip.title:game?.name||'Last week. Any time.';
+ $('gameTitle').textContent=state.clip?state.clip.title:state.returningTitle?state.returningTitle:game?.name||'Last week. Any time.';
  $('modeCaption').textContent=state.clip?'OFFICIAL HIGHLIGHT':state.mode==='replay'?'WEEK 7 REPLAY LAB':'LIVE DIRECTOR';
  $('reason').textContent=state.clip?'Returns to the game when priority action resumes.':!game?'Loading the NFL slate…':!state.auto?'Pinned to this game.':roster.length?`${roster.map(p=>p.name).join(', ')} · possession priority`:`Roster quiet · following the closest scoring threat.`;
- $('autoDirector').checked=state.auto;$('playButton').textContent=clock.running?'Pause':'Play test';$('muteButton').textContent=saved.muted?'Unmute':'Mute';$('muteButton').setAttribute('aria-pressed',String(saved.muted));
- $('returnGame').hidden=!state.clip;$('sourceLink').hidden=state.mode!=='replay'||!game;if(game?.page)$('sourceLink').href=game.page;
- $('timeline').value=String(clock.at);$('timelineTime').textContent=state.archive?timeLabel(clock.at)+' ET':'—';
- $('playbackNote').textContent=state.mode==='live'?'Live possession is inferred from ESPN’s feed. Source and feed latency can vary.':state.picture==='external'?'All 14 full-game embeds are imported. Their own controls handle playback; shared seeking and automatic buffered cuts are unavailable for these external players.':state.picture==='native'?'One clock seeks every configured recording. Only the active game and two candidates load. Set sync marks for edited recordings. Current footage stays visible while the next source loads.':'Recorded possessions and field position from every game, Oct 22–26. Seek any time or use Next switch. The field view tests decisions without downloading video.';
+ $('autoDirector').checked=state.auto;$('playButton').textContent=state.intentRunning?'Pause':'Play replay';$('muteButton').textContent=saved.muted?'Unmute':'Mute';$('muteButton').setAttribute('aria-pressed',String(saved.muted));
+ $('returnGame').hidden=!state.clip;$('sourceLink').hidden=state.mode!=='replay'||!game;if(game?.page)$('sourceLink').href=game.page;$('returnGame').hidden=!state.clip;$('prepStatus').textContent=preparationLabel();
+ if(!state.scrubbing){$('timeline').value=String(clock.at);$('timelineTime').textContent=state.archive?timeLabel(clock.at)+' ET':'—';}
+ $('playbackNote').textContent=state.mode==='live'?'Feed timing follows ESPN. The next picture is prepared before each cut.':state.picture==='external'?'This is the original provider player. Choose Replay video to use the shared seek bar and buffered switching.':state.picture==='native'?(game&&configFor(game).marks?.length?'Video follows your saved sync points. The current picture stays until the next frame is ready.':'Videos follow one clock. Alignment is estimated because commercial breaks were edited out. Save sync points in Sources & sync to align observed plays.'):'Recorded play-by-play only. Choose Replay video to test the footage.';
  renderSignal();
 }
 function renderGames(){
  $('gameCount').textContent=state.games.length;$('gamesHeading').textContent=state.mode==='replay'?'All of Week 7':'NFL games';$('feedStatus').textContent=state.mode==='replay'?'Recorded':state.feedError?'Feed unavailable':'ESPN';
- $('gameList').innerHTML=state.games.map(g=>{
+ const markup=state.games.map(g=>{
  const playing=g.id===state.displayed,selected=g.id===state.selected;
  const label=playing?'Watching':selected?'Preparing':g.state==='in'?(involved(g,saved.roster).length?'Your roster':g.redZone?'Red zone':'In progress'):g.state==='post'?'Final':'Later';
- return `<button class="game" data-game="${esc(g.id)}" aria-pressed="${playing}"><span class="game-row"><strong>${esc(g.name)}</strong><small>${g.teams.map(t=>esc(t.score||0)).join('–')}</small></span><span class="game-meta">${esc(g.detail)}</span><span class="game-state">${label}${state.mode==='replay'?' · '+(saved.recordings[g.id]?.url?'Synced source':'Replay imported'):''}</span></button>`;
- }).join('')||'<p class="empty-list">No games available. Replay lab works any day.</p>';
+ return `<button class="game" data-game="${esc(g.id)}" aria-pressed="${playing}"><span class="game-row"><strong>${esc(g.name)}</strong><small>${g.teams.map(t=>esc(t.score||0)).join('–')}</small></span><span class="game-meta">${esc(g.detail)}</span><span class="game-state">${label}${state.mode==='replay'?' · '+(saved.recordings[g.id]?.url?'Custom source':sources.status(g.id)):''}</span></button>`;
+ }).join('')||'<p class="empty-list">No games available. Replay lab works any day.</p>';if(markup!==state.gamesMarkup){state.gamesMarkup=markup;$('gameList').innerHTML=markup;}
 }
 function renderRoster(){
  const players=displayedGame()?involved(displayedGame(),saved.roster):[];$('teamName').textContent=saved.teamName;$('refreshRoster').hidden=!saved.leagueId;
@@ -173,22 +210,29 @@ function renderRoster(){
  $('rosterList').innerHTML=saved.roster.map(p=>`<div class="roster-item ${players.some(x=>x.name===p.name)?'active':''}"><span class="position">${esc(p.position)}</span><div><strong>${esc(p.name)}</strong><small>${esc(p.team)}</small></div></div>`).join('')||'<p class="empty-list">No starters. The director follows the closest scoring threat.</p>';
 }
 function renderClips(){
- $('clipList').innerHTML=[...state.clips.map(c=>`<div class="clip"><button data-clip="${esc(c.id)}">▶ ${esc(c.title)}</button><small>${c.youtubeId?'NFL · YouTube player':'ESPN · direct video'}${state.played.has(c.id)?' · Played':''}</small><a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">Original highlight ↗</a></div>`),...state.stories.map(c=>`<div class="clip"><a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">${esc(c.title)} ↗</a><small>NFL story · opens at NFL.com</small></div>`)].join('')||'<p class="empty-list">No published clips available for this slate.</p>';
+ $('clipList').innerHTML=rankNFLClips(state.clips,saved.roster).map(c=>`<div class="clip"><button data-clip="${esc(c.id)}">▶ ${esc(c.title)}</button><small>${c.kind==='nfl'?'NFL.com · integrated video':'ESPN · direct video'}${state.played.has(c.id)?' · Played':''}</small><a href="${esc(c.url)}" target="_blank" rel="noopener noreferrer">Original highlight ↗</a></div>`).join('')||'<p class="empty-list">No published clips are available yet.</p>';
 }
 function render(){
  $('replayMode').setAttribute('aria-pressed',String(state.mode==='replay'));$('liveMode').setAttribute('aria-pressed',String(state.mode==='live'));$('transport').hidden=state.mode!=='replay';renderNow();renderGames();renderRoster();
 }
 async function playHighlight(clip,manual=true){
- if(state.picture==='external'){stopExternal();}
- finishHighlight({restore:false});state.clip=clip;state.manualClip=manual;state.lastClip=performance.now();state.played.add(clip.id);deck.suspend();
- $('signal').hidden=true;$('externalFrame').hidden=true;$('mediaDeck').hidden=true;
- if(clip.youtubeId)highlight.play(clip,saved.muted);
- else if(playable(clip)){$('mediaDeck').hidden=false;deck.setRunning(true);deck.request('clip:'+clip.id,clip.mediaUrl,0).then(ready=>{if(!ready&&state.clip===clip)finishHighlight();});}
- else{state.clip=null;showPicture();return;}
- renderNow();renderClips();
+ const generation=++state.highlightGeneration;clearTimeout(highlightTimer);state.pendingClip={clip,manual};
+ try{
+  const source=clip.kind==='nfl'?await nflSources.resolve(clip):{url:clip.mediaUrl,type:'video/mp4',duration:clip.duration};
+  if(generation!==state.highlightGeneration)return;
+  if(!manual&&source.duration>45){state.played.add(clip.id);state.pendingClip=null;return;}
+  const prepared=await deck.warm('clip:'+clip.id,source.url,0,{type:source.type,hold:true});
+  if(!prepared||generation!==state.highlightGeneration){if(generation===state.highlightGeneration)state.pendingClip=null;return;}
+  state.clip=clip;state.manualClip=manual;state.pendingClip=null;stopExternal();$('signal').hidden=true;$('mediaDeck').hidden=false;$('playerSplash').hidden=true;
+  deck.setRunning(true);const ready=await deck.request('clip:'+clip.id,source.url,0,{type:source.type});
+  if(generation!==state.highlightGeneration)return;
+  if(!ready){finishHighlight();return;}
+  state.played.add(clip.id);state.lastClip=performance.now();clearTimeout(highlightTimer);highlightTimer=setTimeout(()=>finishHighlight(),Math.min(120,source.duration||120)*1000+1000);renderNow();renderClips();
+ }catch{if(generation===state.highlightGeneration){state.pendingClip=null;state.played.add(clip.id);if(state.clip)finishHighlight();status('This highlight is unavailable. Staying with the game.');}}
 }
 function finishHighlight({restore=true}={}){
- if(!state.clip)return;highlight.stop();state.clip=null;state.manualClip=false;deck.setRunning(state.mode==='live'||clock.running);deck.cancelPending();
+ state.highlightGeneration++;state.pendingClip=null;clearTimeout(highlightTimer);
+ if(!state.clip)return;state.returningTitle='Returning to the game…';state.clip=null;state.manualClip=false;state.requestTag=null;state.retryAt=0;deck.running=state.mode==='live'||state.intentRunning;if(deck.activeSlot){deck.activeSlot.video.pause();deck.activeSlot.video.muted=true;}if(state.picture==='signal'||state.picture==='external')deck.suspend();else deck.gate.cancel();
  if(restore){showPicture();renderNow();}
 }
 $('returnGame').onclick=()=>finishHighlight();$('autoClips').onchange=e=>{if(!e.target.checked&&state.clip&&!state.manualClip)finishHighlight();};
@@ -196,42 +240,54 @@ $('clipList').onclick=e=>{const b=e.target.closest('[data-clip]');if(b){const cl
 async function espn(path,signal){const response=await fetch(BASE+path,{credentials:'omit',referrerPolicy:'no-referrer',cache:'no-store',signal});if(!response.ok)throw new Error('ESPN unavailable');return response.json();}
 async function livePoll(generation){
  if(generation!==state.generation||state.mode!=='live')return;feedController=new AbortController();const timeout=setTimeout(()=>feedController.abort(),8000);
- try{const games=normalizeScoreboard(await espn('scoreboard',feedController.signal));if(generation!==state.generation)return;state.games=games;state.lastFeed=Date.now();state.feedError='';direct();render();}catch{if(generation===state.generation){state.feedError='Unavailable';$('feedStatus').textContent='Feed unavailable · auto held';}}
+ try{const games=normalizeScoreboard(await espn('scoreboard',feedController.signal));if(generation!==state.generation)return;state.games=games;state.lastFeed=Date.now();state.feedError='';direct();warmLive();render();}catch{if(generation===state.generation){state.feedError='Unavailable';$('feedStatus').textContent='Feed unavailable · auto held';}}
  finally{clearTimeout(timeout);if(generation===state.generation)feedTimer=setTimeout(()=>livePoll(generation),!document.hidden&&state.games.some(g=>g.state==='in')?5000:30000);}
+}
+async function warmLive(){
+ if(state.mode!=='live'||!state.started)return;
+ const candidates=rankGames(state.games,saved.roster).filter(x=>x.game.id!==deck.active).slice(0,2);
+ for(const {game} of candidates){const url=videoFor(game);if(url)deck.warm(game.id,url,()=>deck.slots.get(game.id)?.video.currentTime||0,{type:/\.m3u8(?:\?|$)/i.test(url)?'application/vnd.apple.mpegurl':'video/mp4'});}
 }
 async function liveClips(generation){
  if(generation!==state.generation||state.mode!=='live')return;clipController=new AbortController();const timeout=setTimeout(()=>clipController.abort(),15000);
- try{const ranked=rankGames(state.games,saved.roster).slice(0,2);for(const {game} of ranked){const data=await espn('summary?event='+game.id,clipController.signal);if(generation!==state.generation)return;const clips=normalizeHighlights(data,game).filter(c=>c.kind==='clip'&&playable(c));state.clips=[...new Map([...state.clips,...clips].map(c=>[c.id,c])).values()].slice(-20);}if(state.side==='clips')renderClips();}catch{}
- finally{clearTimeout(timeout);if(generation===state.generation)clipTimer=setTimeout(()=>liveClips(generation),60000);}
+ const merge=clips=>{if(generation===state.generation)state.clips=[...new Map([...state.clips,...clips].map(c=>[c.id,c])).values()].slice(-60);};
+ try{
+  const jobs=rankGames(state.games,saved.roster).slice(0,2).map(async({game})=>{const data=await espn('summary?event='+game.id,clipController.signal);merge(normalizeHighlights(data,game).filter(c=>c.kind==='clip'&&playable(c)));});
+  if(!state.lastNFL||Date.now()-state.lastNFL>300000)jobs.push((async()=>{const response=await fetch('/api/nfl-highlights',{signal:clipController.signal,cache:'no-store'});if(!response.ok)return;const data=await response.json();if(generation!==state.generation)return;merge(data.clips||[]);state.lastNFL=Date.now();})());
+  await Promise.allSettled(jobs);if(generation===state.generation&&state.side==='clips')renderClips();
+ }finally{clearTimeout(timeout);if(generation===state.generation)clipTimer=setTimeout(()=>liveClips(generation),60000);}
 }
 function stopNetwork(){clearTimeout(feedTimer);clearTimeout(clipTimer);feedController?.abort();clipController?.abort();}
 async function setMode(mode){
- if(mode===state.mode)return;stopNetwork();finishHighlight({restore:false});deck.destroy();stopExternal();clock.setRunning(false,performance.now());state.generation++;state.mode=mode;state.auto=true;state.selected=null;state.displayed=null;state.lastFeed=0;state.played.clear();state.quietAt=null;state.started=mode==='live';deck.setRunning(mode==='live');
+ if(mode===state.mode)return;stopNetwork();finishHighlight({restore:false});deck.destroy();stopExternal();clock.setRunning(false,performance.now());state.generation++;state.mode=mode;state.auto=true;state.selected=null;state.displayed=null;state.lastFeed=0;state.played.clear();state.quietAt=null;state.started=mode==='live';state.intentRunning=mode==='live';state.clockWait=false;state.requestTag=null;state.retryAt=0;deck.setRunning(mode==='live');
  if(mode==='replay'){state.games=state.archive.sample(clock.at);state.clips=state.archiveClips||[];direct();}
- else{state.games=[];state.clips=[];await livePoll(state.generation);liveClips(state.generation);}
+ else{state.games=[];state.clips=[];state.lastNFL=0;await livePoll(state.generation);liveClips(state.generation);}
  render();renderClips();if(saved.leagueId)importLeague({refresh:true,announce:false});
 }
 $('replayMode').onclick=()=>setMode('replay');$('liveMode').onclick=()=>setMode('live');
 function openSettings(){
- if(state.mode==='replay')setRunning(false);
+ if(state.mode==='replay')setRunning(false);deck.setControls(true);
  const games=state.mode==='replay'?state.archive?.games||[]:state.games;
- $('sourceHeading').textContent=state.mode==='replay'?'Recordings · Week 7':'Live stream URLs';
- $('streamInputs').innerHTML=games.map(g=>`<div class="stream-row"><label for="stream-${esc(g.id)}">${esc(g.name)}${g.page?`<a href="${esc(g.page)}" target="_blank" rel="noopener noreferrer">Replay ↗</a>`:''}</label><input id="stream-${esc(g.id)}" data-game="${esc(g.id)}" type="url" value="${esc(videoFor(g)||'')}" placeholder="https://…/recording.mp4"><small>${state.mode==='replay'?`${timeLabel(g.start)} ET kickoff · ${configFor(g).marks?.length||0} sync marks`:'Direct MP4, WebM or native HLS'}</small></div>`).join('');
+ $('sourceHeading').textContent=state.mode==='replay'?'Imported replays · optional overrides':'Live stream URLs';
+ $('streamInputs').innerHTML=games.map(g=>`<div class="stream-row"><label for="stream-${esc(g.id)}">${esc(g.name)}${g.page?`<a href="${esc(g.page)}" target="_blank" rel="noopener noreferrer">Replay ↗</a>`:''}</label><input id="stream-${esc(g.id)}" data-game="${esc(g.id)}" type="url" value="${esc(videoFor(g)||'')}" placeholder="Imported automatically · optional source override"><small>${state.mode==='replay'?`${timeLabel(g.start)} ET kickoff · ${configFor(g).marks?.length||0} sync points · ${sources.status(g.id)}`:'Direct MP4, WebM or native HLS'}</small></div>`).join('');
  $('manualRoster').value=saved.roster.map(p=>`${p.name}, ${p.team}, ${p.position}`).join('\n');$('settingsError').textContent='';
- const game=activeGame();$('syncDetails').hidden=state.mode!=='replay'||!game;
- if(game){$('syncDescription').textContent=`${game.name} · test clock ${timeLabel(clock.at)} ET`;$('syncTime').value=formatDuration(deck.currentTime??targetFor(game));$('syncMarks').textContent=`${configFor(game).marks?.length||0} sync marks saved for this recording.`;}
- $('settingsDialog').showModal();
+ const game=activeGame();$('syncDetails').hidden=state.mode!=='replay'||!game||!!state.clip;
+ if(game){$('syncQuarter').value=String(game.period||1);$('syncGameClock').value=game.clock||'15:00';$('syncDescription').textContent=`${game.name} · test clock ${timeLabel(clock.at)} ET`;$('syncTime').value=formatDuration(deck.currentTime??targetFor(game));$('syncMarks').textContent=`${configFor(game).marks?.length||0} sync marks saved for this recording.`;}
+ $('settingsDialog').showModal();syncPreview();
 }
+function syncPreview(){const show=$('settingsDialog').open&&$('syncDetails').open&&!$('syncDetails').hidden&&deck.active===state.selected;$('syncPreview').hidden=!show;if(show){$('syncPreview').append($('mediaDeck'));deck.setControls(true);}else $('player').append($('mediaDeck'));}
+$('syncDetails').ontoggle=syncPreview;
+$('settingsDialog').onclose=()=>{$('player').append($('mediaDeck'));$('syncPreview').hidden=true;deck.setControls(false);};
 function formatDuration(seconds){const value=Math.max(0,Math.floor(seconds));return `${Math.floor(value/60)}:${String(value%60).padStart(2,'0')}`;}
 function parseDuration(text){const parts=text.trim().split(':').map(Number);if(!parts.length||parts.length>3||parts.some(p=>!Number.isFinite(p)||p<0))throw new Error('Use m:ss or h:mm:ss.');return parts.reduce((a,n)=>a*60+n,0);}
-$('settingsButton').onclick=openSettings;$('roomSettings').onclick=openSettings;$('closeSettings').onclick=()=>$('settingsDialog').close();
-$('addSync').onclick=()=>{try{const game=activeGame();saved.recordings[game.id]=addSyncMark(configFor(game),clock.at-game.start,parseDuration($('syncTime').value));persist();$('syncMarks').textContent=`${configFor(game).marks.length} sync marks saved.`;deck.cancelPending();}catch(error){$('settingsError').textContent=error.message;}};
-$('clearSync').onclick=()=>{const game=activeGame();saved.recordings[game.id]={...configFor(game),marks:[]};persist();$('syncMarks').textContent='Sync marks reset. Recording zero is aligned to kickoff.';};
+$('settingsButton').onclick=openSettings;$('roomSettings').onclick=openSettings;$('closeSettings').onclick=()=>{$('settingsDialog').close();deck.setControls(false);};
+$('addSync').onclick=()=>{try{const game=activeGame(),play=observedPlay(game,Number($('syncQuarter').value),$('syncGameClock').value,clock.at-game.start);saved.recordings[game.id]=addSyncMark(saved.recordings[game.id]||{},play[0],deck.active===game.id&&deck.currentTime!==null?deck.currentTime:parseDuration($('syncTime').value));persist();clock.seek(game.start+play[0],performance.now());state.games=state.archive.sample(clock.at);$('syncMarks').textContent=`${configFor(game).marks.length} observed sync points saved.`;deck.cancelPending();state.requestTag=null;renderNow();}catch(error){$('settingsError').textContent=error.message;}};
+$('clearSync').onclick=()=>{const game=activeGame();saved.recordings[game.id]={...configFor(game),marks:[]};persist();$('syncMarks').textContent='Sync points reset. Using estimated alignment for the edited replay.';};
 $('settingsForm').onsubmit=e=>{e.preventDefault();try{
  const roster=parseRoster($('manualRoster').value),recordings={...saved.recordings},streams={...saved.streams};
  for(const input of $('streamInputs').querySelectorAll('input')){const game=(state.archive?.games||[]).find(g=>g.id===input.dataset.game)||state.games.find(g=>g.id===input.dataset.game);const url=safeVideo(input.value.trim());if(state.mode==='replay')recordings[game.id]={...recordings[game.id],url};else streams[gameKey(game)]=url;}
  const changed=JSON.stringify(roster)!==JSON.stringify(saved.roster.map(({name,team,position})=>({name,team,position})));
- saved={...saved,recordings,streams,roster,...(changed?{teamName:'My roster',teamId:''}:{})};persist();$('settingsDialog').close();deck.destroy();deck.setMuted(saved.muted);deck.setRunning(state.mode==='live'||clock.running);if(changed)franchiseOptions();direct(true);render();notice('Sources and sync settings saved.');
+ saved={...saved,recordings,streams,roster,...(changed?{teamName:'My roster',teamId:''}:{})};persist();$('settingsDialog').close();state.requestTag=null;deck.destroy();deck.setControls(false);deck.setMuted(saved.muted);deck.setRunning(state.mode==='live'||clock.running);if(changed)franchiseOptions();direct(true);render();notice('Sources and sync settings saved.');
  }catch(error){$('settingsError').textContent=error.message;}};
 $('fullscreenButton').onclick=async()=>{
  const room=$('watchRoom');try{if(document.fullscreenElement){await document.exitFullscreen();}else if(room.classList.contains('theater')){room.classList.remove('theater');document.body.style.overflow='';}else if(room.requestFullscreen){const fallback=setTimeout(()=>{if(!document.fullscreenElement){room.classList.add('theater');document.body.style.overflow='hidden';fullscreenLabel();}},700);try{await room.requestFullscreen();}finally{clearTimeout(fallback);}}else{room.classList.add('theater');document.body.style.overflow='hidden';}}catch{room.classList.add('theater');document.body.style.overflow='hidden';}fullscreenLabel();
@@ -239,21 +295,41 @@ $('fullscreenButton').onclick=async()=>{
 function fullscreenLabel(){const active=!!document.fullscreenElement||$('watchRoom').classList.contains('theater');$('fullscreenButton').textContent=active?'Exit full screen ↙':'Full screen ↗';$('fullscreenButton').setAttribute('aria-label',active?'Exit fullscreen':'Enter fullscreen');}
 document.addEventListener('fullscreenchange',()=>{if(document.fullscreenElement){$('watchRoom').classList.remove('theater');document.body.style.overflow='';}fullscreenLabel();});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&$('watchRoom').classList.contains('theater')){$('watchRoom').classList.remove('theater');document.body.style.overflow='';fullscreenLabel();}});
+function preparationLabel(){
+ const ready=deck.snapshot().players.filter(p=>p.ready&&!p.active),imported=sources.records.size;
+ return `${state.mode==='replay'?imported+'/14 replays imported · ':''}${ready.length} ready ahead${ready.length?' · '+Math.floor(Math.min(...ready.map(p=>p.bufferSeconds)))+'s buffered':''}`;
+}
+async function warmAhead(){
+ if(state.mode!=='replay'||state.picture!=='native'||!state.started||!state.archive)return;
+ const candidates=state.clip&&activeGame()?[{game:activeGame()},...forecastGames(state.archive,clock.at,saved.roster,state.selected)]:forecastGames(state.archive,clock.at,saved.roster,state.selected);
+ for(const ranked of rankGames(state.games,saved.roster))if(ranked.game.id!==state.selected&&!candidates.some(x=>x.game.id===ranked.game.id))candidates.push(ranked);
+ const nextClip=rankNFLClips(state.clips,saved.roster,state.played).find(c=>c.kind==='nfl'&&c.short);if(nextClip&&!nflSources.get(nextClip.id))nflSources.resolve(nextClip).catch(()=>{});
+ const version=state.seekVersion,generation=state.generation;
+ for(const {game} of candidates.slice(0,state.pendingClip?1:2)){
+  try{const source=await resolveVideo(game);if(version!==state.seekVersion||generation!==state.generation)return;deck.warm(game.id,source.url,()=>mediaTime(game,clock.at,configFor(game)),{type:source.type});}catch{}
+ }
+}
+$('retryVideo').onclick=()=>{state.requestTag=null;state.retryAt=0;deck.retry();if(activeGame()&&state.mode==='replay')sources.invalidate(activeGame().id);showPicture();};
+$('splashPlay').onclick=()=>setRunning(true);
+$('qualitySelect').onchange=e=>{state.quality=e.target.value;state.seekVersion++;state.requestTag=null;state.forceSeek=true;state.retryAt=0;deck.retry();showPicture();};
+$('downloadDiagnostics').onclick=()=>{
+ const report={week:7,at:clock.at,franchise:saved.teamName,imported:sources.records.size,alignment:state.archive.games.map(g=>({id:g.id,points:configFor(g).marks||[],estimated:!configFor(g).marks?.length})),...deck.snapshot()};
+ const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='fantasy-director-playback.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+};
 function tick(now){
- clock.tick(now);
+ if($('settingsDialog').open&&$('syncDetails').open&&deck.currentTime!==null)$('syncTime').value=formatDuration(deck.currentTime);
+ const clockGame=state.archive?.games.find(g=>g.id===deck.active);
+ if(state.mode==='replay'&&state.picture==='native'&&clock.running&&!state.clip&&clockGame&&!deck.gate.pending){const game=clockGame;clock.seek(Math.min(clock.end,wallTime(game,deck.currentTime,configFor(game))),now);}
+ else clock.tick(now);
  if(!document.hidden&&state.archive&&state.mode==='replay'&&now-state.lastDecision>=250){
-  state.lastDecision=now;
-  state.games=state.archive.sample(clock.at);direct();
-  if(state.picture==='native'&&!state.clip&&state.started){const game=displayedGame();if(game&&deck.active===game.id)deck.sync(mediaTime(game,clock.at,configFor(game)));}
-  if(now-state.lastWarm>2000&&state.picture==='native'&&state.started&&clock.running){
-   state.lastWarm=now;const future=state.archive.sample(clock.at+5);for(const {game} of rankGames(future,saved.roster).slice(0,2)){const url=videoFor(game);if(url)deck.warm(game.id,url,()=>mediaTime(game,clock.at,configFor(game)));}
-  }
+  state.lastDecision=now;state.games=state.archive.sample(clock.at);direct();
+  if(now-state.lastWarm>2000&&state.picture==='native'&&state.started){state.lastWarm=now;warmAhead();}
   if(now-state.lastRender>500){state.lastRender=now;renderNow();renderGames();if(state.side==='roster')renderRoster();}
  }
  requestAnimationFrame(tick);
 }
-document.addEventListener('visibilitychange',()=>{if(document.hidden){clock.setRunning(false,performance.now());deck.setRunning(false);highlight.pause();}else{clock.last=performance.now();renderNow();}});
-window.addEventListener('pagehide',()=>{stopNetwork();deck.destroy();highlight.stop();stopExternal();});
+document.addEventListener('visibilitychange',()=>{if(document.hidden){setRunning(false);}else{clock.last=performance.now();renderNow();}});
+window.addEventListener('pagehide',()=>{clearTimeout(state.noticeTimer);clearTimeout(highlightTimer);stopNetwork();sources.cancel();deck.destroy();stopExternal();});
 window.addEventListener('pageshow',e=>{if(e.persisted){clock.last=performance.now();if(state.mode==='live'){livePoll(state.generation);liveClips(state.generation);}render();}});
 async function init(){
  franchiseOptions();renderRoster();
@@ -263,8 +339,8 @@ async function init(){
   state.archive=new ReplayArchive(await archiveResponse.json());state.games=state.archive.sample(state.archive.sessions[0].start);
   $('weekLabel').textContent=state.archive.data.title;$('sessionSelect').innerHTML=state.archive.sessions.map((s,i)=>`<option value="${i}">${esc(s.label)}</option>`).join('');
   const defaultSession=Math.max(0,state.archive.sessions.findIndex(s=>s.label.startsWith('Sunday')));setSession(defaultSession);const opening=state.archive.events.find(at=>at>=session().start&&at<=session().end&&state.archive.sample(at).filter(g=>g.state==='in').length>=3);if(opening)seekAll(opening);
-  if(highlightResponse.ok){const library=await highlightResponse.json();state.stories=library.stories;state.clips=library.embeds;state.archiveClips=library.embeds;}
-  direct();render();renderClips();restoreConnection();requestAnimationFrame(tick);
+  if(highlightResponse.ok){const library=await highlightResponse.json();state.stories=[];state.clips=library.clips||[];state.archiveClips=state.clips;}
+  direct();render();renderClips();restoreConnection();sources.importAll(state.archive.games,[state.selected,...forecastGames(state.archive,clock.at,saved.roster,state.selected).map(x=>x.game.id)]);requestAnimationFrame(tick);
  }catch(error){status(error.message);$('signalPlay').textContent='The replay archive could not load.';}
 }
 init();

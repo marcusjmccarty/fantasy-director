@@ -1,0 +1,42 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {parseReplayMetadata,replaySourceAPI,decodeAttribute,publicReplayURL} from '../server/media.js';
+import {SourceCatalog,chooseSource} from '../web/sources.js';
+import {parseNFLPublicConfig,nflSourceAPI,nflMediaURL} from '../server/nfl.js';
+import {rankNFLClips} from '../web/nfl-sources.js';
+const page=(metadata)=>'<div data-options="'+JSON.stringify({flashvars:{metadata:JSON.stringify(metadata)}}).replace(/&/g,'&amp;').replace(/"/g,'&quot;')+'"></div>';
+const metadata={movie:{duration:'7800'},videos:[{name:'sd',url:'https://a.vkuser.net/?expires=9999999999999&sig=unchanged%2Fab%3D&type=4'},{name:'mobile',url:'https://a.vkuser.net/?expires=9999999999999&sig=mobile&type=4'}]};
+test('public metadata sources preserve encoded signatures and decode HTML exactly once',()=>{
+ const parsed=parseReplayMetadata(page(metadata),1000);assert.equal(parsed.sources[0].url,metadata.videos[0].url);assert.equal(parsed.duration,7800);assert.equal(parsed.expiresAt,301000);
+ assert.equal(decodeAttribute('&amp;quot;'),'&quot;');assert.equal(publicReplayURL('https://attacker.example/video.mp4'),null);assert.equal(publicReplayURL('https://u:p@a.vkuser.net/x'),null);
+});
+test('replay resolver is confined to known catalog pages and never retrieves media bytes',async()=>{
+ const games=[{id:'test-source-1',embed:'https://ok.ru/videoembed/1234',page:'https://nfl-video.com/game',name:'A at B'}];let calls=0;
+ const fetcher=async(url,options)=>{calls++;assert.equal(url,games[0].embed);assert.equal(options.redirect,'manual');assert.equal(options.credentials,'omit');assert.equal(options.headers.Cookie,undefined);return new Response(page(metadata));};
+ const response=await replaySourceAPI(new Request('https://site.test/api/replay-source?id=test-source-1'),games,fetcher);assert.equal(response.status,200);assert.equal((await response.json()).sources.length,2);
+ assert.equal((await replaySourceAPI(new Request('https://site.test/api/replay-source?id=https://attacker.example/'),games,fetcher)).status,404);assert.equal(calls,1);
+});
+test('source import is bounded, coalesces requests, and refreshes ephemeral URLs',async()=>{
+ let now=1000,calls=0,inFlight=0,max=0;const catalog=new SourceCatalog({now:()=>now,fetcher:async url=>{calls++;max=Math.max(max,++inFlight);await new Promise(r=>setImmediate(r));inFlight--;return new Response(JSON.stringify({id:new URL('https://x'+url).searchParams.get('id'),sources:[{quality:'sd',url:'https://a.vkuser.net/x'}],expiresAt:now+100}),{headers:{'Content-Type':'application/json'}});}});
+ const games=Array.from({length:14},(_,i)=>({id:String(i)}));await catalog.importAll(games,['8']);assert.equal(catalog.records.size,14);assert.ok(max<=3);
+ await Promise.all([catalog.resolve(games[0]),catalog.resolve(games[0])]);assert.equal(calls,14);now+=101;await Promise.all([catalog.resolve(games[0]),catalog.resolve(games[0])]);assert.equal(calls,15);assert.equal(chooseSource(catalog.get('0')).quality,'sd');
+});
+test('NFL anonymous resolver returns only an ephemeral HLS source, without the identity token',async()=>{
+ const config='desktop:{production:{nflClientId:"public-id",nflClientKey:"public-key",nflClientSecret:"public-secret"';assert.deepEqual(parseNFLPublicConfig(config),{clientKey:'public-key',clientSecret:'public-secret'});
+ const clip={id:'test-nfl-id',mcpID:'12345'},calls=[];
+ const fetcher=async(url,options={})=>{calls.push(url);if(url.startsWith('https://p.nfltags.com/'))return new Response(config);if(url.includes('/identity/')){assert.equal(JSON.parse(options.body).clientKey,'public-key');return Response.json({accessToken:'anonymous-test-token'});}assert.equal(options.headers.Authorization,'Bearer anonymous-test-token');assert.equal(JSON.parse(options.body).asset.mcpID,'12345');return Response.json({accessUrl:'https://dcs-vod.mp.lura.live/vod/p/master.m3u8?token=original',metadata:{event:{duration:13}}});};
+ const response=await nflSourceAPI(new Request('https://site.test/api/nfl-source?id=test-nfl-id'),[clip],fetcher),body=await response.text();assert.equal(response.status,200);assert.equal(JSON.parse(body).duration,13);assert.equal(body.includes('anonymous-test-token'),false);assert.equal(calls.length,3);assert.equal(nflMediaURL('https://evil.example/master.m3u8'),null);
+});
+test('integrated highlight ranking prefers the selected franchise and short clips',()=>{
+ const clips=[{id:'other',title:'Other highlight',teams:['SEA'],athletes:[],short:true},{id:'roster',title:'Touchdown',teams:['IND'],athletes:['Jonathan Taylor'],short:true}];
+ assert.equal(rankNFLClips(clips,[{name:'Jonathan Taylor',team:'IND'}])[0].id,'roster');assert.equal(rankNFLClips(clips,[{name:'Jonathan Taylor',team:'IND'}],new Set(['roster']))[0].id,'other');
+});
+
+import {parseNFLCatalog,nflHighlightsAPI} from '../server/nfl.js';
+test('current NFL catalog uses two bounded public page requests and maps roster tags',async()=>{
+ const playlist=[{id:'b8840cb7-ea15-4799-a507-1baac8f334a9',mcpID:'2751404',slug:'sample-touchdown',title:'Sample touchdown',tags:[{teamId:'public-team',title:'Dallas Cowboys'},{personId:'public-player',title:'Javonte Williams'}]}];
+ const page='<script type="application/json" id="video-config-example">'+JSON.stringify({playlist})+'</script>';
+ assert.equal(parseNFLCatalog(page,{'Dallas Cowboys':'DAL'})[0].teams[0],'DAL');let calls=0;
+ const fetcher=async url=>{calls++;return new Response(url.includes('/channel/')?'<a href="/videos/channel/skip">Skip</a><a href="/videos/sample-touchdown">Clip</a>':page);};
+ const response=await nflHighlightsAPI(new Request('https://site.test/api/nfl-highlights'),{'Dallas Cowboys':'DAL'},fetcher);const data=await response.json();assert.equal(response.status,200);assert.equal(data.clips.length,1);assert.equal(data.clips[0].mcpID,'2751404');assert.equal(calls,2);
+});

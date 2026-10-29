@@ -1,13 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readyToCut,bufferedAhead,CutGate} from '../web/media-deck.js';
-const video=(changes={})=>({currentTime:30,duration:120,seeking:false,readyState:3,buffered:{length:2,start:i=>[0,28][i],end:i=>[8,37][i]},...changes});
+const video=(changes={})=>({currentTime:30,duration:120,seeking:false,readyState:3,buffered:{length:2,start:i=>[0,28][i],end:i=>[8,42][i]},...changes});
 test('a loaded page/metadata or unbuffered seek cannot pass the cut gate',()=>{
  assert.equal(readyToCut(video({readyState:1}),30),false);
  assert.equal(readyToCut(video({seeking:true}),30),false);
  assert.equal(readyToCut(video(),18),false);
  assert.equal(readyToCut(video(),30),true);
- assert.equal(bufferedAhead(video(),30),7);
+ assert.equal(bufferedAhead(video(),30),12);
 });
 test('short clips can finish without requiring buffer past their duration',()=>{
  assert.equal(readyToCut(video({currentTime:118,duration:120,buffered:{length:1,start:()=>115,end:()=>120}}),118),true);
@@ -41,7 +41,7 @@ test('a buffered candidate stays hidden until its decoded-frame callback',async 
 });
 test('warm preparation cannot pause or replace a newer committed request',async t=>{
  const deck=harness(t),b=deck.ensure('b','b.mp4');b.video.autoFrame=false;
- deck.warm('b','b.mp4',10);await flush();deck.setRunning(true);const cut=deck.request('b','b.mp4',30);await flush();b.video.decoded();
+ deck.warm('b','b.mp4',10);await flush();deck.setRunning(true);const cut=deck.request('b','b.mp4',30);await flush();b.video.decoded();await flush();b.video.decoded();
  assert.equal(await cut,true);await flush();assert.equal(deck.active,'b');assert.equal(b.video.currentTime,30);assert.equal(b.video.paused,false);deck.destroy();
 });
 test('a cancelled delayed frame cannot cut over the latest requested source',async t=>{
@@ -56,4 +56,15 @@ test('a failed source is held on cooldown instead of retried every director tick
 test('the warm pool stays bounded to the current player and two candidates',async t=>{
  const deck=harness(t);await deck.request('a','a.mp4',0);
  for(const key of ['b','c','d','e'])deck.ensure(key,key+'.mp4');assert.equal(deck.slots.size,3);assert.ok(deck.slots.has('a'));deck.destroy();
+});
+
+test('seeking the visible game retains the previous video element until the replacement is ready',async t=>{
+ const deck=harness(t);await deck.request('a','a.mp4',10);const before=deck.activeSlot;
+ const cut=deck.request('a','a.mp4',60,{force:true});const next=deck.slots.get('a');next.video.autoFrame=false;
+ await flush();assert.notEqual(before,next);assert.equal(before.video.currentTime,10);assert.equal(before.video.classes.has('active'),true);assert.equal(next.video.classes.has('active'),false);
+ next.video.decoded();assert.equal(await cut,true);assert.equal(deck.activeSlot,next);assert.equal(next.video.currentTime,60);assert.equal(before.video.classes.has('active'),false);deck.destroy();
+});
+test('a warm candidate uses its existing media element at the cut',async t=>{
+ const deck=harness(t);await deck.request('a','a.mp4',0);await deck.warm('b','b.mp4',20);const warmed=deck.slots.get('b').video;
+ await deck.request('b','b.mp4',20);assert.equal(deck.activeSlot.video,warmed);assert.equal(deck.snapshot().cuts.at(-1).decoded,true);assert.ok(deck.snapshot().cuts.at(-1).bufferSeconds>=8);deck.destroy();
 });
