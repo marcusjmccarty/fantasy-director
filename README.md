@@ -14,7 +14,7 @@ Plain browser JavaScript, HTML and CSS. The dependency-free Cloudflare Worker se
 
 POST `/api/league` with a numeric leagueId. Public leagues work without credentials. A configured owner's private league uses the server's saved ESPN connection only if both the authenticated user and league ID match. The current team is identified using ESPN ownership; other leagues present a team picker. Only starters are imported; bench and IR are excluded.
 
-Runtime secrets: `ESPN_OWNER_ID`, `ESPN_LEAGUE_ID`, `ESPN_SWID`, `ESPN_S2`. No credentials belong in code, files, logs or browser storage. Saved cookies are never sent for another user or another league. The API returns roster fields, never league member details or cookies. Browser storage holds only the selected roster, league/team identifiers and user stream URLs.
+Runtime secrets: `ESPN_OWNER_ID`, `ESPN_LEAGUE_ID`, `ESPN_SWID`, `ESPN_S2`. The owner ID must be the Site-scoped ID from Sites dispatch, never an account UUID. GET `/api/session` exposes only the current visitor ID and the authorized saved league ID, with no-store caching. On page load, the browser restores the saved team or imports the owner’s configured league automatically. No credentials belong in code, files, logs or browser storage. Saved cookies are never sent for another user or another league. The API returns roster fields, never league member details or cookies. Browser storage holds only the selected roster, league/team identifiers and user stream URLs.
 
 ## Replay testing
 
@@ -30,4 +30,4 @@ ESPN scoreboard poll: 5 seconds during live games, 30 seconds otherwise. Summary
 
 ## Verification
 
-14 automated checks cover director routing, replay scenarios, parsing, private-cookie isolation, request validation and upstream failures. A live server-side import using the supplied connection returned 10 teams and identified We Are Christian Kirk with 9 starters. Embedded replay pages resolved successfully; full browser video playback could not be verified in this environment because browser automation was unavailable and the native preview did not expose content. Provider playback still needs an interactive check.
+19 automated checks cover director routing, replay scenarios, parsing, private-cookie isolation, Site-scoped identity, request validation, redirects and upstream failures. The October 29 connection repair replaced Workers-incompatible redirect:error with manual redirect rejection and corrected the production owner identity. A signed-in Safari page load triggered GET /api/session (200) and POST /api/league (200, 183 ms) in production. Service access without visitor identity correctly returns 403 for the saved private connection. Earlier direct ESPN validation returned 10 teams and identified We Are Christian Kirk with 9 starters. Provider video playback remains separately dependent on its embedded player and autoplay behavior.
