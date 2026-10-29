@@ -1,0 +1,23 @@
+const TEAM={1:'ATL',2:'BUF',3:'CHI',4:'CIN',5:'CLE',6:'DAL',7:'DEN',8:'DET',9:'GB',10:'TEN',11:'IND',12:'KC',13:'LV',14:'LAR',15:'MIA',16:'MIN',17:'NE',18:'NO',19:'NYG',20:'NYJ',21:'PHI',22:'ARI',23:'PIT',24:'LAC',25:'SF',26:'SEA',27:'TB',28:'WAS',29:'CAR',30:'JAC',33:'BAL',34:'HOU'};
+const POS={1:'QB',2:'RB',3:'WR',4:'TE',5:'K',16:'D/ST'};
+const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+export function normalizedLeague(raw,ownerSwid=''){
+ if(!Array.isArray(raw.teams)||!raw.teams.length)throw new Error('No teams returned');
+ return {name:raw.settings?.name||'ESPN league',week:raw.scoringPeriodId||0,ownedTeamId:ownerSwid?String(raw.teams.find(t=>t.owners?.some(x=>String(x).toUpperCase()===ownerSwid.toUpperCase()))?.id||''):'',teams:raw.teams.map(t=>({id:String(t.id),name:t.name||[t.location,t.nickname].filter(Boolean).join(' ')||t.abbrev||`Team ${t.id}`,players:(t.roster?.entries||[]).filter(e=>![20,21].includes(Number(e.lineupSlotId))).map(e=>{const p=e.playerPoolEntry?.player||{};return{id:String(p.id||''),name:p.fullName||'',team:TEAM[p.proTeamId]||'',position:POS[p.defaultPositionId]||''};}).filter(p=>p.name&&p.team&&p.position)}))};
+}
+export async function leagueAPI(request,env={},fetcher=fetch){
+ if(request.method!=='POST')return json({error:'Use POST.'},405);
+ const origin=request.headers.get('Origin');if(origin&&origin!==new URL(request.url).origin)return json({error:'Invalid request origin.'},403);
+ let data;try{if(Number(request.headers.get('Content-Length')||0)>1024)return json({error:'Request too large.'},413);const text=await request.text();if(text.length>1024)return json({error:'Request too large.'},413);data=JSON.parse(text);}catch{return json({error:'Enter a valid league ID.'},400);}
+ const id=String(data.leagueId||'');const now=new Date();const season=now.getUTCFullYear()-(now.getUTCMonth()<5?1:0);const year=Number(data.season||season);
+ if(!/^\d{1,12}$/.test(id)||!Number.isInteger(year)||year<2018||year>season+1)return json({error:'Enter a numeric ESPN league ID.'},400);
+ const owner=request.headers.get('oai-authenticated-user-id')===env.ESPN_OWNER_ID;
+ const useSaved=!!(owner&&id===env.ESPN_LEAGUE_ID&&env.ESPN_SWID&&env.ESPN_S2);
+ const headers={Accept:'application/json'};if(useSaved)headers.Cookie=`SWID=${env.ESPN_SWID}; espn_s2=${env.ESPN_S2}`;
+ try{const response=await fetcher(`https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/${year}/segments/0/leagues/${id}?view=mRoster&view=mTeam&view=mSettings`,{headers,redirect:'error',signal:AbortSignal.timeout(12000)});
+ if([401,403,404].includes(response.status))return json({error:useSaved?'ESPN could not open this league with the saved access. The login may have expired, or the league/season is unavailable.':'This league is private or unavailable. League ID alone works for public leagues; private leagues need an ESPN connection.'},response.status===404?404:401);
+ if(!response.ok)return json({error:'ESPN is temporarily unavailable. Please try again.'},502);
+ const raw=await response.json();if(!raw.teams?.length)return json({error:useSaved?'ESPN did not return your roster. Your saved login may need refreshing.':'ESPN did not return this league. Check the ID and league visibility.'},422);
+ return json({...normalizedLeague(raw,useSaved?env.ESPN_SWID:''),leagueId:id,season:year});
+ }catch{return json({error:'Could not reach ESPN. Try again shortly.'},502);}
+}

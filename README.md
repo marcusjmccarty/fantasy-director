@@ -1,26 +1,33 @@
-# Fantasy Director — Web Foundation
+# Fantasy Director
 
-A dependency-free static site: native JavaScript, CSS, HTML and one original 6-second sample WebM. No build step, remote fonts, framework, analytics, or embedded credentials.
+Minimal viewing room: one player and a tabbed Games / Roster / Highlights panel. Body type is 16px; setup lives in a small connection bar and a settings dialog. Nothing starts switching until the user starts the replay test.
 
-## Run
+## Run and check
 
-`python3 -m http.server 4173 --directory dist`
+- `npm test`
+- `npm run build`
+- `npm run dev`, then http://127.0.0.1:4173
 
-Visit http://localhost:4173. `npm test` runs director policy tests.
+Plain browser JavaScript, HTML and CSS. The dependency-free Cloudflare Worker serves those files and one roster-import endpoint. Build output is in `dist/server/index.js`.
 
-## Included
+## ESPN connection
 
-- A 72-second Test Sunday: three roster possessions, a RedZone fallback, a replay window, then priority action. Pause, step, restart, or pin a game.
-- Public ESPN scoreboard polling, every 5 seconds during active games, 30 seconds otherwise; background throttling and stale-data hold.
-- Rotating ESPN summaries for published highlights, with direct MP4 validation and expiration/device restrictions. Playable clips queue during quiet periods; urgent live events preempt automatic replays. ESPN links remain available.
-- A single live video element plus a replay element. Direct HTTPS MP4/WebM and browser-native HLS. Browser autoplay rejection exposes a Play control. Replay errors and timeout return to the selected game.
-- Setup for manual starters, per-matchup stream URLs and an optional custom replay. Stored on this browser only; sample roster clearly labeled. Test Sunday always uses its own sample roster.
-- Responsive keyboard-accessible interface, native fullscreen, default muted playback, reduced-motion support.
+POST `/api/league` with a numeric leagueId. Public leagues work without credentials. A configured owner's private league uses the server's saved ESPN connection only if both the authenticated user and league ID match. The current team is identified using ESPN ownership; other leagues present a team picker. Only starters are imported; bench and IR are excluded.
 
-## Boundaries
+Runtime secrets: `ESPN_OWNER_ID`, `ESPN_LEAGUE_ID`, `ESPN_SWID`, `ESPN_S2`. No credentials belong in code, files, logs or browser storage. Saved cookies are never sent for another user or another league. The API returns roster fields, never league member details or cookies. Browser storage holds only the selected roster, league/team identifiers and user stream URLs.
 
-No subscription television feeds are provided. Ordinary watch-page URLs are not embeddable video files. Provider login, DRM integration and ESPN private roster import are not implemented in this foundation. Browser-native HLS depends on browser capabilities. Games are switched by possession/team inference; actual per-snap participation is unknown. Public ESPN data has no latency guarantee. A fresh source can buffer on a cut; no claim of seamless broadcast switching is made.
+## Replay testing
+
+Two source pages provided by NFL-Video resolve through their listed players to OK video embeds:
+- Cowboys at Eagles, October 26, 2026: https://nfl-video.com/dallas-cowboys-vs-philadelphia-eagles-full-game-replay-nfl-week-07-october-26-2026
+- Colts at Vikings, October 25, 2026: https://nfl-video.com/indianapolis-colts-vs-minnesota-vikings-full-game-replay-nfl-week-07-october-25-2026
+
+Original pages remain linked. The app uses their embedded players, without copying, extracting or proxying the game video. Only one game player is loaded. Playback, availability and autoplay are controlled by the provider; a click inside the player may be required. A cut loads a different replay and does not preserve its position. Five scripted events demonstrate roster priority, closest scoring threat, a quiet highlight window and a priority return. Those events are explicitly not synchronized to the actual footage. Published ESPN highlights for the same week populate the replay queue when available.
+
+## Live viewing
+
+ESPN scoreboard poll: 5 seconds during live games, 30 seconds otherwise. Summary polling adds published highlights. Live playback accepts compatible direct HTTPS MP4/WebM or browser-native HLS. Subscription watch-page URLs and DRM integrations are not supported. Player presence is inferred from possession/position, not snap tracking; data latency still depends on ESPN.
 
 ## Verification
 
-Seven automated tests cover scenario routing, urgent switching, fallback, score transitions, position roles, input validation and scoreboard parsing. Browser QA checked simulation routing, replay playback/return and real public scoreboard fetching. Live subscription footage remains unverified until a compatible source is configured.
+14 automated checks cover director routing, replay scenarios, parsing, private-cookie isolation, request validation and upstream failures. A live server-side import using the supplied connection returned 10 teams and identified We Are Christian Kirk with 9 starters. Embedded replay pages resolved successfully; full browser video playback could not be verified in this environment because browser automation was unavailable and the native preview did not expose content. Provider playback still needs an interactive check.
