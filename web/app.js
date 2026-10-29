@@ -14,14 +14,14 @@ try{
  const old=JSON.parse(localStorage.getItem('fd-simple-v2')||'null');
  if(old&&Array.isArray(old.roster)){saved={...saved,...old};saved.roster=parseRoster(old.roster.map(p=>`${p.name}, ${p.team}, ${p.position}`).join('\n'));saved.recordings=old.recordings||{};}
 }catch{}
-const state={mode:'replay',picture:'native',archive:null,session:0,games:[],selected:null,displayed:null,auto:true,started:false,league:saved.leagueCache,loadingLeague:false,side:'games',generation:0,lastFeed:0,feedError:'',clip:null,manualClip:false,clips:[],stories:[],played:new Set(),quietAt:null,lastClip:-Infinity,changedAt:0,switches:0,externalId:null,noticeTimer:null,lastRender:0,lastWarm:0,lastDecision:0,forceSeek:false,intentRunning:false,clockWait:false,seekVersion:0,requestTag:null,retryAt:0,pendingClip:null,highlightGeneration:0,returningTitle:null,quality:'auto',scrubbing:false,gamesMarkup:''};
+const state={mode:'replay',picture:'native',archive:null,session:0,games:[],selected:null,displayed:null,auto:true,started:false,league:saved.leagueCache,loadingLeague:false,side:'games',generation:0,lastFeed:0,feedError:'',clip:null,manualClip:false,clips:[],stories:[],played:new Set(),quietAt:null,lastClip:-Infinity,changedAt:0,switches:0,externalId:null,noticeTimer:null,lastRender:0,lastWarm:0,lastDecision:0,forceSeek:false,intentRunning:false,clockWait:false,seekVersion:0,requestTag:null,retryAt:0,pendingClip:null,highlightGeneration:0,returningTitle:null,quality:'auto',scrubbing:false,gamesMarkup:'',playbackFailure:null,loadAttempt:0,loadWatchdog:null};
 const clock=new ReplayClock();
 let feedTimer,clipTimer,feedController,clipController,seekTimer,highlightTimer;
 const sources=new SourceCatalog({onUpdate:()=>{if(state.archive)renderGames();}});
 const nflSources=new NFLSourceCatalog();
 function persist(){try{localStorage.setItem('fd-simple-v2',JSON.stringify(saved));}catch{notice('Browser storage is unavailable. Your changes work for this visit.');}}
 function notice(message){$('roomNotice').textContent=message;$('roomNotice').hidden=false;clearTimeout(state.noticeTimer);state.noticeTimer=setTimeout(()=>$('roomNotice').hidden=true,6000);}
-function status(message){$('playbackStatus').textContent=message;}
+function status(message){if(state.playbackFailure)message=state.playbackFailure.message;$('playbackStatus').textContent=message;if(state.started&&!deck.active&&!state.playbackFailure)$('splashDetail').textContent=message;}
 const deck=new MediaDeck($('mediaDeck'),{onCommit:key=>{
  $('playerSplash').hidden=true;
  if(key.startsWith('clip:'))return;
@@ -78,7 +78,7 @@ function setSession(index,{seek=true}={}){
  state.session=index;const s=session();if(!s)return;$('sessionSelect').value=String(index);clock.end=s.end;$('timeline').min=s.start;$('timeline').max=s.end;$('timelineEnd').textContent=timeLabel(s.end)+' ET';if(seek)seekAll(s.start);
 }
 function setRunning(running){
- state.started=state.started||running;state.intentRunning=running;deck.retry();state.retryAt=0;
+ if(running){state.playbackFailure=null;state.requestTag=null;}state.started=state.started||running;state.intentRunning=running;deck.retry();state.retryAt=0;
  if(!running){clock.setRunning(false,performance.now());deck.setRunning(false);state.clockWait=false;}
  else if(state.picture==='signal'||state.mode==='live'){clock.setRunning(state.mode==='replay',performance.now());deck.setRunning(true);}
  else if(deck.active===state.selected&&deck.ready(state.selected,targetFor(activeGame()))){clock.setRunning(true,performance.now());deck.setRunning(true);}
@@ -86,6 +86,7 @@ function setRunning(running){
  direct();render();
 }
 function seekAll(at){
+ state.playbackFailure=null;
  const day=session();if(!day)return;finishHighlight({restore:false});state.seekVersion++;state.requestTag=null;state.retryAt=0;deck.cancelPending();deck.retry();
  state.returningTitle=null;state.forceSeek=true;clock.setRunning(false,performance.now());deck.setRunning(false);state.clockWait=state.intentRunning;
  clock.seek(Math.max(day.start,Math.min(day.end,at)),performance.now());state.played.clear();state.quietAt=null;state.lastClip=-Infinity;state.games=state.archive.sample(clock.at);
@@ -114,6 +115,7 @@ async function resolveVideo(game){
 }
 function stopExternal(){if($('externalFrame').hasAttribute('src'))$('externalFrame').removeAttribute('src');$('externalFrame').hidden=true;state.externalId=null;}
 function changePicture(picture){
+ state.playbackFailure=null;
  finishHighlight({restore:false});deck.destroy();stopExternal();state.picture=picture;state.displayed=null;state.requestTag=null;state.retryAt=0;
  if(picture==='native'&&clock.rate>4){clock.rate=1;$('playbackRate').value='1';}deck.setRate(clock.rate);deck.setMuted(saved.muted);
  if(picture==='external'){state.auto=false;$('autoDirector').checked=false;setRunning(false);}
@@ -121,6 +123,13 @@ function changePicture(picture){
  showPicture();render();
 }
 $('pictureMode').onchange=e=>changePicture(e.target.value);
+function failPlayback(game,tag,attempt,message,code='SOURCE'){
+ if(state.requestTag!==tag||state.loadAttempt!==attempt)return;
+ clearTimeout(state.loadWatchdog);state.loadAttempt++;deck.cancelPending();
+ state.playbackFailure={id:game.id,code,message:message+' ['+code+']'};state.clockWait=false;
+ if(!deck.active){state.intentRunning=false;clock.setRunning(false,performance.now());deck.setRunning(false);}
+ status(state.playbackFailure.message);showPicture();renderNow();renderGames();
+}
 function showPicture(){
  const game=activeGame();if(!game||state.clip)return;
  const picture=state.mode==='live'?'native':state.picture;
@@ -130,27 +139,29 @@ function showPicture(){
   if(state.externalId!==game.id){$('externalFrame').src=game.embed;state.externalId=game.id;state.displayed=game.id;}
   status('Original provider player · use Replay video for shared controls');return;
  }
- $('splashPlay').hidden=state.started;
+ if(state.playbackFailure?.id===game.id){if(!deck.active){$('splashTitle').textContent='Couldn’t start this replay';$('splashDetail').textContent=state.playbackFailure.message;$('splashPlay').hidden=false;$('splashPlay').textContent='Retry replay';}return;}
+ $('splashPlay').textContent='Play replay';$('splashPlay').hidden=state.started;
  if(!state.started){$('splashTitle').textContent='Your roster. One feed.';$('splashDetail').textContent='All 14 games are importing. Press Play to prepare the first replay.';return;}
  const tag=[state.generation,state.seekVersion,game.id,state.quality].join(':');
  if(state.requestTag===tag||performance.now()<state.retryAt)return;
  if(!state.forceSeek&&state.mode==='replay'&&!clock.running&&!state.clockWait&&deck.active===game.id)return;
- const force=state.forceSeek;state.forceSeek=false;state.requestTag=tag;
+ const force=state.forceSeek;state.forceSeek=false;state.requestTag=tag;const attempt=++state.loadAttempt;clearTimeout(state.loadWatchdog);state.loadWatchdog=setTimeout(()=>failPlayback(game,tag,attempt,'The recording did not start within 35 seconds. Retry or choose another game.','START_TIMEOUT'),35000);
  if(!deck.active){$('splashTitle').textContent='Preparing your replay';$('splashDetail').textContent='Loading a buffered picture before the test clock starts.';}
  (async()=>{
   try{
-   const source=await resolveVideo(game);if(state.requestTag!==tag||state.clip||state.selected!==game.id)return;
+   const source=await resolveVideo(game);if(state.requestTag!==tag||state.loadAttempt!==attempt||state.clip||state.selected!==game.id)return;
    const ready=await deck.request(game.id,source.url,()=>targetFor(game),{force,type:source.type});
-   if(state.requestTag!==tag)return;
-   if(!ready&&!deck.gate.pending){if(deck.slots.get(game.id)?.failed&&state.mode==='replay'&&!videoFor(game))sources.invalidate(game.id);state.retryAt=performance.now()+15000;state.requestTag=null;if(!deck.active)$('splashDetail').textContent='The replay host has not provided a ready picture. Retry or choose another game.';}
+   if(state.requestTag!==tag||state.loadAttempt!==attempt)return;
+   if(!ready&&!deck.gate.pending){const failed=deck.slots.get(game.id);if(failed?.failed&&state.mode==='replay'&&!videoFor(game))sources.invalidate(game.id);const code=failed?.failure?.code||'NOT_READY';failPlayback(game,tag,attempt,code==='AUTOPLAY'?'Your browser blocked playback. Press Retry replay.':'The recording did not produce a ready picture. Retry or choose another game.',code);}
    else if(ready&&state.clockWait){state.clockWait=false;clock.setRunning(state.intentRunning,performance.now());deck.setRunning(state.intentRunning);}
-  }catch(error){if(state.requestTag===tag){state.requestTag=null;state.retryAt=performance.now()+15000;status(error.message);if(!deck.active)$('splashDetail').textContent=error.message;}}
+  }catch(error){failPlayback(game,tag,attempt,error.message,error.code||'SOURCE');}
+  finally{if(state.loadAttempt===attempt)clearTimeout(state.loadWatchdog);}
  })();
 }
 function direct(force=false){
  if(state.auto&&(state.mode==='replay'||Date.now()-state.lastFeed<20000)){
   const pick=chooseGame(state.games,saved.roster,force?null:state.selected,state.changedAt,performance.now());
-  if(pick&&pick.game.id!==state.selected){state.requestTag=null;state.retryAt=0;state.selected=pick.game.id;state.changedAt=performance.now();if(state.picture==='signal')state.switches++;}
+  if(pick&&pick.game.id!==state.selected){state.playbackFailure=null;state.requestTag=null;state.retryAt=0;state.selected=pick.game.id;state.changedAt=performance.now();if(state.picture==='signal')state.switches++;}
  }
  if(!activeGame())state.selected=state.games.find(g=>g.state==='in')?.id||state.games[0]?.id;
  const pick=rankGames(state.games,saved.roster)[0];
@@ -168,7 +179,7 @@ $('autoDirector').onchange=e=>{
 };
 $('gameList').onclick=e=>{
  const b=e.target.closest('[data-game]');if(!b)return;const game=state.games.find(g=>g.id===b.dataset.game);if(!game)return;
- state.auto=false;state.started=true;finishHighlight({restore:false});state.selected=game.id;state.requestTag=null;state.retryAt=0;
+ state.playbackFailure=null;state.auto=false;state.started=true;finishHighlight({restore:false});state.selected=game.id;state.requestTag=null;state.retryAt=0;
  if(state.mode==='replay'&&(clock.at<game.start||clock.at>game.end)){
   const index=state.archive.sessions.findIndex(s=>s.gameIds.includes(game.id));setSession(index,{seek:false});seekAll(game.start);return;
  }
@@ -200,7 +211,7 @@ function renderGames(){
  $('gameCount').textContent=state.games.length;$('gamesHeading').textContent=state.mode==='replay'?'All of Week 7':'NFL games';$('feedStatus').textContent=state.mode==='replay'?'Recorded':state.feedError?'Feed unavailable':'ESPN';
  const markup=state.games.map(g=>{
  const playing=g.id===state.displayed,selected=g.id===state.selected;
- const label=playing?'Watching':selected?'Preparing':g.state==='in'?(involved(g,saved.roster).length?'Your roster':g.redZone?'Red zone':'In progress'):g.state==='post'?'Final':'Later';
+ const label=playing?'Watching':selected?(state.playbackFailure?.id===g.id?'Playback unavailable':state.started?'Preparing':'Selected'):g.state==='in'?(involved(g,saved.roster).length?'Your roster':g.redZone?'Red zone':'In progress'):g.state==='post'?'Final':'Later';
  return `<button class="game" data-game="${esc(g.id)}" aria-pressed="${playing}"><span class="game-row"><strong>${esc(g.name)}</strong><small>${g.teams.map(t=>esc(t.score||0)).join('–')}</small></span><span class="game-meta">${esc(g.detail)}</span><span class="game-state">${label}${state.mode==='replay'?' · '+(saved.recordings[g.id]?.url?'Custom source':sources.status(g.id)):''}</span></button>`;
  }).join('')||'<p class="empty-list">No games available. Replay lab works any day.</p>';if(markup!==state.gamesMarkup){state.gamesMarkup=markup;$('gameList').innerHTML=markup;}
 }
@@ -259,7 +270,7 @@ async function liveClips(generation){
 }
 function stopNetwork(){clearTimeout(feedTimer);clearTimeout(clipTimer);feedController?.abort();clipController?.abort();}
 async function setMode(mode){
- if(mode===state.mode)return;stopNetwork();finishHighlight({restore:false});deck.destroy();stopExternal();clock.setRunning(false,performance.now());state.generation++;state.mode=mode;state.auto=true;state.selected=null;state.displayed=null;state.lastFeed=0;state.played.clear();state.quietAt=null;state.started=mode==='live';state.intentRunning=mode==='live';state.clockWait=false;state.requestTag=null;state.retryAt=0;deck.setRunning(mode==='live');
+ if(mode===state.mode)return;state.playbackFailure=null;stopNetwork();finishHighlight({restore:false});deck.destroy();stopExternal();clock.setRunning(false,performance.now());state.generation++;state.mode=mode;state.auto=true;state.selected=null;state.displayed=null;state.lastFeed=0;state.played.clear();state.quietAt=null;state.started=mode==='live';state.intentRunning=mode==='live';state.clockWait=false;state.requestTag=null;state.retryAt=0;deck.setRate(mode==='live'?1:clock.rate);deck.setRunning(mode==='live');
  if(mode==='replay'){state.games=state.archive.sample(clock.at);state.clips=state.archiveClips||[];direct();}
  else{state.games=[];state.clips=[];state.lastNFL=0;await livePoll(state.generation);liveClips(state.generation);}
  render();renderClips();if(saved.leagueId)importLeague({refresh:true,announce:false});
@@ -300,7 +311,7 @@ function preparationLabel(){
  return `${state.mode==='replay'?imported+'/14 replays imported · ':''}${ready.length} ready ahead${ready.length?' · '+Math.floor(Math.min(...ready.map(p=>p.bufferSeconds)))+'s buffered':''}`;
 }
 async function warmAhead(){
- if(state.mode!=='replay'||state.picture!=='native'||!state.started||!state.archive)return;
+ if(state.mode!=='replay'||state.picture!=='native'||!state.started||!state.archive||!deck.active||state.clockWait||state.playbackFailure)return;
  const candidates=state.clip&&activeGame()?[{game:activeGame()},...forecastGames(state.archive,clock.at,saved.roster,state.selected)]:forecastGames(state.archive,clock.at,saved.roster,state.selected);
  for(const ranked of rankGames(state.games,saved.roster))if(ranked.game.id!==state.selected&&!candidates.some(x=>x.game.id===ranked.game.id))candidates.push(ranked);
  const nextClip=rankNFLClips(state.clips,saved.roster,state.played).find(c=>c.kind==='nfl'&&c.short);if(nextClip&&!nflSources.get(nextClip.id))nflSources.resolve(nextClip).catch(()=>{});
@@ -309,11 +320,11 @@ async function warmAhead(){
   try{const source=await resolveVideo(game);if(version!==state.seekVersion||generation!==state.generation)return;deck.warm(game.id,source.url,()=>mediaTime(game,clock.at,configFor(game)),{type:source.type});}catch{}
  }
 }
-$('retryVideo').onclick=()=>{state.requestTag=null;state.retryAt=0;deck.retry();if(activeGame()&&state.mode==='replay')sources.invalidate(activeGame().id);showPicture();};
+$('retryVideo').onclick=()=>{state.playbackFailure=null;state.requestTag=null;state.retryAt=0;deck.cancelPending();deck.retry();if(activeGame()&&state.mode==='replay')sources.invalidate(activeGame().id);if(!deck.active)setRunning(true);else showPicture();};
 $('splashPlay').onclick=()=>setRunning(true);
-$('qualitySelect').onchange=e=>{state.quality=e.target.value;state.seekVersion++;state.requestTag=null;state.forceSeek=true;state.retryAt=0;deck.retry();showPicture();};
+$('qualitySelect').onchange=e=>{state.playbackFailure=null;state.quality=e.target.value;state.seekVersion++;state.requestTag=null;state.forceSeek=true;state.retryAt=0;deck.retry();showPicture();};
 $('downloadDiagnostics').onclick=()=>{
- const report={week:7,at:clock.at,franchise:saved.teamName,imported:sources.records.size,alignment:state.archive.games.map(g=>({id:g.id,points:configFor(g).marks||[],estimated:!configFor(g).marks?.length})),...deck.snapshot()};
+ const report={version:'startup-recovery-1',failure:state.playbackFailure,week:7,at:clock.at,franchise:saved.teamName,imported:sources.records.size,alignment:state.archive.games.map(g=>({id:g.id,points:configFor(g).marks||[],estimated:!configFor(g).marks?.length})),...deck.snapshot()};
  const url=URL.createObjectURL(new Blob([JSON.stringify(report,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='fantasy-director-playback.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 };
 function tick(now){
@@ -329,7 +340,7 @@ function tick(now){
  requestAnimationFrame(tick);
 }
 document.addEventListener('visibilitychange',()=>{if(document.hidden){setRunning(false);}else{clock.last=performance.now();renderNow();}});
-window.addEventListener('pagehide',()=>{clearTimeout(state.noticeTimer);clearTimeout(highlightTimer);stopNetwork();sources.cancel();deck.destroy();stopExternal();});
+window.addEventListener('pagehide',()=>{clearTimeout(state.noticeTimer);clearTimeout(highlightTimer);clearTimeout(state.loadWatchdog);stopNetwork();sources.cancel();deck.destroy();stopExternal();});
 window.addEventListener('pageshow',e=>{if(e.persisted){clock.last=performance.now();if(state.mode==='live'){livePoll(state.generation);liveClips(state.generation);}render();}});
 async function init(){
  franchiseOptions();renderRoster();

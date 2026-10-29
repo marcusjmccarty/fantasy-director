@@ -6,11 +6,11 @@ class Element {
  setAttribute(k,v){this.attributes[k]=v;} hasAttribute(k){return k in this.attributes;} removeAttribute(k){delete this.attributes[k];}
  focus(){} append(child){if(child.parent)child.parent.children=child.parent.children.filter(c=>c!==child);this.children.push(child);child.parent=this;} remove(){if(this.parent)this.parent.children=this.parent.children.filter(c=>c!==this);} replaceChildren(){this.children=[];} querySelectorAll(){return [];} showModal(){this.open=true;} close(){this.open=false;this.onclose?.();}
 }
-let holdFrames=false;
+let holdFrames=false,denyPlayback=false;
 class Video extends Element {
  constructor(){super();this.currentTime=0;this.duration=12000;this.readyState=3;this.seeking=false;this.paused=true;this.events={};this.frames=[];this.hold=holdFrames;this.buffered={length:1,start:()=>0,end:()=>this.duration};}
  set src(value){this.source=value;this.duration=value.includes('highlight')?13:12000;} get src(){return this.source;}
- load(){} canPlayType(){return 'probably';} addEventListener(name,fn){this.events[name]=fn;} pause(){this.paused=true;} async play(){this.paused=false;}
+ load(){} canPlayType(){return 'probably';} addEventListener(name,fn){this.events[name]=fn;} pause(){this.paused=true;} async play(){if(denyPlayback)throw new DOMException('Blocked','NotAllowedError');this.paused=false;}
  requestVideoFrameCallback(fn){if(this.hold)this.frames.push(fn);else queueMicrotask(()=>fn(0,{mediaTime:this.currentTime}));}
  decoded(){for(const fn of this.frames.splice(0))fn(0,{mediaTime:this.currentTime});}
 }
@@ -22,7 +22,7 @@ const storage=new Map(),listeners={};
 globalThis.document={getElementById:el,createElement:tag=>tag==='video'?new Video():new Element(),addEventListener(){},hidden:false,body:new Element()};
 globalThis.window={addEventListener:(name,fn)=>{listeners[name]=fn;}};
 globalThis.localStorage={getItem:key=>storage.get(key)||null,setItem:(key,value)=>storage.set(key,value)};
-globalThis.requestAnimationFrame=()=>{};
+let animation;globalThis.requestAnimationFrame=callback=>{animation=callback;};
 globalThis.fetch=async url=>{
  let data=url==='/week7.json'?archive:url==='/nfl-highlights.json'?catalog:url==='/api/session'?{savedLeagueId:league.leagueId}:league;
  if(url.startsWith('/api/replay-source')){const id=new URL('https://x'+url).searchParams.get('id'),game=archive.games.find(g=>g.id===id);data={id,duration:(game.end-game.start)*.7,expiresAt:Date.now()+300000,sources:[{quality:'sd',url:'https://a.vkuser.net/replay-'+id+'.mp4',type:'video/mp4'}]};}
@@ -58,4 +58,12 @@ test('franchise, shared footage seek, and prepared highlight return work through
  assert.equal(JSON.parse(storage.get('fd-simple-v2')).recordings[game.id].marks[0].media,73.25);
  el('closeSettings').onclick();assert.equal(el('mediaDeck').parent,el('player'));assert.equal(gameVideo.controls,false);
  listeners.pagehide();
+});
+
+test('startup failure replaces the preparing screen and a user retry can recover',async()=>{
+ elements.clear();denyPlayback=true;await import('../web/app.js?startup-failure');await settled();
+ el('splashPlay').onclick();await settled();
+ assert.equal(el('splashTitle').textContent,'Couldn’t start this replay');assert.match(el('splashDetail').textContent,/AUTOPLAY/);assert.equal(el('splashPlay').hidden,false);assert.equal(visible(),undefined);
+ const count=el('mediaDeck').children.length;animation(performance.now()+1000);await settled();assert.equal(el('mediaDeck').children.length,count);assert.equal(count,1);
+ denyPlayback=false;el('retryVideo').onclick();await settled();assert.ok(visible());assert.equal(el('playerSplash').hidden,true);assert.equal(el('playButton').textContent,'Pause');listeners.pagehide();
 });
