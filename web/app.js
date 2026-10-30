@@ -5,9 +5,9 @@ import {Coverage} from './coverage.js';
 import {PlayerPool} from './players.js';
 import {officialClip,replayWindow} from './replays.js';
 import {NFLSourceCatalog} from './nfl-sources.js';
-import {liveGames,liveScores} from './live.js';
+import {liveGames,liveScores,LiveFeed} from './live.js';
 import {alias,describeScore,rosterCredit} from './scoring.js';
-import {SAMPLE,parseRoster,formatRoster,safeVideo,gameKey} from './roster.js';
+import {SAMPLE,parseRoster,formatRoster,safeVideo,streamType,gameKey} from './roster.js';
 import {normalizeHighlights,playable} from './highlights.js';
 
 const $=id=>document.getElementById(id);
@@ -16,7 +16,7 @@ const STORE='fantasy-stream-v3',ESPN='https://site.api.espn.com/apis/site/v2/spo
 const LOAD_LIMIT=20000,COOLDOWN=60000;
 
 // ---------- saved preferences ----------
-let saved={roster:SAMPLE,teamName:'Sample lineup',teamId:'',leagueId:'',league:null,streams:{},marks:{},muted:false,includeDefense:true,highlights:true,dataOnly:false,delay:30};
+let saved={roster:SAMPLE,teamName:'Sample lineup',teamId:'',leagueId:'',league:null,streams:{},marks:{},muted:false,includeDefense:true,highlights:true,dataOnly:false,delay:30,espn:{swid:'',s2:''}};
 try{
  const stored=JSON.parse(localStorage.getItem(STORE)||'null');
  if(stored)saved={...saved,...stored};
@@ -35,7 +35,7 @@ function persist(){try{localStorage.setItem(STORE,JSON.stringify(saved));}catch{
 const S={scope:'game',center:null,range:null,mode:'replay',archive:null,clips:[],liveClips:[],day:0,games:[],at:0,lastAt:null,
  program:{kind:'idle'},pending:null,pinned:null,highlight:null,decision:null,playing:false,started:false,
  cooldown:new Map(),ads:new Set(),sources:new Map(),syncs:new Map(),seekHold:false,cuts:0,
- lastStep:0,lastWarm:0,lastRender:0,live:{games:[],scores:new Map(),fetched:0,error:'',generation:0},toastTimer:null,unmuteHint:false};
+ lastStep:0,lastWarm:0,lastRender:0,live:{games:[],feed:new LiveFeed(),scores:new Map(),fetched:0,error:'',generation:0},toastTimer:null,unmuteHint:false};
 const clock=new Clock(),director=new Director(),coverage=new Coverage(),nfl=new NFLSourceCatalog();
 const pool=new PlayerPool($('layers'),{capacity:3,
  onAd:(key,on)=>{if(on)S.ads.add(key);else S.ads.delete(key);render();},
@@ -57,7 +57,7 @@ function syncFor(game){
 function sourceFor(id){
  if(S.mode==='replay'){const g=archiveGame(id);return g?.embed?{url:g.embed,type:'provider/ok',duration:g.recordingDuration}:null;}
  const g=gameState(id),url=g&&saved.streams[gameKey(g)];
- return url?{url,type:/\.m3u8(?:\?|$)/i.test(url)?'application/vnd.apple.mpegurl':'video/mp4'}:null;
+ return url?{url,type:streamType(url)}:null;
 }
 const picture=id=>S.mode==='replay'?(saved.dataOnly?'data':'video'):(sourceFor(id)?'video':'data');
 function target(id){if(S.mode!=='replay')return null;const g=archiveGame(id);return g?syncFor(g).media(S.at-g.start):0;}
@@ -73,7 +73,8 @@ function excluded(){
  if(S.mode==='live')for(const g of S.games)if(!sourceFor(g.id)&&S.games.some(x=>sourceFor(x.id)))out.add(g.id);
  return out;
 }
-function recentScore(game,at){return (game.scores||[]).some(s=>at-s.at>=0&&at-s.at<RULES.scoreHold&&rosterCredit(s,game,roster()).length);}
+const LIVE_SLACK=12;   // seconds the scoreboard may trail the snap on top of the stream delay
+function recentScore(game,at){const t=S.mode==='live'?at-saved.delay:at;return (game.scores||[]).some(s=>t-s.at>=0&&t-s.at<RULES.scoreHold&&rosterCredit(s,game,roster()).length);}
 
 // ---------- the loop ----------
 function frame(now){
@@ -110,10 +111,10 @@ function advanceClock(now){
 }
 function step(now){
  if(S.mode==='replay'){if(!S.archive)return;S.games=S.archive.sample(S.at,day().gameIds);}
- else S.games=S.live.games;
+ else S.games=S.live.feed.view(S.at,saved.delay).map(g=>({...g,scores:S.live.scores.get(g.id)||[]}));   // the feed as the stream shows it
  if(S.lastAt!==null&&visibleConfirmed())coverage.watch(S.program.id,S.lastAt,S.at,3+clock.rate*1.5);
  S.lastAt=S.at;
- for(const item of coverage.update(S.games,roster(),S.at,S.mode==='live'?saved.delay:0))announce(item);
+ for(const item of coverage.update(S.games,roster(),S.at,S.mode==='live'?saved.delay:0,S.mode==='live'?LIVE_SLACK:0))announce(item);
  if(!saved.highlights)coverage.queue.length=0;
  for(const item of coverage.queue)prepareReplay(item);
  if(!S.started)return;
@@ -323,7 +324,9 @@ function renderScreen(){
  else if(p.kind==='standby'&&!h){const next=nextKickoff();overlay={eyebrow:'STANDBY',title:'None of your starters are playing right now.',text:next?`Next up: ${next.name} at ${timeLabel(next.start)} ET.`:'Your starters are done for this slate.',button:S.mode==='replay'&&next?'Skip to kickoff':null,action:'kickoff'};}
  else if(p.kind==='game'&&S.ads.has(p.id))overlay={eyebrow:'COMMERCIAL',title:'Skipping the break.',text:'Your game resumes as soon as the provider’s ad ends. Another of your games takes over if one is on.',spinner:true,dim:true};
  const o=$('overlay');o.hidden=!overlay;o.classList.toggle('dim',!!overlay?.dim);
- $('unmute').hidden=!!overlay||saved.muted||!pool.current?.audioLocked||(S.audioAsked||0)>=2;
+ const wantsSound=!overlay&&!saved.muted&&!!pool.current?.audioLocked&&S.playing;
+ $('unmute').hidden=!wantsSound||pool.current?.kind==='provider';
+ $('soundHint').hidden=!wantsSound||pool.current?.kind!=='provider';
  if(overlay){$('ovEyebrow').textContent=overlay.eyebrow;$('ovTitle').innerHTML=overlay.title;$('ovText').textContent=overlay.text;$('ovButton').hidden=!overlay.button;$('ovButton').textContent=overlay.button||'';$('ovButton').dataset.action=overlay.action||'start';o.classList.toggle('busy',!!overlay.spinner);$('ovHint').textContent=S.unmuteHint?'If the video waits, press play inside it.':'';}
  // switching chip
  const pend=S.pending&&gameState(S.pending.id);$('switching').hidden=!(pend&&pool.visible&&performance.now()-S.pending.since>700);
@@ -465,6 +468,20 @@ $('speed').onchange=e=>{clock.tick(performance.now());clock.rate=Number(e.target
 $('muteButton').onclick=()=>{saved.muted=!saved.muted;S.audioAsked=0;pool.setMuted(saved.muted);persist();render();};
 $('unmute').onclick=()=>{S.audioAsked=(S.audioAsked||0)+1;pool.retryAudio();render();};
 pool.host.addEventListener('pointerdown',()=>{S.audioAsked=0;},true);
+// A click inside the provider's frame moves focus into it; that click is the one gesture its player accepts for sound.
+// The click also pauses its player: ask it to play, and send the unmute only once footage is moving again
+// (an unmute during that transition wedges it, and the watchdog would mute it back).
+window.addEventListener('blur',()=>{setTimeout(()=>{
+ const el=document.activeElement,p=pool.current;
+ if(!p||p.kind!=='provider'||el!==p.element)return;
+ S.audioAsked=0;p.audioLocked=false;p.clickedAt=performance.now();
+ const unmute=()=>{if(!saved.muted&&pool.current===p&&!p.audioLocked)p.muted=false;render();};
+ if(!S.playing){unmute();return;}
+ p.resume?.();
+ const started=performance.now(),mark=p.lastTime;
+ const wait=setInterval(()=>{if(p.lastTime>mark+.2||performance.now()-started>4000||pool.current!==p){clearInterval(wait);unmute();}},150);
+ render();
+},0);});
 $('resumeAuto').onclick=()=>{S.pinned=null;director.reset();render();};
 $('games').onclick=e=>{
  const b=e.target.closest('[data-game]');if(!b)return;const id=b.dataset.game,g=gameState(id);
@@ -473,7 +490,25 @@ $('games').onclick=e=>{
  if(g?.state!=='in')return;
  S.pinned=id;if(S.highlight){S.highlight.done=true;closeHighlight();}if(!S.started)setPlaying(true);render();
 };
-$('fullButton').onclick=async()=>{const stage=document.querySelector('.stage');try{if(document.fullscreenElement)await document.exitFullscreen();else await stage.requestFullscreen();}catch{stage.classList.toggle('theater');}};
+// Fullscreen where the browser allows it (Safari needs the webkit names); otherwise a fixed theater layout.
+// A request that is refused, unsupported, or simply never answered (embedded browsers) falls back to the theater within a moment.
+$('fullButton').onclick=async()=>{
+ const stage=document.querySelector('.stage'),d=document;
+ const active=d.fullscreenElement||d.webkitFullscreenElement;
+ try{
+  if(active){await (d.exitFullscreen?d.exitFullscreen():d.webkitExitFullscreen());return;}
+  if(stage.classList.contains('theater')){stage.classList.remove('theater');render();return;}
+  const req=stage.requestFullscreen||stage.webkitRequestFullscreen;
+  if(!req)throw new Error('no fullscreen');
+  const slow=new Promise((_,reject)=>setTimeout(()=>reject(new Error('no answer')),800));
+  await Promise.race([Promise.resolve(req.call(stage,{navigationUI:'hide'})),slow]);
+  if(!(d.fullscreenElement||d.webkitFullscreenElement))throw new Error('not granted');
+ }catch{stage.classList.add('theater');render();}
+};
+for(const ev of ['fullscreenchange','webkitfullscreenchange'])document.addEventListener(ev,()=>{
+ const full=!!(document.fullscreenElement||document.webkitFullscreenElement);
+ document.body.classList.toggle('is-full',full);if(full)document.querySelector('.stage').classList.remove('theater');render();
+});
 document.addEventListener('keydown',e=>{
  if(e.target.closest('input,textarea,select,dialog'))return;
  if(e.key===' '||e.key==='k'){e.preventDefault();if(S.started||S.archive)setPlaying(!S.playing);}
@@ -492,7 +527,7 @@ document.addEventListener('visibilitychange',()=>{
 async function setMode(mode){
  if(mode===S.mode)return;
  setPlaying(false);pool.destroy();S.mode=mode;S.program={kind:'idle'};S.pending=null;S.pinned=null;S.highlight=null;S.started=false;
- S.live.generation++;coverage.reset();director.reset();S.sources.clear();S.cooldown.clear();S.ads.clear();S.lastAt=null;
+ S.live.generation++;S.live.feed=new LiveFeed();coverage.reset();director.reset();S.sources.clear();S.cooldown.clear();S.ads.clear();S.lastAt=null;
  $('replayMode').setAttribute('aria-pressed',String(mode==='replay'));$('liveMode').setAttribute('aria-pressed',String(mode==='live'));
  if(mode==='live'){S.at=Date.now()/1000;pollLive(S.live.generation);pollLiveClips(S.live.generation);}
  else{S.games=S.archive.sample(S.at,day().gameIds);coverage.skipTo(S.games,S.at);}
@@ -506,7 +541,7 @@ async function pollLive(generation){
  try{
   const games=liveGames(await espn('scoreboard',AbortSignal.timeout(8000)));
   for(const g of games)g.scores=S.live.scores.get(g.id)||[];
-  S.live.games=games;S.live.error='';S.live.fetched=Date.now();
+  S.live.games=games;S.live.error='';S.live.fetched=Date.now();S.live.feed.push(games,Date.now()/1000);
   const teams=rosterTeams(roster());
   await Promise.allSettled(games.filter(g=>g.state!=='pre'&&g.teams.some(t=>teams.has(t.abbr))&&Date.now()-(S.live.summaryAt?.[g.id]||0)>25000).slice(0,4).map(async g=>{
    const summary=await espn('summary?event='+g.id,AbortSignal.timeout(10000));
@@ -541,11 +576,13 @@ $('franchise').onchange=e=>{const team=saved.league?.teams.find(t=>t.id===e.targ
 async function importLeague({refresh=false,quiet=false}={}){
  const leagueId=(refresh?saved.leagueId:$('leagueId').value).trim();
  if(!/^\d{1,12}$/.test(leagueId)){$('leagueStatus').textContent='Enter your numeric ESPN league ID.';return;}
+ if(!refresh){saved.espn={swid:$('espnSwid').value.trim(),s2:$('espnS2').value.trim()};persist();}
+ const cookies=saved.espn?.swid&&saved.espn?.s2?{swid:saved.espn.swid,s2:saved.espn.s2}:{};
  $('importLeague').disabled=true;$('leagueStatus').textContent='Getting every franchise from ESPN…';
  try{
-  const r=await fetch('/api/league',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leagueId,week:S.mode==='replay'?7:undefined}),signal:AbortSignal.timeout(15000)});
+  const r=await fetch('/api/league',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leagueId,week:S.mode==='replay'?7:undefined,...cookies}),signal:AbortSignal.timeout(15000)});
   if(!r.headers.get('Content-Type')?.includes('application/json'))throw new Error('Reload this page to refresh your signed-in session.');
-  const data=await r.json();if(!r.ok)throw new Error(data.error||'Could not import this league.');
+  const data=await r.json();if(!r.ok){if(data.code==='LEAGUE_PRIVATE'){$('cookieDetails').open=true;}throw new Error(data.error||'Could not import this league.');}
   saved.league=data;saved.leagueId=data.leagueId;
   const team=data.teams.find(t=>t.id===saved.teamId)||data.teams.find(t=>t.id===data.ownedTeamId)||data.teams[0];
   useRoster(team.players,{teamName:team.name,teamId:team.id});
@@ -563,10 +600,10 @@ async function restoreConnection(){
 
 // ---------- settings ----------
 function openSettings(tab='league'){
- $('leagueId').value=saved.leagueId||'';$('manualRoster').value=formatRoster(roster());$('settingsError').textContent='';
+ $('leagueId').value=saved.leagueId||'';$('espnSwid').value=saved.espn?.swid||'';$('espnS2').value=saved.espn?.s2||'';$('manualRoster').value=formatRoster(roster());$('settingsError').textContent='';
  $('optDefense').checked=saved.includeDefense;$('optHighlights').checked=saved.highlights;$('optData').checked=saved.dataOnly;$('optDelay').value=saved.delay;
  const games=S.mode==='live'?S.live.games:S.archive.games;
- $('streamInputs').innerHTML=S.mode==='live'?games.map(g=>`<label class="stream"><span>${esc(g.name)}</span><input type="url" data-key="${esc(gameKey(g))}" value="${esc(saved.streams[gameKey(g)]||'')}" placeholder="https://…/stream.m3u8"></label>`).join('')||'<p class="muted">No games on the ESPN scoreboard yet.</p>':'<p class="muted">Switch to Live to add stream links for today’s games.</p>';
+ $('streamInputs').innerHTML=S.mode==='live'?games.map(g=>`<label class="stream"><span>${esc(g.name)}</span><input type="url" data-key="${esc(gameKey(g))}" value="${esc(saved.streams[gameKey(g)]||'')}" placeholder="https://… (video file, .m3u8, or a page to embed)"></label>`).join('')||'<p class="muted">No games on the ESPN scoreboard yet.</p>':'<p class="muted">Switch to Live to add stream links for today’s games.</p>';
  $('syncGame').innerHTML=(S.archive?.games||[]).map(g=>`<option value="${esc(g.id)}">${esc(g.name)}</option>`).join('');
  const cur=currentGameId();if(cur&&S.mode==='replay')$('syncGame').value=cur;
  syncStatus();showTab(tab);$('settings').showModal();
@@ -579,7 +616,7 @@ for(const id of ['optDefense','optHighlights','optData'])$(id).onchange=()=>{
  const data=$('optData').checked;if(data!==saved.dataOnly){saved.dataOnly=data;if(!data){clock.rate=1;$('speed').value='1';}pool.destroy();S.pending=null;if(S.program.kind==='game')S.program={kind:'standby'};}
  persist();director.reset();render();
 };
-$('optDelay').onchange=e=>{saved.delay=Math.max(0,Math.min(180,Number(e.target.value)||0));persist();};
+$('optDelay').onchange=e=>{saved.delay=Math.max(0,Math.min(600,Number(e.target.value)||0));persist();};
 $('saveStreams').onclick=()=>{try{const streams={...saved.streams};for(const input of $('streamInputs').querySelectorAll('input'))streams[input.dataset.key]=safeVideo(input.value.trim());saved.streams=streams;persist();$('settingsError').textContent='';toast('Streams saved.');}catch(error){$('settingsError').textContent=error.message;}};
 function syncStatus(){const g=archiveGame($('syncGame').value);if(!g)return;const sync=syncFor(g);$('syncStatus').textContent=`${g.name}: ${g.anchors?.length||0} built-in scorebug anchors, ${saved.marks[g.id]?.length||0} of yours.${pool.visible===g.id?` Video is at ${Math.floor(pool.current.currentTime/60)}:${String(Math.floor(pool.current.currentTime%60)).padStart(2,'0')}.`:' Open this game on screen to mark it.'}`;void sync;}
 $('syncGame').onchange=syncStatus;

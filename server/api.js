@@ -4,7 +4,16 @@ const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:
 // Sites dispatch supplies a Site-scoped identity. Account UUIDs are not interchangeable.
 function isOwner(request,env){
  const userId=request.headers.get('oai-authenticated-user-id');
- return !!(userId&&env.ESPN_OWNER_ID&&userId===env.ESPN_OWNER_ID);
+ if(userId&&env.ESPN_OWNER_ID&&userId===env.ESPN_OWNER_ID)return true;
+ // A local preview has no identity header; its env.json is the owner's own machine.
+ try{return !userId&&LOOPBACK.has(new URL(request.url).hostname)&&!!env.ESPN_LOCAL;}catch{return false;}
+}
+// Cookies pasted by the viewer for their own private league travel with the request and are used once.
+function ownCookies(data){
+ const swid=String(data.swid||'').trim(),s2=String(data.s2||'').trim();
+ if(!swid||!s2)return null;
+ if(!/^\{?[0-9A-Fa-f-]{36}\}?$/.test(swid)||s2.length>2048||/[\s;]/.test(s2))throw new Error('The ESPN cookies look wrong: SWID is a {GUID} and espn_s2 is one long token.');
+ return {swid:swid.startsWith('{')?swid:`{${swid}}`,s2};
 }
 // Same origin, treating the loopback names as one host for local previews.
 const LOOPBACK=new Set(['localhost','127.0.0.1','[::1]']);
@@ -28,17 +37,20 @@ export async function leagueAPI(request,env={},fetcher=fetch){
  if(!/^\d{1,12}$/.test(id)||!Number.isInteger(year)||year<2018||year>season+1)return json({error:'Enter a numeric ESPN league ID.'},400);
  const week=data.week==null?null:Number(data.week);
  if(week!==null&&(!Number.isInteger(week)||week<1||week>25))return json({error:'Choose a valid scoring week.'},400);
+ let own;try{own=ownCookies(data);}catch(error){return json({error:error.message},400);}
  const owner=isOwner(request,env);
- if(id===env.ESPN_LEAGUE_ID&&!owner)return json({error:'The saved ESPN connection is not linked to this signed-in session.',code:'CONNECTION_IDENTITY'},403);
- const useSaved=!!(owner&&id===env.ESPN_LEAGUE_ID&&env.ESPN_SWID&&env.ESPN_S2);
- if(owner&&id===env.ESPN_LEAGUE_ID&&!useSaved)return json({error:'The saved ESPN connection is missing its access credentials.',code:'CONNECTION_MISSING'},503);
- const headers={Accept:'application/json'};if(useSaved)headers.Cookie=`SWID=${env.ESPN_SWID}; espn_s2=${env.ESPN_S2}`;
+ if(id===env.ESPN_LEAGUE_ID&&!owner&&!own)return json({error:'The saved ESPN connection is not linked to this signed-in session.',code:'CONNECTION_IDENTITY'},403);
+ const useSaved=!own&&!!(owner&&id===env.ESPN_LEAGUE_ID&&env.ESPN_SWID&&env.ESPN_S2);
+ if(!own&&owner&&id===env.ESPN_LEAGUE_ID&&!useSaved)return json({error:'The saved ESPN connection is missing its access credentials.',code:'CONNECTION_MISSING'},503);
+ const headers={Accept:'application/json'};
+ if(own)headers.Cookie=`SWID=${own.swid}; espn_s2=${own.s2}`;else if(useSaved)headers.Cookie=`SWID=${env.ESPN_SWID}; espn_s2=${env.ESPN_S2}`;
+ const signedIn=!!(own||useSaved);
  // Workers throws synchronously for redirect:'error'. Manual also prevents cookie forwarding.
  try{const response=await fetcher(`https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/${year}/segments/0/leagues/${id}?view=mRoster&view=mTeam&view=mSettings${week===null?'':'&scoringPeriodId='+week}`,{headers,redirect:'manual',signal:AbortSignal.timeout(12000)});
  if(response.status>=300&&response.status<400)return json({error:'ESPN redirected the roster request. Your saved ESPN login may need refreshing.',code:'ESPN_REDIRECT'},502);
- if([401,403,404].includes(response.status))return json({error:useSaved?'ESPN could not open this league with the saved access. The login may have expired, or the league/season is unavailable.':'This league is private or unavailable. League ID alone works for public leagues; private leagues need an ESPN connection.'},response.status===404?404:401);
+ if([401,403,404].includes(response.status))return json({error:response.status===404?'ESPN has no league with that ID for this season.':signedIn?'ESPN would not open this league with those cookies. Copy fresh SWID and espn_s2 values from a browser where you are signed in to ESPN.':'This league is private. Paste your ESPN SWID and espn_s2 cookies below the league ID to import it.',code:signedIn?'ESPN_DENIED':'LEAGUE_PRIVATE'},response.status===404?404:401);
  if(!response.ok)return json({error:'ESPN is temporarily unavailable. Please try again.'},502);
- const raw=await response.json();if(!raw.teams?.length)return json({error:useSaved?'ESPN did not return your roster. Your saved login may need refreshing.':'ESPN did not return this league. Check the ID and league visibility.'},422);
- return json({...normalizedLeague(raw,useSaved?env.ESPN_SWID:''),leagueId:id,season:year});
+ const raw=await response.json();if(!raw.teams?.length)return json({error:signedIn?'ESPN did not return your roster. The cookies may have expired.':'ESPN did not return this league. Check the ID and league visibility.'},422);
+ return json({...normalizedLeague(raw,own?own.swid:useSaved?env.ESPN_SWID:''),leagueId:id,season:year});
  }catch(error){const timeout=error?.name==='TimeoutError'||error?.name==='AbortError';return json({error:timeout?'ESPN took too long to respond. Try importing again.':'The roster service could not reach ESPN. Try importing again.',code:timeout?'ESPN_TIMEOUT':'ESPN_NETWORK'},timeout?504:502);}
 }

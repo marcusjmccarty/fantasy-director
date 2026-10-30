@@ -32,6 +32,8 @@ export class ProviderPlayer{
  // the last seek, and is either still moving or deliberately paused there.
  near(target,tolerance=2.5){return this.primed&&!this.inAd&&!this.error&&this.target===null&&(this.progressing||!this.wantPlay)&&Math.abs(this.currentTime-target)<=tolerance;}
  play(){this.wantPlay=true;if(this.initialized)this.bootstrap();}
+ // The viewer's click inside the frame pauses the provider's player: ask it straight to play again.
+ resume(){this.wantPlay=true;if(this.initialized)this.send('play');}
  pause(){this.wantPlay=false;this.advances=0;this.stopBootstrap();if(this.initialized)this.send('pause');}
  // The provider drops a play sent before its player is ready (observed: one
  // play after `inited` yields nothing, a half-second retry starts footage), so
@@ -91,7 +93,8 @@ export class ProviderPlayer{
    case 'ended':this.emit('ended');return;
    case 'started':case 'resumed':
     // The provider restarts from its own remembered position; put it back on ours.
-    if(!this.wantPlay)this.send('pause');
+    // (A pause reply is sent at most every few seconds, or the two players ping-pong.)
+    if(!this.wantPlay){if(now-(this.pausedAt||-Infinity)>4000){this.pausedAt=now;this.send('pause');}}
     else if(this.target!==null&&!this.inAd){this.seekedAt=now;this.send('seek',{time:this.target});}
     this.applyVolume(true);return;
    case 'timeupdate':case 'rewound':break;

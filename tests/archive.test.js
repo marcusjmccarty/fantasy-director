@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {sampleGame,findPlay,timeLabel,ReplayArchive,Clock,F,PLAY_SECONDS} from '../web/archive.js';
+import {sampleGame,findPlay,timeLabel,ReplayArchive,Clock,F,PLAY_SECONDS,AFTER_WHISTLE,LONGEST_PLAY,playWindow} from '../web/archive.js';
 
 const week7=JSON.parse(readFileSync(new URL('../web/week7.json',import.meta.url),'utf8'));
 const archive=new ReplayArchive(week7);
@@ -179,9 +179,22 @@ test('before kickoff the game is pre with a countdown to the snap and nothing sc
  assert.equal(at(NE_CHI,0).state,'in','the kickoff row at t=0 is already in progress');
 });
 
-test('a snap is phase play for PLAY_SECONDS and shows that play, not the next situation',()=>{
+test('playWindow: a quick play is PLAY_SECONDS plus the whistle; yards gained stretch it, up to LONGEST_PLAY; markers have none',()=>{
+ const W=PLAY_SECONDS+AFTER_WHISTLE;
+ assert.equal(playWindow('Pass Incompletion','D.Maye pass incomplete deep right to K.Boutte.'),W);
+ assert.equal(playWindow('Field Goal Good','C.Boswell 47 yard field goal is GOOD.'),W);
+ assert.ok(Math.abs(playWindow('Rush','R.Harvey up the middle to ARZ 38 for 2 yards (D.Robinson).')-(W+2*.12))<1e-9);
+ assert.ok(Math.abs(playWindow('Pass Reception','L.Jackson pass deep left to Z.Flowers to CIN 2 for 51 yards (J.Battle).')-(W+51*.12))<1e-9);
+ assert.ok(Math.abs(playWindow('Rushing Touchdown','J.Taylor right end for 80 yards, TOUCHDOWN.')-(W+80*.12))<1e-9);
+ assert.equal(playWindow('Pass Interception Return','D.Maye pass intercepted by T.Edmunds at CHI 1. T.Edmunds for 75 yards, lateral to J.Johnson for 40 yards, TOUCHDOWN.'),LONGEST_PLAY);
+ assert.ok(playWindow('Kickoff','C.Boswell kicks 65 yards from PIT 35 to end zone, Touchback.')>playWindow('Field Goal Good','x'));
+ assert.ok(playWindow('Punt','C.Wishnowsky punts 52 yards to NE 12, Center-T.Stevens. M.Hollins to NE 20 for 8 yards.')>playWindow('Rush','a for 3 yards'));
+ for(const type of ['Penalty','Timeout','Official Timeout','End Period','Two-minute warning','End of Half','End of Game',''])assert.equal(playWindow(type,'for 40 yards'),0,type);
+});
+test('a snap is phase play for its window and shows that play, not the next situation',()=>{
  // Row 1: D.Maye incomplete on 1st & 10 from the NE 31, t=47.
- for(const rel of [47,50,47+PLAY_SECONDS-0.1]){
+ const W=playWindow('Pass Incompletion');assert.equal(W,PLAY_SECONDS+AFTER_WHISTLE);
+ for(const rel of [47,50,47+W-0.1]){
   const s=at(NE_CHI,rel);
   assert.equal(s.state,'in');assert.equal(s.phase,'play');assert.equal(s.breakKind,null);
   assert.equal(s.playIndex,1);assert.equal(s.playType,'Pass Incompletion');
@@ -189,11 +202,11 @@ test('a snap is phase play for PLAY_SECONDS and shows that play, not the next si
   assert.equal(s.downDistance,'1st & 10');assert.equal(s.special,false);
   assert.equal(s.period,1);assert.equal(s.clock,'14:53');assert.equal(s.detail,'Q1 14:53');
   assert.match(s.lastPlay,/^D\.Maye pass incomplete/);
-  assert.ok(Math.abs(s.playAge-(rel-47))<1e-6);
+  assert.ok(Math.abs(s.playAge-(rel-47))<1e-6);assert.ok(Math.abs(s.playEndsIn-(47+W-rel))<1e-6);
   assert.ok(Math.abs(s.nextSnapIn-(87-rel))<1e-6);
  }
- const after=at(NE_CHI,47+PLAY_SECONDS);
- assert.equal(after.phase,'live','the whistle ends the play window');
+ const after=at(NE_CHI,47+W);
+ assert.equal(after.phase,'live','the whistle ends the play window');assert.equal(after.playEndsIn,0);
  assert.equal(after.playIndex,1);
  assert.equal(after.downDistance,'2nd & 10','between snaps the feed already shows the next situation');
  assert.equal(after.clock,'14:49');assert.equal(after.detail,'Q1 14:49');
@@ -293,7 +306,7 @@ test('kickoffs and punts are special and carry no down & distance',()=>{
  const punt=at(NE_CHI,1007);   // Row 19: Wishnowsky punts on 4th & 4 at t=1005
  assert.equal(punt.phase,'play');assert.equal(punt.playType,'Punt');
  assert.equal(punt.special,true);assert.equal(punt.down,4);assert.equal(punt.distance,4);assert.equal(punt.downDistance,'');
- const beforePunt=at(NE_CHI,968+PLAY_SECONDS+1);   // between the 3rd-down incompletion and the punt
+ const beforePunt=at(NE_CHI,968+LONGEST_PLAY+1);   // between the 3rd-down incompletion and the punt
  assert.equal(beforePunt.phase,'live');assert.equal(beforePunt.special,true,'the upcoming punt is already special');
 });
 
@@ -367,7 +380,7 @@ test('a long stoppage after an ordinary play is a generic break; a long gap befo
  const gap=at(game,330);   // 30s after a plain rush, 270s before a kickoff: a score the feed did not record
  assert.equal(gap.phase,'break');assert.equal(gap.breakKind,'score');assert.equal(gap.detail,'After the score');
  assert.equal(gap.special,true,'the upcoming kickoff is special');
- assert.equal(at(game,40+PLAY_SECONDS+30).phase,'live','a normal 40s gap between snaps is not a break');
+ assert.equal(at(game,40+LONGEST_PLAY+10).phase,'live','a normal 40s gap between snaps is not a break');
 });
 
 test('conversion tries (down -1) are special whether on the field or upcoming',()=>{
@@ -382,7 +395,7 @@ test('conversion tries (down -1) are special whether on the field or upcoming',(
  const td=at(game,43);
  assert.equal(td.phase,'play');assert.equal(td.special,false);assert.equal(td.downDistance,'1st & Goal');
  assert.deepEqual(td.score,[6,0]);
- const upcomingTry=at(game,40+PLAY_SECONDS+2);
+ const upcomingTry=at(game,40+playWindow('Rushing Touchdown','J.Doe up the middle for 3 yards, TOUCHDOWN.')+2);
  assert.equal(upcomingTry.phase,'live');assert.equal(upcomingTry.down,-1);
  assert.equal(upcomingTry.special,true,'an upcoming conversion try is not a drive');
  const tryPlay=at(game,103);
@@ -432,7 +445,7 @@ test('stoppage rows never register as a play in progress',()=>{
  assert.equal(at(game,142).phase,'play','the snap after a timeout is a play again');
 });
 
-test('a play that shares its timestamp with the following stoppage marker still gets its PLAY_SECONDS window',()=>{
+test('a play that shares its timestamp with the following stoppage marker still gets its play window',()=>{
  // Real data: PIT vs NO, play 90 is C.Boswell's 47-yd FG at t=5405 and play 91 is END QUARTER 2, also at t=5405.
  const game=archive.game('401873011');
  assert.equal(TYPES[game.plays[90][F.TYPE]],'Field Goal Good');
@@ -442,7 +455,7 @@ test('a play that shares its timestamp with the following stoppage marker still 
  assert.equal(s.phase,'play');
  assert.equal(s.playIndex,90);
  assert.equal(s.playType,'Field Goal Good');
- assert.equal(at(game,5405+PLAY_SECONDS+10).breakKind,'halftime');
+ assert.equal(at(game,5405+LONGEST_PLAY+1).breakKind,'halftime');
  // Synthetic: a rush and the quarter-end marker at the same t.
  const synthetic=fixture([
   row(0,'Kickoff',{offense:1,down:0,distance:0,ytg:65}),

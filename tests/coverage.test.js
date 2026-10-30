@@ -394,3 +394,18 @@ test('describeScore() labels the score, names the scoring team and strips the pa
  assert.equal(describeScore({kind:'D2P',team:IND,away:2,home:0,text:'x'},g).label,'Defensive 2-pt');
  assert.equal(describeScore({kind:'??',team:IND,away:0,home:0,text:'x'},g).label,'Score');
 });
+
+test('seen()/update(): slack widens the window after the snap for feeds whose exact on-screen moment is uncertain',()=>{
+ const c=new Coverage();const on=(c,a,b)=>{for(let t=a;t<b;t+=2)c.watch('g',t,Math.min(b,t+2));};
+ on(c,96,110);   // on screen from 4 s before a snap at 100 until 10 s after
+ assert.equal(c.seen('g',100),true,'the ordinary window [-3,+4] is covered');
+ assert.equal(c.seen('g',100,12),false,'with 12 s of slack the window [-3,+16] is only half covered');
+ on(c,110,118);
+ assert.equal(c.seen('g',100,12),true);
+ const game={id:'g',name:'G',teams:[{abbreviation:'IND'},{abbreviation:'MIN'}],scores:[{id:'g:1',at:100,team:0,kind:'TD',players:[{name:'Jonathan Taylor',role:'scorer'}],text:'J Taylor 5 Yd Rush'}]};
+ const roster=[{name:'Jonathan Taylor',team:'IND',position:'RB'}];
+ const d=new Coverage();on(d,96,118);
+ assert.equal(d.update([game],roster,100+30+9+12-1,30,12).length,0,'with slack the score is judged later');
+ const [item]=d.update([game],roster,100+30+9+12,30,12);
+ assert.equal(item.id,'g:1');assert.equal(item.seen,false,'the delayed window [127,146] was not on screen');
+});

@@ -3,7 +3,10 @@
 // between snaps, or in a break (TV timeout, quarter end, after a score).
 import {alias} from './scoring.js';
 export const F={T:0,PERIOD:1,CLOCK:2,TYPE:3,OFFENSE:4,DOWN:5,DISTANCE:6,YTG:7,AWAY:8,HOME:9,TEXT:10};
-export const PLAY_SECONDS=7;          // snap to whistle
+export const PLAY_SECONDS=5;          // the shortest play, snap to whistle
+export const AFTER_WHISTLE=3;         // the tackle, the spot and the first replay belong to the play
+export const LONGEST_PLAY=21;         // a breakaway run or a long return, whistle included
+const YARDS=/(-?\d+)\s+yards?/g;
 const SETTLE=15;                      // back from a break this long before the next snap
 const LONG_GAP=90;                    // snap-to-snap gaps longer than this are breaks
 const STOPPAGE=/^(Timeout|Official Timeout|End Period|Two-minute warning|End of Half|End of Regulation)$/;
@@ -13,6 +16,19 @@ const eastern=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',weekd
 const clockFormat=new Intl.DateTimeFormat('en-US',{timeZone:'America/New_York',hour:'numeric',minute:'2-digit'});
 export const timeLabel=seconds=>clockFormat.format(new Date(seconds*1000));
 
+// Seconds a play owns the screen after the snap: a quick one is five, every
+// yard the ball travels adds a little (a 70-yard run is a quarter of a
+// minute), then the whistle and the spot. Markers and penalties are not plays.
+export function playWindow(type,text=''){
+ if(!type||NO_ACTION.test(type))return 0;
+ let yards=0;for(const m of String(text).matchAll(YARDS))yards+=Math.abs(Number(m[1]));
+ let seconds;
+ if(/Kickoff/.test(type))seconds=9+yards*.05;
+ else if(/Punt/.test(type))seconds=10+yards*.03;
+ else if(/Field Goal/.test(type)||type==='Pass Incompletion')seconds=PLAY_SECONDS;
+ else seconds=PLAY_SECONDS+yards*.12;
+ return Math.min(LONGEST_PLAY,seconds+AFTER_WHISTLE);
+}
 export function findPlay(plays,rel){
  let low=0,high=plays.length-1,result=-1;
  while(low<=high){const mid=(low+high)>>1;if(plays[mid][0]<=rel){result=mid;low=mid+1;}else high=mid-1;}
@@ -35,7 +51,7 @@ export function sampleGame(game,at,types){
  const score=[Math.max(p[F.AWAY],tally?.away??0),Math.max(p[F.HOME],tally?.home??0)];
  if(!next&&age>20)return {...base,state:'post',phase:'final',score,possession:-1,period:p[F.PERIOD],detail:'Final',scores,lastPlay:marker[F.TEXT]};
  const gap=next?next[F.T]-p[F.T]:Infinity,nextType=next?types[next[F.TYPE]]:'';
- const live=!NO_ACTION.test(type)&&age<PLAY_SECONDS;
+ const window=playWindow(type,p[F.TEXT]),live=window>0&&age<window;
  // Between snaps the feed already shows the upcoming situation (past any stoppage rows).
  let k=i+1;while(plays[k]&&STOPPAGE.test(types[plays[k][F.TYPE]]))k++;
  const upcoming=plays[k];
@@ -56,7 +72,7 @@ export function sampleGame(game,at,types){
   special:SPECIAL.test(sType)||down<=0,period,clock:live?p[F.CLOCK]:(next?.[F.CLOCK]??p[F.CLOCK]),
   detail:phase==='break'?breakLabel(breakKind,period):`Q${period>4?'OT':period} ${live?p[F.CLOCK]:(next?.[F.CLOCK]??'')}`.trim(),
   downDistance:down&&!SPECIAL.test(sType)?`${ordinal(down)} & ${ytg!==null&&s[F.DISTANCE]>=ytg?'Goal':s[F.DISTANCE]}`:'',
-  lastPlay:live?p[F.TEXT]:marker[F.TEXT],playType:live?type:markerType,playIndex:first+group.indexOf(p),playAge:age,nextSnapIn:next?next[F.T]-rel:null,scores};
+  lastPlay:live?p[F.TEXT]:marker[F.TEXT],playType:live?type:markerType,playIndex:first+group.indexOf(p),playAge:age,playEndsIn:live?window-age:0,nextSnapIn:next?next[F.T]-rel:null,scores};
 }
 function breakLabel(kind,period){return {halftime:'Halftime',quarter:`End of Q${period-1||1}`,'two-minute':'Two-minute warning',timeout:'Timeout',score:'After the score',stoppage:'Break'}[kind]||'Break';}
 

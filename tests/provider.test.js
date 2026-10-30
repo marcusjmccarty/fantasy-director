@@ -961,3 +961,46 @@ test('createPlayer builds a ProviderPlayer for provider/ok sources',t=>{
  assert.equal(globalThis.window.count,1,'listens on window by default');
  p.destroy();assert.equal(globalThis.window.count,0);
 });
+
+// ---- EmbedPlayer: a page embed loads only while it is on screen ------------
+import {EmbedPlayer} from '../web/embed-player.js';
+test('EmbedPlayer: hidden it has no page and counts as ready; shown it loads the page and is ready 1.5 s after load; hidden again it goes blank',()=>{
+ const saved=globalThis.document;let frame;
+ globalThis.document={createElement(){frame=fakeFrame();frame.listeners={};frame.addEventListener=(n,fn)=>{frame.listeners[n]=fn;};return frame;}};
+ try{
+  let now=0;const p=new EmbedPlayer('https://stream.example/game',{now:()=>now});
+  assert.equal(p.kind,'embed');assert.equal(frame.src,undefined,'nothing loads until shown');
+  assert.equal(p.progressing,true,'hidden: nothing to wait for');assert.equal(p.near(),true);
+  p.setVisible(true);
+  assert.equal(frame.src,'https://stream.example/game');assert.equal(p.progressing,false,'shown: not until the page has loaded');
+  now=1000;frame.listeners.load();assert.equal(p.progressing,false);
+  now=2600;assert.equal(p.progressing,true);
+  p.setVisible(true);assert.equal(p.loadedAt,1000,'showing it again does not reload');
+  p.setVisible(false);assert.equal(frame.src,'about:blank');assert.equal(p.progressing,true);
+  now=3000;frame.listeners.load();assert.equal(p.loadedAt,null,'a hidden load (the blank page) is ignored');
+  p.setVisible(true);assert.equal(frame.src,'https://stream.example/game');assert.equal(p.progressing,false);
+  p.destroy();assert.equal(frame.src,'about:blank');assert.equal(frame.removed,true);
+ }finally{globalThis.document=saved;}
+});
+test('PlayerPool.show()/hide() tell players whether they are on screen',()=>{
+ const host=fakeHost(),shown=[];
+ const make=key=>({kind:'embed',element:fakeElement(),listeners:new Map(),on(){},play(){},pause(){},seek(){},destroy(){},near(){return true;},progressing:true,target:null,primed:true,advances:2,wantPlay:false,error:null,set muted(v){},get muted(){return true;},setVisible(on){shown.push([key,on]);}});
+ const pool=new PlayerPool(host,{capacity:3,create:s=>make(s.url),now:()=>0});
+ pool.open('a',{url:'a',type:'embed/page'});pool.open('b',{url:'b',type:'embed/page'});
+ pool.show('a');assert.deepEqual(shown.splice(0),[['a',true],['b',false]]);
+ pool.show('b');assert.deepEqual(shown.splice(0),[['a',false],['b',true]]);
+ pool.hide();assert.deepEqual(shown.splice(0),[['a',false],['b',false]]);
+});
+
+test('ProviderPlayer.resume(): after the viewer\'s click paused the provider, asks it straight to play without restarting the bootstrap',t=>{
+ const h=harness(t);const p=h.init(h.make());
+ p.play();h.prime(p,100);assert.equal(p.progressing,true);assert.equal(h.intervals(),0,'the bootstrap has finished');
+ p.element.posted.length=0;
+ h.msg(p,{event:'paused',time:101});
+ p.resume();
+ assert.deepEqual(actions(p),['play'],'one plain play, no seek or volume traffic');
+ assert.equal(h.intervals(),0,'no bootstrap interval was started');
+ assert.equal(p.wantPlay,true);
+ // A player that is not initialized remembers the wish and sends nothing.
+ const q=h.make();q.resume();assert.equal(q.wantPlay,true);assert.deepEqual(actions(q),[]);
+});

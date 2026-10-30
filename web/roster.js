@@ -19,10 +19,16 @@ export function parseRoster(value){
  });
 }
 export const formatRoster=roster=>roster.map(p=>`${p.name}, ${p.team}, ${p.position}`).join('\n');
+// A stream can be a direct video file, an HLS playlist, or any https page to embed.
 export function safeVideo(value){
  if(!value)return '';
- const u=new URL(value);
- if(u.protocol!=='https:'||u.username||u.password||!/\.(mp4|webm|m3u8)$/i.test(u.pathname))throw new Error('Use a direct HTTPS .mp4, .webm or .m3u8 link.');
+ let u;try{u=new URL(value);}catch{throw new Error('Enter a full https:// link.');}
+ if(u.protocol!=='https:'||u.username||u.password)throw new Error('Use an https:// link without a login in it.');
  return u.href;
+}
+export function streamType(url){
+ if(/\.m3u8(?:\?|$)/i.test(url))return 'application/vnd.apple.mpegurl';
+ if(/\.(mp4|webm|mov)(?:\?|$)/i.test(url))return 'video/mp4';
+ return 'embed/page';
 }
 export function gameKey(game){return game.teams.map(t=>alias(t.abbreviation||t.abbr)).sort().join('-');}

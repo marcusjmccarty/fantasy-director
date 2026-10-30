@@ -21,6 +21,7 @@
    <div class="switching" id="switching" hidden></div>
    <div class="overlay" id="overlay"><div class="overlay-card"><span class="eyebrow" id="ovEyebrow">WEEK 7 · SUNDAY OCT 25</span><h1 id="ovTitle">Every snap your starters take.</h1><p id="ovText">The channel follows your players on the field, goes to whoever is closest to the end zone, skips the breaks, and replays any score you missed.</p><button id="ovButton" class="primary big">Start watching</button><small id="ovHint"></small></div></div>
    <button class="unmute" id="unmute" hidden>🔇 Tap for sound</button>
+   <div class="sound-hint" id="soundHint" hidden>🔇 <b>Click the video</b> once for sound</div>
   </div>
   <div class="transport" id="transport">
    <button id="playButton" class="icon primary" aria-label="Play">▶</button>
@@ -49,6 +50,11 @@
  <section data-panel="league">
   <label for="leagueId">ESPN league ID</label><div class="inline"><input id="leagueId" inputmode="numeric" autocomplete="off" placeholder="e.g. 12345678"><button type="button" id="importLeague" class="primary">Import</button></div>
   <p class="muted" id="leagueStatus">Public leagues need only the ID. Starters only; bench and IR are ignored.</p>
+  <details id="cookieDetails"><summary>Private league? Add your ESPN cookies</summary>
+   <p class="muted">ESPN only shows private leagues to a signed-in browser. In a browser where you are signed in to ESPN, open its developer tools → Application → Cookies → espn.com, and copy these two values. They stay in this browser and are sent only with your import.</p>
+   <label for="espnSwid">SWID</label><input id="espnSwid" autocomplete="off" spellcheck="false" placeholder="{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}">
+   <label for="espnS2">espn_s2</label><input id="espnS2" autocomplete="off" spellcheck="false" placeholder="AEB…">
+  </details>
   <label for="manualRoster">Or type your starters</label><textarea id="manualRoster" rows="9" spellcheck="false" aria-describedby="rosterHelp"></textarea><p class="muted" id="rosterHelp">One per line: name, team, position (QB, RB, WR, TE, K, D/ST). Example: <code>Jonathan Taylor, IND, RB</code></p>
   <button type="button" id="saveRoster">Use this roster</button>
  </section>
@@ -56,7 +62,7 @@
   <label class="check"><input type="checkbox" id="optDefense" checked> Follow my D/ST when no other starter is on the field</label>
   <label class="check"><input type="checkbox" id="optHighlights" checked> Replay scores I missed</label>
   <label class="check"><input type="checkbox" id="optData"> Data-only picture (no video; allows up to 60× in the replay)</label>
-  <label for="optDelay">Live stream delay behind the ESPN feed (seconds)</label><input id="optDelay" type="number" min="0" max="180" step="5" value="30">
+  <label for="optDelay">Live stream delay (seconds)</label><input id="optDelay" type="number" min="0" max="600" step="5" value="30"><p class="muted">Set it so the clock in the corner of the channel matches the scorebug on your stream. The channel then follows the game as you see it: no cuts mid-play, no spoilers, and missed scores judged by what was really on screen.</p>
   <div class="rules"><h3>How the channel decides</h3><ul>
    <li>Only games where one of your starters is on the field. Never a game without your players.</li>
    <li>Offense first, closest to the end zone. Your D/ST only fills in when no offense is on.</li>
@@ -64,8 +70,8 @@
    <li>Never cuts mid-play. A rival drive needs to be 10+ yards closer, or entering the red zone, to take over.</li>
    <li>Breaks and provider ads are skipped. If one of your players scores off screen, you get the replay at the next quiet moment.</li></ul></div>
  </section>
- <section data-panel="sources" hidden><p class="muted">Live mode plays your own stream links (MP4, WebM or HLS .m3u8) per game. The Week 7 replay imports its recordings automatically.</p><div id="streamInputs"></div><button type="button" id="saveStreams">Save streams</button></section>
- <section data-panel="sync" hidden><p class="muted">Each replay is aligned to the play-by-play with scorebug readings. If a cut lands on the wrong moment, pause on a snap and add a mark: the quarter and game clock on screen, at the current video position.</p>
+ <section data-panel="sources" hidden><p class="muted">Live mode plays your own link per game. A direct video file or an HLS <code>.m3u8</code> link is the smooth option: the channel warms it in the background, cuts to it instantly and controls its sound. Any other https page is embedded as-is and loaded only while it is on screen (a hidden page would play its own sound), so each cut to it reloads the page and you may need to press play inside it. The Week 7 replay imports its recordings automatically.</p><div id="streamInputs"></div><button type="button" id="saveStreams">Save streams</button></section>
+ <section data-panel="sync" hidden><p class="muted">Each replay is aligned to the play-by-play with about two hundred scorebug readings taken from its footage. If a cut still lands on the wrong moment, pause on a snap and add a mark: the quarter and game clock on screen, at the current video position. Your marks take priority.</p>
   <div class="sync-row"><label>Game <select id="syncGame"></select></label><label>Quarter <select id="syncQuarter"><option value="1">1st</option><option value="2">2nd</option><option value="3">3rd</option><option value="4">4th</option><option value="5">OT</option></select></label><label>Clock <input id="syncClock" placeholder="12:34" size="6"></label></div>
   <div class="inline"><button type="button" id="addSync" class="primary">Mark current video position</button><button type="button" id="clearSync">Reset my marks</button></div><p class="muted" id="syncStatus"></p></section>
  <p class="error" id="settingsError" role="alert"></p>

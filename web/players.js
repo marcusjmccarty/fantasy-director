@@ -3,6 +3,7 @@
 // footage at the right moment, never a fresh load in front of the viewer.
 import {ProviderPlayer} from './provider-player.js';
 import {NativePlayer} from './native-player.js';
+import {EmbedPlayer} from './embed-player.js';
 
 export const TOLERANCE=8;      // seconds a warm player may be from the shared clock and still be cut to
 const AHEAD=1.2,BEHIND=8;      // native hidden players pause when ahead, everyone re-seeks when this far behind
@@ -29,13 +30,15 @@ export class PlayerPool{
  close(key){const slot=this.slots.get(key);if(!slot)return;slot.player.destroy();this.slots.delete(key);if(this.visible===key)this.visible=null;}
  // Seconds a seek on this player takes to land; a moving target is led by this much.
  lead(key){const p=this.slots.get(key)?.player;return p?.kind==='provider'?Math.min(12,Math.max(1,(p.seekLatency||3000)/1000)):0;}
+ // Players that cannot be driven (page embeds) are shown as soon as they have loaded.
+ static drivable(player){return player.kind!=='embed';}
  // Keep a player at `target` (seconds into its media). A moving target (the
  // shared clock while playing) is led by the player's seek latency; an
  // outstanding seek is left alone until it lands or looks stuck, because
  // re-seeking a provider every poll never lets it deliver a frame.
  hold(key,target,{play=this.running,fixed=false}={}){
   const slot=this.slots.get(key);if(!slot)return;this.touch(slot);const p=slot.player;
-  if(target===null||target===undefined){if(play)p.play();else p.pause();return;}
+  if(target===null||target===undefined||p.kind==='embed'){if(play)p.play();else p.pause();return;}
   const lead=play&&!fixed?this.lead(key):0;
   const seek=()=>{slot.seekAt=this.now();p.seek(target+lead);if(play)p.play();};
   if(p.target!==null){
@@ -53,10 +56,10 @@ export class PlayerPool{
  ready(key,target,tolerance=TOLERANCE){const p=this.slots.get(key)?.player;return !!p&&(target===null||target===undefined?p.progressing:p.near(target,tolerance));}
  show(key){
   const slot=this.slots.get(key);if(!slot)return false;
-  for(const s of this.slots.values()){const on=s.key===key;s.player.element.classList.toggle('on',on);s.player.element.setAttribute('aria-hidden',String(!on));s.player.muted=!on||this.muted;}
+  for(const s of this.slots.values()){const on=s.key===key;s.player.element.classList.toggle('on',on);s.player.element.setAttribute('aria-hidden',String(!on));s.player.muted=!on||this.muted;s.player.setVisible?.(on);}
   this.visible=key;this.touch(slot);if(this.running)slot.player.play();return true;
  }
- hide(){for(const s of this.slots.values()){s.player.element.classList.remove('on');s.player.muted=true;}this.visible=null;}
+ hide(){for(const s of this.slots.values()){s.player.element.classList.remove('on');s.player.muted=true;s.player.setVisible?.(false);}this.visible=null;}
  setMuted(value){this.muted=!!value;const slot=this.slots.get(this.visible);if(slot)slot.player.muted=this.muted;}
  // The viewer asked for sound on the visible player (inside their gesture): try the unmute again.
  retryAudio(){const p=this.current;if(!p||this.muted)return false;p.audioLocked=false;p.muted=false;return true;}
@@ -72,4 +75,8 @@ export class PlayerPool{
  destroy(){for(const key of [...this.slots.keys()])this.close(key);}
  get current(){return this.slots.get(this.visible)?.player||null;}
 }
-export function createPlayer(source){return source.type==='provider/ok'?new ProviderPlayer(source.url,{duration:source.duration}):new NativePlayer(source);}
+export function createPlayer(source){
+ if(source.type==='provider/ok')return new ProviderPlayer(source.url,{duration:source.duration});
+ if(source.type==='embed/page')return new EmbedPlayer(source.url);
+ return new NativePlayer(source);
+}

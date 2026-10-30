@@ -23,7 +23,7 @@ test('week7.json: every one of the 14 games carries built-in scorebug anchors an
  assert.equal(data.games.length,14);
  for(const g of data.games){
   assert.ok(g.recordingDuration>0,g.name);assert.ok(g.plays.length>100,g.name);assert.ok(Array.isArray(g.scores)&&g.scores.length>0,g.name);
-  assert.ok(Array.isArray(g.anchors)&&g.anchors.length>=8&&g.anchors.length<=13,`${g.name} has ${g.anchors?.length} anchors`);
+  assert.ok(Array.isArray(g.anchors)&&g.anchors.length>=30&&g.anchors.length<=600,`${g.name} has ${g.anchors?.length} anchors`);
   g.anchors.forEach((a,k)=>{
    assert.ok(Number.isFinite(a.wall)&&Number.isFinite(a.media)&&a.media>=0&&a.media<g.recordingDuration,`${g.name} anchor ${JSON.stringify(a)}`);
    if(k)assert.ok(a.wall>g.anchors[k-1].wall&&a.media>g.anchors[k-1].media,`${g.name} anchors advance in both game time and footage`);

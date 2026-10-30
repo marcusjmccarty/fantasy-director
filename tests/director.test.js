@@ -237,6 +237,20 @@ test('decide: never cuts away while a play involving your starter is in progress
  // Nor does a play in an excluded game.
  assert.equal(decide(d,{games:[mine,urgent],current:{kind:'game',id:'A'},excluded:new Set(['A'])}).id,'B');
 });
+test('decide: never cuts away from a game your starter is in within RULES.preSnap seconds of its next snap',()=>{
+ const d=new Director({debounce:0});
+ const mine=game('A','IND','KC',{phase:'live',yardsToGoal:70,nextSnapIn:RULES.preSnap});
+ const urgent=game('B','DAL','NYG',{yardsToGoal:5,nextSnapIn:20});
+ const held=decide(d,{games:[mine,urgent],current:{kind:'game',id:'A'}});
+ assert.deepEqual([held.kind,held.id,held.reason],['game','A','Snap coming']);
+ assert.equal(decide(d,{games:[mine,urgent],current:{kind:'game',id:'A'},queue:[{id:'s1',queuedAt:0}]}).id,'A','not even for an overdue replay');
+ // With the snap further out, or unknown (a live feed), the red-zone drive wins.
+ assert.equal(decide(d,{games:[{...mine,nextSnapIn:RULES.preSnap+1},urgent],current:{kind:'game',id:'A'}}).id,'B');
+ assert.equal(decide(d,{games:[{...mine,nextSnapIn:null},urgent],current:{kind:'game',id:'A'}}).id,'B');
+ // A snap your starter is not part of does not hold the channel, nor does one in a break.
+ assert.equal(decide(d,{games:[{...mine,possession:1},urgent],current:{kind:'game',id:'A'}}).id,'B');
+ assert.equal(decide(d,{games:[{...mine,phase:'break'},urgent],current:{kind:'game',id:'A'}}).id,'B');
+});
 test('decide: after a cut, dwells for RULES.dwell seconds against a same-tier challenger',()=>{
  const d=new Director({debounce:0});
  const cur=game('A','IND','KC',{yardsToGoal:50}),better=game('B','DAL','NYG',{yardsToGoal:30});   // 72 (Lamb + Prescott) vs 50: past the margin, not critical

@@ -18,7 +18,7 @@ export function liveGames(raw,nowSeconds=Date.now()/1000){
   const teams=ordered.map(t=>({id:String(t.team?.id||t.id),abbreviation:t.team?.abbreviation||'?',abbr:alias(t.team?.abbreviation||'?'),name:t.team?.displayName||'',score:Number(t.score||0)}));
   const possession=teams.findIndex(t=>t.id===String(s.possession?.id??s.possession??''));
   const state=type.completed?'post':type.state||'pre';
-  const last=s.lastPlay||{},lastType=last.type?.text||'';
+  const last=s.lastPlay||{},lastType=last.type?.text||'',lastPlayId=String(last.id||'');
   const down=Number(s.down||0),explicit=Number(s.yardsToEndzone);
   const ytg=Number.isFinite(explicit)&&explicit>0&&explicit<=100?explicit:yardsFromText(s.possessionText,teams,possession);
   let phase=state==='post'?'final':state==='pre'?'pre':'live',breakKind=null;
@@ -32,8 +32,44 @@ export function liveGames(raw,nowSeconds=Date.now()/1000){
   return {id:String(e.id),name:e.shortName||e.name||'NFL game',kind:'live',teams,state,phase,breakKind,score:teams.map(t=>t.score),
    possession,down,distance:Number(s.distance||0),yardsToGoal:ytg,special:down<=0||/kickoff|punt/i.test(lastType)&&down<=0,
    period:Number(status.period||0),clock:status.displayClock||'',detail:type.shortDetail||'',downDistance:s.shortDownDistanceText||'',
-   lastPlay:last.text||'',playType:lastType,nextSnapIn:null,date:e.date,scores:[],fetchedAt:nowSeconds};
+   lastPlay:last.text||'',lastPlayId,playType:lastType,nextSnapIn:null,date:e.date,scores:[],fetchedAt:nowSeconds};
  }).filter(g=>g.teams.length===2);
+}
+// A live feed seen through the stream's delay. The director acts on the
+// scoreboard as it stood when the picture on screen happened, so a drive is
+// followed as the viewer sees it rather than spoiled by data that runs ahead.
+// ESPN logs a play only after the whistle: a new entry means the play just
+// ended on screen, the next snap follows within the play clock, and the gap
+// between is the only safe time to cut away. A game that goes quiet for much
+// longer than a play clock is stalled (injury, review), not snapping.
+export const SAFE_AFTER_PLAY=18;   // seconds after a logged play before the next snap can be near
+export const STALLED_AFTER=75;     // seconds without a new play: the snap is not coming
+const KEEP=900;                    // seconds of snapshots kept (the longest delay, with room)
+export class LiveFeed{
+ constructor(){this.snapshots=[];this.logged=new Map();}
+ push(games,at){
+  const last=this.snapshots.at(-1);
+  for(const g of games){
+   const prev=last?.games.find(x=>x.id===g.id);
+   if(g.lastPlayId&&(!prev||prev.lastPlayId!==g.lastPlayId)){const list=this.logged.get(g.id)||[];list.push({at,playId:g.lastPlayId});if(list.length>80)list.shift();this.logged.set(g.id,list);}
+  }
+  this.snapshots.push({at,games});
+  while(this.snapshots.length>1&&at-this.snapshots[0].at>KEEP)this.snapshots.shift();
+ }
+ get latest(){return this.snapshots.at(-1)?.games||[];}
+ // The feed as it stood `delay` seconds before `now` (the oldest snapshot while the delay has not elapsed).
+ view(now,delay=0){
+  const t=now-Math.max(0,delay);
+  let snap=null;for(const s of this.snapshots){if(s.at<=t)snap=s;else break;}
+  snap??=this.snapshots[0];if(!snap)return [];
+  return snap.games.map(g=>{
+   if(g.state!=='in'||g.phase!=='live'||!(g.possession>=0))return {...g,sinceLogged:null};
+   const logged=(this.logged.get(g.id)||[]).filter(x=>x.at<=t).at(-1);
+   const since=logged?t-logged.at:0;
+   if(since>SAFE_AFTER_PLAY&&since<=STALLED_AFTER)return {...g,phase:'play',playAge:since-SAFE_AFTER_PLAY,playEndsIn:null,sinceLogged:since};
+   return {...g,sinceLogged:since};
+  });
+ }
 }
 // Scoring plays with the wallclock of the snap, from a game summary.
 export function liveScores(summary,game){

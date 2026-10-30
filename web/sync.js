@@ -74,8 +74,8 @@ function gapContent(sync,i,elapsed,keep){
 function solveKeep(sync,from,to,target){
  let low=0,high=1200;
  const at=keep=>sync.span(from,to,keep);
- if(at(low)>=target)return {keep:low,factor:target/Math.max(1,at(low))};
- if(at(high)<=target)return {keep:high,factor:target/Math.max(1,at(high))};
+ if(at(low)>=target)return {keep:low,factor:target/Math.max(1e-3,at(low))};
+ if(at(high)<=target)return {keep:high,factor:target/Math.max(1e-3,at(high))};
  for(let k=0;k<40;k++){const mid=(low+high)/2;if(at(mid)>target)high=mid;else low=mid;}
  return {keep:low,factor:1};
 }

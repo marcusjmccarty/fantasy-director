@@ -1,2 +1,5 @@
 node_modules/
 .sites-runtime/
+scripts/scorebug-ocr/frames
+scripts/scorebug-ocr/jobs.tsv
+scripts/scorebug-ocr/results/

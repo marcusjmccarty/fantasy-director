@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {ReplayArchive,PLAY_SECONDS} from '../web/archive.js';
+import {ReplayArchive,LONGEST_PLAY,playWindow,F} from '../web/archive.js';
 import {Director,RULES,KICK_RANGE,rank,rate,involvement,hasRoster,rosterTeams} from '../web/director.js';
 import {Coverage} from '../web/coverage.js';
 import {rosterCredit,worthReplaying} from '../web/scoring.js';
@@ -108,8 +108,8 @@ const rosterGame=(r,id)=>hasRoster(sample(id,r.from),r.roster);
 const programAt=r=>new Map(r.trace.map(t=>[t.at,t.program==='game'?t.programId:t.program]));
 // Longest streak of consecutive trace steps matching `pred` (steps matching `pause` neither extend nor break it).
 function longestRun(trace,pred,pause=()=>false){let run=0,max=0,where=null;for(const t of trace){if(pause(t))continue;if(pred(t)){if(++run>max){max=run;where=rel(t.at);}}else run=0;}return {max,where};}
-const HOLD=PLAY_SECONDS+Math.ceil(RULES.debounce)+1;   // a play in progress, then the debounce, measured in 1-second steps
-const HOLDS=['Play in progress','Your player just scored'];   // stay reasons that replace the explain() text
+const HOLD=RULES.preSnap+LONGEST_PLAY+Math.ceil(RULES.debounce)+1;   // the snap coming, the play, then the debounce, in 1-second steps
+const HOLDS=['Play in progress','Snap coming','Your player just scored'];   // stay reasons that replace the explain() text
 
 // ---------------------------------------------------------------- the slate
 test('fixture: the Sunday slate has 12 games, the roster is spread over five of them, and seven games have no starter',()=>{
@@ -495,7 +495,8 @@ test('a single-starter roster sits on that game from kickoff to final: one cut, 
  assert.equal(r.queuedIds.size,0);assert.equal(r.events.length,0);
  // Each touchdown: the play itself is 'Play in progress', the rest of the hold is the celebration.
  const celebrating=r.trace.filter(t=>t.reason==='Your player just scored').length;
- assert.ok(celebrating>=3*(RULES.scoreHold-PLAY_SECONDS)-3&&celebrating<=3*RULES.scoreHold,`${celebrating} celebration seconds`);
+ const expected=[6,17,173].reduce((sum,i)=>sum+Math.max(0,RULES.scoreHold-playWindow(archive.types[game.plays[i][F.TYPE]],game.plays[i][F.TEXT])),0);
+ assert.ok(Math.abs(celebrating-expected)<=4,`${celebrating} celebration seconds, expected about ${expected}`);
 });
 
 test('a mid-day start skips the scores already in the past: never logged, never replayed, and the channel comes straight on',()=>{

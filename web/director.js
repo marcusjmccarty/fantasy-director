@@ -9,6 +9,7 @@ export const RULES={
  dwell:12,        // seconds to stay after a cut unless something more urgent appears
  margin:10,       // yards closer a rival drive must be to take over a healthy one
  debounce:1.5,    // a challenger must stay best this long (absorbs feed jitter)
+ preSnap:5,       // never leave a game you care about this close to its next snap
  scoreHold:18,    // stay for the celebration after one of your players scores
  highlightWait:75 // longest a missed score waits for a natural break
 };
@@ -83,8 +84,9 @@ export class Director{
    if(urgent)return {kind:'game',id:urgent.game.id,entry:urgent,reason:'Back to live action'};
    return {kind:'highlight',id:current.id,reason:'Replaying a score you missed'};
   }
-  // Never cut away from a live snap in a game you care about.
+  // Never cut away from a live snap in a game you care about, nor in the seconds before one.
   if(cur&&cur.tier>0&&curGame.phase==='play'){this.challenger=null;return stay('Play in progress');}
+  if(cur&&cur.tier>0&&curGame.phase==='live'&&curGame.nextSnapIn!==null&&curGame.nextSnapIn<=r.preSnap){this.challenger=null;return stay('Snap coming');}
   if(curGame&&curGame.state==='in'&&recentScore(curGame,at)&&curGame.phase!=='break')return stay('Your player just scored');
   if(queue.length&&!ranked.some(e=>e.critical)&&(!cur||cur.tier===0||curGame.phase!=='play'&&(at-queue[0].queuedAt>=r.highlightWait||!best)))
    return {kind:'highlight',id:queue[0].id,reason:'Replaying a score you missed'};

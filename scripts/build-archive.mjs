@@ -29,21 +29,65 @@ function yardsToGoal(start,abbr){
  if(start.possessionText==='50')return 50;
  const y=start.yardsToEndzone;return Number.isFinite(y)&&y>0&&y<=100?y:null;
 }
-// A scorebug reading taken while the clock was stopped could be anywhere in
-// that stoppage. Readings with a running clock pin the recording on their own;
-// the others are placed where that partial alignment says the footage was.
+// A scorebug reading is [media, quarter, clock, kind]. A running clock ("run")
+// pins the second the clock reached that value; the moment a stopped clock
+// resumed ("snap") pins the snap that starts from it. A reading taken while
+// the clock was stopped ("stop", or no kind) could be anywhere in that
+// stoppage; it is placed where the alignment built from the exact readings
+// says the footage was.
 function resolveReadings(game,readings,typeNames){
- const spans=readings.map(([media,period,clock])=>({media,...clockSpan(game,period,clock),label:`Q${period} ${clock}`}));
- const exact=spans.filter(r=>r.hi-r.lo<=20).map(r=>({wall:Math.round((r.lo+r.hi)/2),media:r.media}));
+ const spans=readings.map(([media,period,clock,kind='stop'])=>({media,kind,...clockSpan(game,period,clock),label:`Q${period} ${clock}`}));
+ const pinned=r=>r.kind!=='stop'||r.hi-r.lo<=20;
+ const pin=r=>({wall:r.kind==='snap'?r.hi:r.kind==='run'?r.lo:Math.round((r.lo+r.hi)/2),media:r.media});
+ const exact=spans.filter(pinned).map(pin);
  const guide=new RecordingSync(game,{types:typeNames,anchors:exact});
+ // A stopped-clock reading also sits, in game time, between the pinned readings on either side of it in the footage.
+ const byMedia=[...exact].sort((a,b)=>a.media-b.media);
  const anchors=spans.map(r=>{
-  if(r.hi-r.lo<=20)return {wall:Math.round((r.lo+r.hi)/2),media:r.media};
-  let best=r.lo,error=Infinity;
-  for(let w=r.lo;w<=r.hi;w++){const e=Math.abs(guide.media(w)-r.media);if(e<error){error=e;best=w;}}
+  if(pinned(r))return pin(r);
+  const before=byMedia.filter(a=>a.media<r.media).at(-1),after=byMedia.find(a=>a.media>r.media);
+  const lo=Math.max(r.lo,before?before.wall+1:-Infinity),hi=Math.min(r.hi,after?after.wall-1:Infinity);
+  if(lo>hi)return null;
+  let best=lo,error=Infinity;
+  for(let w=lo;w<=hi;w++){const e=Math.abs(guide.media(w)-r.media);if(e<error){error=e;best=w;}}
   if(error>90)console.warn(`  ${game.name||''} ${r.label}: ${Math.round(error)}s from the running-clock alignment`);
   return {wall:best,media:r.media};
- }).sort((a,b)=>a.wall-b.wall);
- return anchors.filter((a,i)=>!i||a.wall>anchors[i-1].wall&&a.media>anchors[i-1].media);
+ }).filter(Boolean).sort((a,b)=>a.wall-b.wall);
+
+ // Footage never outruns the game: between two anchors the recording holds at
+ // most the elapsed time (ESPN's wallclocks jitter by a few seconds). An
+ // anchor that fits neither neighbour is wrong; one that fits either stays.
+ // Readings after the final whistle or at the very end of the file pin
+ // nothing the channel needs.
+ const lastSnap=game.plays.at(-1)[0];
+ const inGame=anchors.filter(a=>a.wall<=lastSnap+2&&a.media<=game.recordingDuration-10);
+ const fits=(a,b)=>!!a&&!!b&&b.wall>a.wall&&b.media>a.media&&b.media-a.media<=b.wall-a.wall+8;
+ const plausible=[];
+ for(const [i,a] of inGame.entries()){
+  if(!(fits(inGame[i-1],a)||fits(a,inGame[i+1])))continue;
+  const last=plausible.at(-1);if(!last||a.wall>=last.wall+3&&a.media>last.media)plausible.push(a);   // two readings seconds apart pin the same moment
+ }
+ const kept=dropOutliers(game,plausible,typeNames);
+ if(process.env.DEBUG_ANCHORS)console.warn(`  ${game.name}: ${readings.length} readings, ${exact.length} pinned, ${anchors.length} placed, ${plausible.length} plausible, ${kept.length} kept`+(anchors.length-plausible.length>20?`; first implausible after wall ${anchors.find((a,i)=>i&&!(a.wall>anchors[i-1].wall&&a.media>anchors[i-1].media&&a.media-anchors[i-1].media<=a.wall-anchors[i-1].wall+2))?.wall}`:''));
+ return kept;
+}
+// Second line of defence against a misread: an anchor that a sync built from
+// its neighbours puts more than 45 s away is dropped, worst first, one at a
+// time, since one bad anchor makes its good neighbours look wrong too.
+function dropOutliers(game,anchors,typeNames){
+ const list=[...anchors];
+ for(let round=0;round<60;round++){
+  let worst=-1,error=45;
+  list.forEach((a,i)=>{
+   const around=[...list.slice(Math.max(0,i-4),i),...list.slice(i+1,i+5)];if(around.length<2)return;
+   const e=Math.abs(new RecordingSync(game,{types:typeNames,anchors:around}).media(a.wall)-a.media);
+   if(e>error){error=e;worst=i;}
+  });
+  if(worst<0)break;
+  console.warn(`  ${game.name} anchor wall ${list[worst].wall} media ${list[worst].media}: ${Math.round(error)}s off its neighbours, dropped`);
+  list.splice(worst,1);
+ }
+ return list;
 }
 const types=new Map();
 const typeIndex=name=>{if(!types.has(name))types.set(name,types.size);return types.get(name);};
@@ -72,7 +116,7 @@ for(const meta of previous.games){
   const parsed=parseScoringPlay(s.text,s.type?.text,s.scoringType?.name);
   scores.push({i,t:rows[i][0],team,kind:parsed.kind,defensive:team>=0&&offense>=0&&team!==offense||parsed.defensive,text:s.text.trim(),players:parsed.players,away:s.awayScore,home:s.homeScore,period:s.period?.number||0,clock:s.clock?.displayValue||''});
  }
- const anchors=resolveReadings({plays:rows,recordingDuration:meta.recordingDuration},readings[meta.id]||[],[...types.keys()]);
+ const anchors=resolveReadings({name:meta.name,plays:rows,recordingDuration:meta.recordingDuration},readings[meta.id]||[],[...types.keys()]);
  games.push({id:meta.id,name:meta.name,teams:[away,home].map(c=>({id:String(c.team.id),abbreviation:c.team.abbreviation,name:c.team.displayName})),date:meta.date,start:kickoff,end:kickoff+rows.at(-1)[0]+30,page:meta.page,embed:meta.embed,summary:meta.summary,recordingDuration:meta.recordingDuration,anchors,plays:rows,scores});
  playCount+=rows.length;scoreCount+=scores.length;
 }
