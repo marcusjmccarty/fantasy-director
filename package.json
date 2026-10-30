@@ -5,9 +5,13 @@
   "scripts": {
     "test": "node --test tests/*.test.js",
     "build": "node scripts/build.mjs",
-    "dev": "node scripts/preview.mjs"
+    "dev": "node scripts/preview.mjs",
+    "deploy": "npm run build && wrangler deploy"
   },
   "dependencies": {
     "hls.js": "1.7.4"
+  },
+  "devDependencies": {
+    "wrangler": "4.50.0"
   }
 }

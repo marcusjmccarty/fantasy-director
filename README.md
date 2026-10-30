@@ -2,7 +2,13 @@
 
 A RedZone-style channel for one fantasy roster. It watches every game your starters are in, keeps the picture on whoever is closest to the end zone, skips the breaks, and replays any score you missed. Plain browser JavaScript plus a small Cloudflare Worker; no framework.
 
-## Run
+## Live site
+
+The channel runs on Cloudflare Workers at **https://fantasy-stream.fantasy-hub.workers.dev** (free plan, one Worker, no other services). Open it on any device; there is nothing to run locally. Settings → League takes an ESPN league ID (public leagues need nothing else; a private league needs your SWID and espn_s2 cookies pasted under the ID, or set once with `npx wrangler secret put ESPN_SWID` / `ESPN_S2` / `ESPN_LEAGUE_ID`).
+
+Redeploy after a change with `npm run deploy` (builds `dist/` and uploads it with the Cloudflare account that `npx wrangler login` authorized; `wrangler.toml` names the Worker).
+
+## Run locally
 
 ```bash
 npm ci          # pins hls.js (loaded only for HLS live streams)

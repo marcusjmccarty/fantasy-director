@@ -1,0 +1,10 @@
+# Cloudflare Workers deployment: `npm run deploy` builds dist/ and uploads it.
+# The Worker serves the whole site (pages, scripts, the ESPN proxy, the
+# highlight resolver) from one script; no other Cloudflare resources are used.
+name = "fantasy-stream"
+main = "dist/server/index.js"
+compatibility_date = "2026-10-01"
+workers_dev = true
+
+# Optional secrets for a private ESPN league, set with `wrangler secret put <NAME>`:
+#   ESPN_LEAGUE_ID, ESPN_SWID, ESPN_S2  (and ESPN_OWNER_ID when an identity header is available)
