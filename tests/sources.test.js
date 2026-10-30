@@ -1,27 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {replaySourceAPI} from '../server/media.js';
-import {SourceCatalog,chooseSource} from '../web/sources.js';
 import {parseNFLPublicConfig,nflSourceAPI,nflMediaURL} from '../server/nfl.js';
 import {NFLSourceCatalog,rankNFLClips} from '../web/nfl-sources.js';
 
-test('browser fetch receives the global receiver for every replay and highlight request',async t=>{
+test('the highlight catalog keeps the global fetch receiver and recovers from synchronous failures',async t=>{
  const original=globalThis.fetch;let calls=0;
- globalThis.fetch=function(url){
-  if(this!==globalThis)throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");
-  calls++;return Promise.resolve(Response.json({sources:[{url:'https://ok.ru/videoembed/123',type:'provider/ok'}],url:'https://example.test/highlight.m3u8',expiresAt:Date.now()+300000}));
- };
+ globalThis.fetch=function(){if(this!==globalThis)throw new TypeError("Failed to execute 'fetch' on 'Window': Illegal invocation");calls++;return Promise.resolve(Response.json({url:'https://example.test/highlight.m3u8',expiresAt:Date.now()+300000}));};
  t.after(()=>{globalThis.fetch=original;});
- const replays=new SourceCatalog(),highlights=new NFLSourceCatalog();await replays.importAll(Array.from({length:14},(_,i)=>({id:String(i)})));
- assert.equal(replays.records.size,14);assert.equal(replays.errors.size,0);await highlights.resolve({id:'clip'});assert.equal(calls,15);
-});
-
-test('a synchronous request failure clears pending state so replay and highlight retries recover',async()=>{
- for(const Catalog of [SourceCatalog,NFLSourceCatalog]){
-  let attempts=0,now=1000;const catalog=new Catalog({now:()=>now,fetcher:()=>{if(++attempts===1)throw new TypeError('Request setup failed');return Promise.resolve(Response.json({sources:[{url:'https://ok.ru/videoembed/123'}],url:'https://example.test/highlight.m3u8',expiresAt:999999}));}});
-  await assert.rejects(catalog.resolve({id:'one'}),/Request setup failed/);assert.equal(catalog.pending.size,0);
-  now+=61000;await catalog.resolve({id:'one'});assert.equal(attempts,2);assert.equal(catalog.pending.size,0);assert.ok(catalog.get('one'));
- }
+ await new NFLSourceCatalog().resolve({id:'clip'});assert.equal(calls,1);
+ let attempts=0,now=1000;const catalog=new NFLSourceCatalog({now:()=>now,fetcher:()=>{if(++attempts===1)throw new TypeError('Request setup failed');return Promise.resolve(Response.json({url:'https://example.test/highlight.m3u8',expiresAt:999999}));}});
+ await assert.rejects(catalog.resolve({id:'one'}),/Request setup failed/);assert.equal(catalog.pending.size,0);
+ now+=61000;await catalog.resolve({id:'one'});assert.equal(attempts,2);assert.ok(catalog.get('one'));
 });
 test('replay source rejects arbitrary embeds and unsupported request methods',async()=>{
  const games=[{id:'bad',embed:'https://attacker.example/videoembed/1234'}];
@@ -33,11 +23,6 @@ test('replay resolver returns the original player without issuing transferable m
  const original=globalThis.fetch;globalThis.fetch=async()=>{calls++;throw new Error('Replay delivery must stay inside the provider.');};t.after(()=>{globalThis.fetch=original;});
  const response=await replaySourceAPI(new Request('https://site.test/api/replay-source?id=test-source-1'),games);assert.equal(response.status,200);const body=await response.json();assert.equal(body.sources[0].type,'provider/ok');assert.equal(body.sources[0].url,games[0].embed);assert.equal(body.duration,7800);
  assert.equal((await replaySourceAPI(new Request('https://site.test/api/replay-source?id=https://attacker.example/'),games)).status,404);assert.equal(calls,0);
-});
-test('source import is bounded, coalesces requests, and refreshes ephemeral URLs',async()=>{
- let now=1000,calls=0,inFlight=0,max=0;const catalog=new SourceCatalog({now:()=>now,fetcher:async url=>{calls++;max=Math.max(max,++inFlight);await new Promise(r=>setImmediate(r));inFlight--;return new Response(JSON.stringify({id:new URL('https://x'+url).searchParams.get('id'),sources:[{quality:'sd',url:'https://a.vkuser.net/x'}],expiresAt:now+100}),{headers:{'Content-Type':'application/json'}});}});
- const games=Array.from({length:14},(_,i)=>({id:String(i)}));await catalog.importAll(games,['8']);assert.equal(catalog.records.size,14);assert.ok(max<=3);
- await Promise.all([catalog.resolve(games[0]),catalog.resolve(games[0])]);assert.equal(calls,14);now+=101;await Promise.all([catalog.resolve(games[0]),catalog.resolve(games[0])]);assert.equal(calls,15);assert.equal(chooseSource(catalog.get('0')).quality,'sd');
 });
 test('NFL anonymous resolver returns only an ephemeral HLS source, without the identity token',async()=>{
  const config='desktop:{production:{nflClientId:"public-id",nflClientKey:"public-key",nflClientSecret:"public-secret"';assert.deepEqual(parseNFLPublicConfig(config),{clientKey:'public-key',clientSecret:'public-secret'});

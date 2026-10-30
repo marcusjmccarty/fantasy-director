@@ -1,75 +1,127 @@
-// OK's published VideoEmbed module accepts action messages. Its classic player
-// reports inited/started/timeupdate/rewound/paused/ended/error to the parent.
-// Keep media delivery inside the original provider; never export its signed URL.
+// Drives OK's embedded player through the postMessage interface its public
+// player ships (actions: play, pause, seek, mute, unmute, volume; events:
+// inited, started, resumed, paused, timeupdate, rewound, ended, error, adShown).
+// Media stays inside the provider's own player.
+const ORIGIN='https://ok.ru';
 export function providerURL(value){
- const u=new URL(value);if(u.origin!=='https://ok.ru'||!/^\/videoembed\/\d+$/.test(u.pathname))throw new Error('Unknown replay provider.');
- u.search='?muted=1&silent=1';u.hash='';return u.href;
+ const u=new URL(value);if(u.origin!==ORIGIN||!/^\/videoembed\/\d+$/.test(u.pathname))throw new Error('Unknown replay provider.');
+ u.search='?autoplay=1&muted=1&silent=1';u.hash='';return u.href;
 }
+const ERRORS={100:'This recording is still processing.',101:'This recording was removed.',102:'The provider blocked this recording.',103:'The provider could not find this recording.',150:'The provider restricted this recording.',151:'The provider denied access to this recording.',152:'The provider disabled embedded playback.',153:'This recording is unavailable in your region.'};
+
 export class ProviderPlayer{
- constructor({createFrame=()=>document.createElement('iframe'),events=window,now=()=>performance.now()}={}){
-  this.kind='provider';this.element=createFrame();this.events=events;this.now=now;this.listeners=new Map();this.pendingPlay=[];
-  this.readyState=0;this.networkState=0;this.duration=NaN;this.error=null;this.seeking=false;this.paused=true;this.initialized=false;this.progress=0;this.lastTime=0;this.lastProgress=-Infinity;this.lastAdvance=-Infinity;this.wantsPlay=false;this._muted=true;this._target=null;this._src='';this.userInteractable=false;this._seekSent=false;
-  this.inAd=false;this.buffered={length:0};this.element.title='Full-game replay · provider player';this.element.allow='autoplay; fullscreen; picture-in-picture';this.element.allowFullscreen=true;this.element.referrerPolicy='strict-origin-when-cross-origin';
-  this.message=event=>this.receive(event);events.addEventListener('message',this.message);
+ constructor(url,{events=window,now=()=>performance.now(),createFrame=()=>document.createElement('iframe'),duration=NaN}={}){
+  this.kind='provider';this.events=events;this.now=now;this.listeners=new Map();
+  this.element=createFrame();this.element.className='layer';this.element.title='Game replay';
+  this.element.allow='autoplay; fullscreen; picture-in-picture; encrypted-media';this.element.referrerPolicy='strict-origin-when-cross-origin';
+  this.duration=Number(duration)>0?Number(duration):NaN;this.knownDuration=Number.isFinite(this.duration);this.lastTime=0;this.lastMessage=-Infinity;this.lastAdvance=-Infinity;this.advances=0;
+  this.initialized=false;this.primed=false;this.inAd=false;this.timer=null;this.error=null;this.wantPlay=false;this.target=null;this.isMuted=true;this.seekedAt=-Infinity;this.seekStartedAt=null;this.seekLatency=3000;this.lastReport=-Infinity;this.kickedAt=-Infinity;this.audioLocked=false;this.audioWatch=null;
+  this.element.src=providerURL(url);   // validated before anything is registered
+  this.onMessage=event=>this.receive(event);events.addEventListener('message',this.onMessage);
  }
- get classList(){return this.element.classList;}set className(value){this.element.className=value;}
- set userInteractable(value){this._interactive=!!value;this.element.classList.toggle('interactive',!!value);}get userInteractable(){return this._interactive;}
- setAttribute(name,value){this.element.setAttribute(name,value);}
- removeAttribute(name){if(name==='src')this._src='';this.element.removeAttribute(name);}
- set src(value){this._src=providerURL(value);}get src(){return this._src;}
- load(){if(this._src){this.element.src=this._src;this.networkState=2;}else this.stopTimer();}
- addEventListener(name,callback){if(!this.listeners.has(name))this.listeners.set(name,new Set());this.listeners.get(name).add(callback);}
- emit(name){for(const callback of this.listeners.get(name)||[])callback();}
- send(action,extra={}){this.element.contentWindow?.postMessage({action,...extra},'https://ok.ru');}
- set muted(value){this._muted=!!value;this.send(value?'mute':'unmute');this.send('volume',{value:value?0:1});}
- get muted(){return this._muted;}
- set controls(value){}set playsInline(value){}set preload(value){}set playbackRate(value){}get playbackRate(){return 1;}
- get currentTime(){const elapsed=this.paused||this.inAd?0:Math.min(2.5,Math.max(0,(this.now()-this.lastProgress)/1000));return this.lastTime+elapsed;}
- set currentTime(value){this._target=Math.max(0,Number(value)||0);this.seeking=true;this.progress=0;this.seekAt=this.now();this._seekSent=false;this._startedSeek=false;if(this.initialized&&!this.inAd){this.send('seek',{time:this._target});this._seekSent=true;}}
- stopTimer(){clearInterval(this.bootstrap);this.bootstrap=null;}
- start(){
-  if(!this.initialized||!this.wantsPlay)return;
-  if(this.inAd){this.send('play');return;}
-  this.send(this._muted?'mute':'unmute');if(this._muted)this.send('volume',{value:0});this.send('play');
-  if(this._target!==null&&this.seeking&&!this._seekSent){this.send('seek',{time:this._target});this._seekSent=true;}
+ on(name,callback){if(!this.listeners.has(name))this.listeners.set(name,new Set());this.listeners.get(name).add(callback);}
+ emit(name,detail){for(const callback of this.listeners.get(name)||[])callback(detail);}
+ send(action,extra={}){try{this.element.contentWindow?.postMessage({action,...extra},ORIGIN);}catch{}}
+ get currentTime(){
+  const playing=this.wantPlay&&!this.inAd&&this.now()-this.lastAdvance<1500;
+  return this.lastTime+(playing?Math.min(1,(this.now()-this.lastMessage)/1000):0);
  }
- play(){
-  this.wantsPlay=true;
-  if(!this.paused&&this.progress>0)return Promise.resolve();
-  const promise=new Promise((resolve,reject)=>this.pendingPlay.push({resolve,reject}));this.start();
-  if(!this.bootstrap){let tries=0;this.bootstrap=setInterval(()=>{if(!this.wantsPlay||++tries>60){this.stopTimer();return;}this.start();},500);}
-  return promise;
+ // Footage is moving right now (two recent advancing time reports, no ad).
+ get progressing(){return !this.inAd&&!this.error&&this.advances>=2&&this.now()-this.lastAdvance<1500;}
+ // Ready to be shown at `target`: footage has played at this position since
+ // the last seek, and is either still moving or deliberately paused there.
+ near(target,tolerance=2.5){return this.primed&&!this.inAd&&!this.error&&this.target===null&&(this.progressing||!this.wantPlay)&&Math.abs(this.currentTime-target)<=tolerance;}
+ play(){this.wantPlay=true;if(this.initialized)this.bootstrap();}
+ pause(){this.wantPlay=false;this.advances=0;this.stopBootstrap();if(this.initialized)this.send('pause');}
+ // The provider drops a play sent before its player is ready (observed: one
+ // play after `inited` yields nothing, a half-second retry starts footage), so
+ // keep asking until a time report proves the footage is moving.
+ bootstrap(){
+  if(this.timer)return;let tries=0;
+  const tick=()=>{
+   if(!this.wantPlay||this.advances>=2||++tries>120){this.stopBootstrap();return;}
+   if(this.inAd)return;
+   // A provider that has gone quiet after a seek or a restart is wedged; a pause breaks the spell and the next tick plays again.
+   if(this.initialized&&this.now()-this.lastReport>6000&&this.now()-this.kickedAt>6000){this.kickedAt=this.now();this.send('pause');return;}
+   if(tries%4===1)this.applyVolume();
+   // Re-seeking every tick would abort the provider's own seek; ask again only when one has gone unanswered.
+   if(this.target!==null&&this.now()-this.seekedAt>3000){this.seekedAt=this.now();this.send('seek',{time:this.target});}
+   this.send('play');
+  };
+  tick();if(!this.timer){this.timer=setInterval(tick,500);this.timer.unref?.();}
  }
- pause(){this.wantsPlay=false;this.paused=true;this.stopTimer();this.send('pause');const pending=this.pendingPlay.splice(0);for(const p of pending)p.reject(new DOMException('Playback paused','AbortError'));}
- readyAt(target){return !this.inAd&&this.progress>=2&&!this.seeking&&!this.error&&this.now()-this.lastAdvance<3000&&Math.abs(this.currentTime-target)<3;}
- checkStall(){if(this.wantsPlay&&!this.paused&&!this.seeking&&!this.inAd&&this.progress>=2&&this.now()-this.lastAdvance>6000&&!this.stalled){this.stalled=true;this.emit('waiting');}}
+ stopBootstrap(){if(this.timer){clearInterval(this.timer);this.timer=null;}}
+ // Footage stopped moving although we want it to: forget the progress seen so far and ask again until it moves.
+ kick(){this.advances=0;this.primed=false;this.stalled=true;if(this.initialized)this.bootstrap();}
+ seek(time){
+  this.target=Math.max(0,Number(time)||0);this.advances=0;this.primed=false;this.seekedAt=this.now();this.seekStartedAt??=this.now();
+  if(Number.isFinite(this.duration))this.target=Math.min(this.target,this.duration-1);
+  if(this.initialized&&!this.inAd){this.send('seek',{time:this.target});if(this.wantPlay)this.bootstrap();}
+ }
+ // Unmuting can wedge the provider's player (observed: footage stops within a
+ // second and ignores play/seek until muted again). Watch for that and fall
+ // back to muted playback, flagging the slot so the app can offer a retry.
+ set muted(value){
+  this.isMuted=!!value;clearTimeout(this.audioWatch);this.audioWatch=null;
+  if(!this.initialized)return;
+  this.applyVolume();
+  if(!this.isMuted&&this.wantPlay){
+   const mark=this.lastTime;
+   this.audioWatch=setTimeout(()=>{this.audioWatch=null;if(this.isMuted||this.inAd)return;if(this.lastTime<=mark+.5){this.audioLocked=true;this.isMuted=true;this.applyVolume(true);this.kick();this.emit('audiolocked');}},3000);
+   this.audioWatch.unref?.();
+  }
+ }
+ get muted(){return this.isMuted;}
+ // Volume commands are sent only when the wanted state changes (or the player re-initialized); repeating them audibly stutters the provider.
+ applyVolume(force=false){if(!force&&this.appliedMuted===this.isMuted)return;this.appliedMuted=this.isMuted;this.send(this.isMuted?'mute':'unmute');this.send('volume',{value:this.isMuted?0:1});}
  receive(event){
-  if(event.origin!=='https://ok.ru'||event.source!==this.element.contentWindow||!event.data||typeof event.data!=='object')return;
-  const data=event.data;
-  if(data.event==='inited'){this.initialized=true;this.readyState=1;this.networkState=1;this.emit('loadedmetadata');this.start();return;}
-  if(data.event==='error'){const messages={100:'This recording is still processing.',101:'This recording was removed.',102:'The provider blocked this recording.',103:'The provider could not find this recording.',150:'The provider restricted this recording.',151:'The provider denied access to this recording.',152:'The provider disabled embedded playback.',153:'This recording is unavailable in your region.'};this.error={code:'PROVIDER_'+String(data.code??0),message:(messages[data.code]||'The replay provider could not start this recording.')+' Choose another game.'};this.readyState=0;this.stopTimer();for(const p of this.pendingPlay.splice(0))p.reject(new Error(this.error.message));this.emit('error');return;}
-  if(data.event==='paused'){this.paused=true;return;}
-  if(data.event==='ended'){this.paused=true;this.emit('ended');return;}
-  if(data.event==='adShown'){this.inAd=true;this.progress=0;this.readyState=1;this.emit('adstart');return;}
-  if(data.event==='started'||data.event==='resumed'){if(this.inAd)return;if(this.userInteractable)this.wantsPlay=true;this.send(this._muted?'mute':'unmute');if(this.seeking&&!this._startedSeek){this._startedSeek=true;this.send('seek',{time:this._target});}return;}
-  if(data.event!=='timeupdate'&&data.event!=='rewound')return;
+  if(event.origin!==ORIGIN||event.source!==this.element.contentWindow||!event.data||typeof event.data!=='object')return;
+  const data=event.data,now=this.now();this.lastReport=now;
+  switch(data.event){
+   case 'inited':
+    this.initialized=true;this.applyVolume(true);
+    if(this.target!==null)this.send('seek',{time:this.target});
+    if(this.wantPlay)this.bootstrap();else this.send('pause');
+    return;
+   case 'error':
+    this.error={code:'PROVIDER_'+(data.code??0),message:(ERRORS[data.code]||'The replay provider could not start this recording.')};
+    this.emit('error',this.error);return;
+   case 'adShown':
+    if(!this.inAd){this.inAd=true;this.advances=0;this.primed=false;this.emit('ad',true);}return;
+   case 'ended':this.emit('ended');return;
+   case 'started':case 'resumed':
+    // The provider restarts from its own remembered position; put it back on ours.
+    if(!this.wantPlay)this.send('pause');
+    else if(this.target!==null&&!this.inAd){this.seekedAt=now;this.send('seek',{time:this.target});}
+    this.applyVolume(true);return;
+   case 'timeupdate':case 'rewound':break;
+   default:return;
+  }
   if(typeof data.time!=='number'||!Number.isFinite(data.time)||data.time<0)return;
-  // Ad resume/pause messages are ambiguous. Only a content timeupdate matching
-  // the recording duration can clear the ad latch; ad progress never drives sync.
-  if(this.inAd){if(data.event!=='timeupdate'||!Number.isFinite(this.duration)||typeof data.duration!=='number'||Math.abs(data.duration-this.duration)>5)return;this.inAd=false;this.progress=0;this.emit('adend');if(this.seeking){this.send('seek',{time:this._target});this._seekSent=true;}}
-  if(typeof data.duration==='number'&&data.duration>0)this.duration=data.duration;
-  if(this.seeking){
-   // A rewind acknowledgement alone is not proof of delivered video.
-   if(Math.abs(data.time-this._target)>3)return;
-   if(data.event==='timeupdate'){this.seeking=false;this.progress=0;this.emit('seeked');}
+  // Only content progress with the recording's own duration ends an ad. Before
+  // the recording length is known, a pre-roll's own length must not be adopted.
+  if(typeof data.duration==='number'&&data.duration>0){
+   if(this.inAd){
+    // Content is recognized by the recording's length (from the catalog when we have it); ads are short.
+    const content=Number.isFinite(this.duration)?Math.abs(data.duration-this.duration)<=5:data.duration>180;
+    if(!content)return;this.inAd=false;this.emit('ad',false);if(this.target!==null)this.send('seek',{time:this.target});
+   }
+   if(!Number.isFinite(this.duration))this.duration=data.duration;
+  }else if(this.inAd)return;
+  if(this.target!==null){
+   if(Math.abs(data.time-this.target)>3){
+    // A rewind elsewhere means the provider moved us; a stale time report just means our seek is pending.
+    if(!this.inAd&&(data.event==='rewound'||now-this.seekedAt>3000)){this.seekedAt=now;this.send('seek',{time:this.target});}
+    return;
+   }
+   // Landed. Remember how long that took, then ask for play again until footage moves.
+   if(this.seekStartedAt!==null){this.seekLatency=Math.round(this.seekLatency*.5+Math.min(15000,now-this.seekStartedAt)*.5);this.seekStartedAt=null;}
+   this.target=null;this.advances=0;if(this.wantPlay)this.bootstrap();
   }
   if(data.event!=='timeupdate')return;
-  const advanced=data.time>this.lastTime+.025;
-  if(this.progress===0||advanced){this.lastAdvance=this.now();this.stalled=false;}
-  this.progress=this.progress===0?1:advanced?this.progress+1:this.progress;
-  this.lastTime=data.time;this.lastProgress=this.now();this.paused=!this.wantsPlay;this.readyState=this.progress>=2?3:2;
-  if(this.wantsPlay){this.stopTimer();for(const p of this.pendingPlay.splice(0))p.resolve();}
-  this.emit('timeupdate');
+  if(data.time>this.lastTime+.02||this.advances===0){this.advances++;this.lastAdvance=now;if(this.advances>=2){this.primed=true;this.stalled=false;this.stopBootstrap();}}
+  this.lastTime=data.time;this.lastMessage=now;
+  if(!this.wantPlay&&this.advances>2)this.send('pause');
  }
- remove(){this.pause();this.events.removeEventListener('message',this.message);this.element.remove();}
+ destroy(){this.wantPlay=false;this.stopBootstrap();clearTimeout(this.audioWatch);this.events.removeEventListener('message',this.onMessage);this.element.removeAttribute('src');this.element.remove();this.listeners.clear();}
 }

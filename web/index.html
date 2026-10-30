@@ -1,38 +1,73 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#f6f6f3"><meta name="description" content="Your fantasy roster. Your football viewing room."><title>Fantasy Stream</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/style.css"></head><body>
-<header class="site-header"><a href="/" class="brand">Fantasy Stream</a><div class="header-actions"><button id="connectionButton">League</button><button id="settingsButton">Sources & sync</button></div></header>
-<main>
-<section class="connect-bar" id="connectBar"><form id="leagueForm"><label for="leagueId">Connect your ESPN league</label><div class="inline"><input id="leagueId" inputmode="numeric" autocomplete="off" placeholder="Paste league ID" required aria-describedby="importStatus"><button type="submit" id="importButton" class="primary">Import league</button></div></form><p id="importStatus" role="status">Your saved connection imports all franchises. Choose any team below.</p></section>
-<section class="watch-room" id="watchRoom" aria-label="Fantasy viewing room">
-<div class="room-toolbar"><div class="mode-tabs" aria-label="Viewing mode"><button id="replayMode" aria-pressed="true">Replay lab</button><button id="liveMode" aria-pressed="false">Live</button></div><label class="franchise"><span>Franchise</span><select id="franchiseSelect" aria-label="Choose franchise"><option value="">Sample roster</option></select></label><button id="roomSettings" class="fullscreen-settings">Sources & sync</button><button id="fullscreenButton" aria-label="Enter fullscreen">Full screen ↗</button></div>
-<div class="watch-layout">
-<section class="watch-column" aria-label="Watching">
-<div class="player" id="player">
- <div class="signal" id="signal"><div class="signal-top"><span class="eyebrow">ARCHIVED PLAY-BY-PLAY</span><span id="signalClock">Week 7</span></div><div class="scoreboard" id="signalScore"></div><div class="field" aria-hidden="true"><span class="endzone left" id="awayAbbr"></span><div class="ball-marker" id="ballMarker"></div><span class="endzone right" id="homeAbbr"></span></div><p id="signalPlay">Loading last week’s games…</p><small id="signalDetail">A deterministic test of your director. No live games needed.</small></div>
- <div id="mediaDeck" class="video-host" hidden></div>
- <iframe id="externalFrame" title="NFL full-game replay" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen referrerpolicy="no-referrer" hidden></iframe>
- <div id="playerSplash" class="player-splash"><span class="eyebrow">WEEK 7 · REPLAY LAB</span><h2 id="splashTitle">Your roster. One feed.</h2><p id="splashDetail">All 14 games, with shared playback controls.</p><button id="splashPlay" class="primary">Play replay</button></div>
-</div>
-<div class="now"><div><div id="modeCaption" class="caption">REPLAY LAB</div><h1 id="gameTitle">Last week. Any time.</h1><p id="reason">Loading the recorded NFL slate…</p></div><div class="director-controls"><label class="auto-label"><input type="checkbox" id="autoDirector" checked> Auto director</label><select id="focusSelect" aria-label="Automatic game selection"><option value="redzone">Roster + RedZone fallback</option><option value="roster">Only my roster’s games</option></select></div></div>
-<div class="transport" id="transport">
- <div class="transport-top"><label class="session-label"><span id="weekLabel">Week 7</span><select id="sessionSelect" aria-label="Replay day"></select></label><label class="source-label"><span>Picture</span><select id="pictureMode" aria-label="Replay picture"><option value="native">Replay video</option><option value="signal">Data only</option></select></label></div>
- <label class="timeline-label" for="timeline"><span id="timelineTime">—</span><span id="timelineEnd">Eastern time</span></label><input type="range" id="timeline" min="0" max="1" step="1" value="0" aria-label="Seek all test streams">
- <div class="transport-buttons"><button class="primary" id="playButton">Play replay</button><button id="skipBack" aria-label="Back 30 seconds">−30s</button><button id="skipForward" aria-label="Forward 30 seconds in the recording">+30s</button><button id="nextSwitch">Next switch →</button><button id="restartTest" aria-label="Restart replay day">↺</button><select id="playbackRate" aria-label="Test speed"><option value="1">1×</option><option value="4">4×</option><option value="16">16×</option><option value="60">60×</option></select><button id="muteButton" aria-pressed="true">Unmute</button></div>
-</div>
-<div class="player-footer"><div><p id="playbackStatus" role="status">Loading the replay archive…</p><p id="prepStatus" class="small-note"></p></div><div><button id="alignVideo">Sync this play</button><button id="retryVideo">Retry video</button><button id="returnGame" hidden>Return to game</button><a id="sourceLink" target="_blank" rel="noopener noreferrer" hidden>Original replay ↗</a></div></div>
-<p class="player-note" id="playbackNote">The next picture prepares before each cut. Shared replay alignment is estimated until you save observed sync points.</p>
-</section>
-<aside><div class="side-tabs" role="tablist" aria-label="Viewing details"><button role="tab" id="gamesTab" aria-selected="true" aria-controls="gamesPanel">Games <span id="gameCount">14</span></button><button role="tab" id="rosterTab" aria-selected="false" aria-controls="rosterPanel">Roster</button><button role="tab" id="clipsTab" aria-selected="false" aria-controls="clipsPanel">Highlights</button></div>
-<section role="tabpanel" id="gamesPanel" aria-labelledby="gamesTab"><div class="panel-heading"><h2 id="gamesHeading">The full week</h2><span id="feedStatus">Recorded</span></div><div id="gameList"></div><p class="small-note">Your starters take priority. RedZone fallback runs only when they are quiet; choose Only my roster’s games to disable it. Click any game to pin it.</p></section>
-<section role="tabpanel" id="rosterPanel" aria-labelledby="rosterTab" hidden><div class="panel-heading"><h2 id="teamName">Sample roster</h2><button id="refreshRoster" hidden>Refresh</button></div><p class="small-note" id="rosterNote"></p><div id="rosterList"></div></section>
-<section role="tabpanel" id="clipsPanel" aria-labelledby="clipsTab" hidden><div class="panel-heading"><h2>Official NFL highlights</h2></div><label class="auto-label"><input type="checkbox" id="autoClips" checked> Play at quiet moments</label><div id="clipList"></div><p class="small-note">Official NFL short clips prepare before entering the feed. Priority action returns you to a ready game.</p></section>
-</aside></div>
-<dialog id="settingsDialog"><form id="settingsForm"><div class="dialog-top"><h2>Sources & sync</h2><button type="button" id="closeSettings" aria-label="Close settings">✕</button></div><p>All 14 replays import automatically. The original replay players receive shared seek commands. The next game must report advancing footage before the cut. Your current picture stays visible until the next game confirms playback. Ads reported by the provider are excluded from automatic cuts; commercials inside a recording may still need +30s or a sync point.</p><p>Choose replay quality in the video player’s own settings. Imported full-game replays run at 1×.</p><details><summary>Playback diagnostics</summary><p>Export playback confirmation, completed cuts, stalls, and sync points. Native video sources also report buffered seconds. Source tokens and ESPN credentials are excluded.</p><button type="button" id="downloadDiagnostics">Download playback report</button></details>
-<details id="syncDetails"><summary>Align the play on screen</summary><p id="syncDescription"></p><div id="syncPreview" class="sync-preview" hidden></div><p>Read the quarter and game clock shown in the footage. This saves an observed alignment point for the shared timeline.</p><div class="sync-game-clock"><label>Quarter <select id="syncQuarter"><option value="1">1st</option><option value="2">2nd</option><option value="3">3rd</option><option value="4">4th</option><option value="5">OT</option></select></label><label>Game clock <input id="syncGameClock" placeholder="12:34" aria-label="Game clock in the footage"></label></div><label for="syncTime">Recording playhead (m:ss or h:mm:ss)</label><div class="inline"><input id="syncTime" placeholder="0:00" readonly><button type="button" id="addSync">Add sync mark</button><button type="button" id="clearSync">Reset marks</button></div><p id="syncMarks" class="small-note"></p><p class="small-note">Until you save points, alignment uses recording duration and is estimated. Add points after edited breaks for precise alignment. Use the video controls above to locate a visible snap. Pause there, enter its quarter and game clock, then save.</p></details>
-<details open><summary id="sourceHeading">Imported replays · optional overrides</summary><div id="streamInputs"></div></details>
-<details><summary>Edit roster manually</summary><p>One starter per line: name, NFL team, position.</p><textarea id="manualRoster" rows="5" aria-label="Manual roster"></textarea></details><p id="settingsError" role="alert"></p><button class="primary" type="submit">Save sources</button></form></dialog>
-<div id="roomNotice" role="status" hidden></div>
-</section>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b0f0d"><meta name="description" content="A RedZone-style channel for your fantasy roster: every snap your starters take, every point they score."><title>Fantasy Stream</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/style.css"></head><body>
+<header class="bar">
+ <a href="/" class="brand"><span class="dot" aria-hidden="true"></span>Fantasy Stream</a>
+ <div class="modes" role="group" aria-label="Viewing mode"><button id="replayMode" aria-pressed="true">Week 7 replay</button><button id="liveMode" aria-pressed="false">Live</button></div>
+ <label class="franchise"><span class="sr">Franchise</span><select id="franchise" aria-label="Franchise"></select></label>
+ <button id="settingsButton" class="ghost">Settings</button>
+</header>
+<main class="room" id="room">
+ <section class="stage" aria-label="Your channel">
+  <div class="screen" id="screen">
+   <div class="layers" id="layers"></div>
+   <div class="field-view" id="fieldView" hidden>
+    <div class="fv-score" id="fvScore"></div>
+    <div class="fv-field"><span class="fv-end" id="fvLeft"></span><div class="fv-grid"><div class="fv-ball" id="fvBall"></div><div class="fv-line" id="fvLine"></div></div><span class="fv-end" id="fvRight"></span></div>
+    <p class="fv-play" id="fvPlay"></p><small class="fv-note" id="fvNote"></small>
+   </div>
+   <div class="bug" id="bug" hidden><span class="bug-tag" id="bugTag">REPLAY</span><span id="bugGame"></span><span class="bug-clock" id="bugClock"></span></div>
+   <div class="lower" id="lower" hidden><div class="lower-kicker" id="lowerKicker"></div><div class="lower-main" id="lowerMain"></div><div class="lower-meta" id="lowerMeta"></div></div>
+   <div class="toast" id="toast" role="status" hidden></div>
+   <div class="switching" id="switching" hidden></div>
+   <div class="overlay" id="overlay"><div class="overlay-card"><span class="eyebrow" id="ovEyebrow">WEEK 7 · SUNDAY OCT 25</span><h1 id="ovTitle">Every snap your starters take.</h1><p id="ovText">The channel follows your players on the field, goes to whoever is closest to the end zone, skips the breaks, and replays any score you missed.</p><button id="ovButton" class="primary big">Start watching</button><small id="ovHint"></small></div></div>
+   <button class="unmute" id="unmute" hidden>🔇 Tap for sound</button>
+  </div>
+  <div class="transport" id="transport">
+   <button id="playButton" class="icon primary" aria-label="Play">▶</button>
+   <button id="backButton" class="icon" aria-label="Back 30 seconds">−30</button>
+   <button id="forwardButton" class="icon" aria-label="Forward 30 seconds">+30</button>
+   <button id="nextButton" class="pill" title="Skip ahead to your next drive">Next drive ⏭</button>
+   <div class="timeline"><div class="ticks" id="ticks" aria-hidden="true"></div><div class="scrub-tip" id="scrubTip" hidden></div><input type="range" id="timeline" min="0" max="1" step="1" value="0" aria-label="Replay time"></div>
+   <select id="scope" aria-label="Timeline range" title="What the timeline spans"><option value="game">This game</option><option value="tight">15 minutes</option><option value="day">Whole day</option></select>
+   <span class="time" id="timeLabel">—</span>
+   <select id="daySelect" aria-label="Replay day"></select>
+   <select id="speed" aria-label="Speed" hidden><option value="1">1×</option><option value="4">4×</option><option value="16">16×</option><option value="60">60×</option></select>
+   <button id="muteButton" class="icon" aria-label="Unmute">🔇</button>
+   <button id="fullButton" class="icon" aria-label="Full screen">⛶</button>
+  </div>
+  <div class="status-line"><span id="autoChip" class="chip on">AUTO</span><span id="reason">Loading the Week 7 slate…</span><button id="resumeAuto" class="link" hidden>Resume auto</button><span class="spacer"></span><span id="pictureNote" class="muted"></span></div>
+ </section>
+ <aside class="rail">
+  <section aria-labelledby="gamesHead"><div class="rail-head"><h2 id="gamesHead">Your games</h2><span class="muted" id="gamesNote"></span></div><ol class="games" id="games"></ol></section>
+  <section aria-labelledby="rosterHead"><div class="rail-head"><h2 id="rosterHead">Your starters</h2><span class="muted" id="rosterNote"></span></div><ul class="roster" id="roster"></ul></section>
+  <section aria-labelledby="scoresHead"><div class="rail-head"><h2 id="scoresHead">Your scores</h2><span class="muted" id="scoresNote"></span></div><ul class="scores" id="scores"></ul></section>
+ </aside>
 </main>
-
+<dialog id="settings" aria-labelledby="settingsTitle"><form method="dialog" id="settingsForm">
+ <div class="dialog-head"><h2 id="settingsTitle">Settings</h2><button type="button" id="closeSettings" class="icon ghost" aria-label="Close">✕</button></div>
+ <div class="tabs" role="tablist"><button type="button" role="tab" data-tab="league" aria-selected="true">League</button><button type="button" role="tab" data-tab="viewing" aria-selected="false">Viewing</button><button type="button" role="tab" data-tab="sources" aria-selected="false">Streams</button><button type="button" role="tab" data-tab="sync" aria-selected="false">Replay sync</button></div>
+ <section data-panel="league">
+  <label for="leagueId">ESPN league ID</label><div class="inline"><input id="leagueId" inputmode="numeric" autocomplete="off" placeholder="e.g. 12345678"><button type="button" id="importLeague" class="primary">Import</button></div>
+  <p class="muted" id="leagueStatus">Public leagues need only the ID. Starters only; bench and IR are ignored.</p>
+  <label for="manualRoster">Or type your starters</label><textarea id="manualRoster" rows="9" spellcheck="false" aria-describedby="rosterHelp"></textarea><p class="muted" id="rosterHelp">One per line: name, team, position (QB, RB, WR, TE, K, D/ST). Example: <code>Jonathan Taylor, IND, RB</code></p>
+  <button type="button" id="saveRoster">Use this roster</button>
+ </section>
+ <section data-panel="viewing" hidden>
+  <label class="check"><input type="checkbox" id="optDefense" checked> Follow my D/ST when no other starter is on the field</label>
+  <label class="check"><input type="checkbox" id="optHighlights" checked> Replay scores I missed</label>
+  <label class="check"><input type="checkbox" id="optData"> Data-only picture (no video; allows up to 60× in the replay)</label>
+  <label for="optDelay">Live stream delay behind the ESPN feed (seconds)</label><input id="optDelay" type="number" min="0" max="180" step="5" value="30">
+  <div class="rules"><h3>How the channel decides</h3><ul>
+   <li>Only games where one of your starters is on the field. Never a game without your players.</li>
+   <li>Offense first, closest to the end zone. Your D/ST only fills in when no offense is on.</li>
+   <li>Kickers only on 4th down in field-goal range (inside the opponent 42).</li>
+   <li>Never cuts mid-play. A rival drive needs to be 10+ yards closer, or entering the red zone, to take over.</li>
+   <li>Breaks and provider ads are skipped. If one of your players scores off screen, you get the replay at the next quiet moment.</li></ul></div>
+ </section>
+ <section data-panel="sources" hidden><p class="muted">Live mode plays your own stream links (MP4, WebM or HLS .m3u8) per game. The Week 7 replay imports its recordings automatically.</p><div id="streamInputs"></div><button type="button" id="saveStreams">Save streams</button></section>
+ <section data-panel="sync" hidden><p class="muted">Each replay is aligned to the play-by-play with scorebug readings. If a cut lands on the wrong moment, pause on a snap and add a mark: the quarter and game clock on screen, at the current video position.</p>
+  <div class="sync-row"><label>Game <select id="syncGame"></select></label><label>Quarter <select id="syncQuarter"><option value="1">1st</option><option value="2">2nd</option><option value="3">3rd</option><option value="4">4th</option><option value="5">OT</option></select></label><label>Clock <input id="syncClock" placeholder="12:34" size="6"></label></div>
+  <div class="inline"><button type="button" id="addSync" class="primary">Mark current video position</button><button type="button" id="clearSync">Reset my marks</button></div><p class="muted" id="syncStatus"></p></section>
+ <p class="error" id="settingsError" role="alert"></p>
+</form></dialog>
 <script type="module" src="/app.js"></script></body></html>

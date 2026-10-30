@@ -4,7 +4,9 @@ async function hls(){hlsModule??=import('/hls.light.mjs');return (await hlsModul
 export async function attachMediaSource(video,source,onFatal=()=>{}){
  if(source.type==='provider/ok'){video.src=source.url;video.load();return null;}
  const isHLS=/mpegurl/i.test(source.type||'')||/\.m3u8(?:\?|$)/i.test(source.url);
- if(!isHLS||video.canPlayType('application/vnd.apple.mpegurl')){video.src=source.url;video.load();return null;}
+ // Chromium builds may answer "maybe" to canPlayType for HLS and then fail; trust hls.js wherever MSE exists.
+ const nativeHLS=!('MediaSource' in globalThis)&&video.canPlayType('application/vnd.apple.mpegurl');
+ if(!isHLS||nativeHLS){video.src=source.url;video.load();return null;}
  const Hls=await hls();if(!Hls.isSupported())throw new Error('HLS is unavailable in this browser.');
  const controller=new Hls({enableWorker:true,maxBufferLength:24,maxMaxBufferLength:40,backBufferLength:10,capLevelToPlayerSize:true,startLevel:0,lowLatencyMode:false});
  let recoveries=0;

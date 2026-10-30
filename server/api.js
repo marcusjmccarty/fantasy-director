@@ -6,6 +6,11 @@ function isOwner(request,env){
  const userId=request.headers.get('oai-authenticated-user-id');
  return !!(userId&&env.ESPN_OWNER_ID&&userId===env.ESPN_OWNER_ID);
 }
+// Same origin, treating the loopback names as one host for local previews.
+const LOOPBACK=new Set(['localhost','127.0.0.1','[::1]']);
+export function sameSite(origin,url){
+ try{const a=new URL(origin),b=new URL(url);return a.origin===b.origin||LOOPBACK.has(a.hostname)&&LOOPBACK.has(b.hostname)&&a.port===b.port;}catch{return false;}
+}
 export function sessionAPI(request,env={}){
  if(request.method!=='GET')return json({error:'Use GET.'},405);
  const userId=request.headers.get('oai-authenticated-user-id')||null;
@@ -17,7 +22,7 @@ export function normalizedLeague(raw,ownerSwid=''){
 }
 export async function leagueAPI(request,env={},fetcher=fetch){
  if(request.method!=='POST')return json({error:'Use POST.'},405);
- const origin=request.headers.get('Origin');if(origin&&origin!==new URL(request.url).origin)return json({error:'Invalid request origin.'},403);
+ const origin=request.headers.get('Origin');if(origin&&!sameSite(origin,request.url))return json({error:'Invalid request origin.'},403);
  let data;try{if(Number(request.headers.get('Content-Length')||0)>1024)return json({error:'Request too large.'},413);const text=await request.text();if(text.length>1024)return json({error:'Request too large.'},413);data=JSON.parse(text);}catch{return json({error:'Enter a valid league ID.'},400);}
  const id=String(data.leagueId||'');const now=new Date();const season=now.getUTCFullYear()-(now.getUTCMonth()<5?1:0);const year=Number(data.season||season);
  if(!/^\d{1,12}$/.test(id)||!Number.isInteger(year)||year<2018||year>season+1)return json({error:'Enter a numeric ESPN league ID.'},400);
