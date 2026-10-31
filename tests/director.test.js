@@ -201,13 +201,13 @@ test('decide: between series it falls back to a game with a roster team, preferr
  assert.equal(decide(d,{games:[other,indBreak,pit],excluded:new Set(['P'])}).id,'I','excluded games are skipped');
  assert.equal(decide(d,{games:[other,indBreak,pit],excluded:new Set(['P','I'])}).kind,'standby');
 });
-test('decide: stays on the current roster game while your players are off the field or the game is in a break',()=>{
+test('decide: stays between possessions but leaves a break for another active roster game',()=>{
  const d=new Director();
  const ind=game('I','IND','KC',{possession:1});
  const stay=decide(d,{games:[ind,game('P','SEA','PIT',{possession:1})],current:{kind:'game',id:'I'}});
  assert.deepEqual([stay.kind,stay.id,stay.reason],['game','I','Your players are off the field']);
  const brk=decide(d,{games:[{...ind,phase:'break',possession:-1},game('P','SEA','PIT',{possession:1})],current:{kind:'game',id:'I'}});
- assert.deepEqual([brk.kind,brk.id,brk.reason],['game','I','Break in the action']);
+ assert.deepEqual([brk.kind,brk.id,brk.reason],['game','P','Your players are off the field']);
  // ...but leaves at once when a starter takes the field elsewhere (a break is not a live feed to debounce).
  const live=decide(d,{games:[{...ind,phase:'break',possession:-1},game('P','SEA','PIT',{possession:0,yardsToGoal:70})],current:{kind:'game',id:'I'}});
  assert.deepEqual([live.kind,live.id,live.reason],['game','P','D/ST defense on the field']);
@@ -426,4 +426,29 @@ test('excluded current games cannot survive a celebration hold or fallback',()=>
 test('a previous lineup’s game is left immediately without debounce',()=>{
  const d=new Director(),a=game('A','IND','MIN'),b=game('B','DAL','NYG');
  assert.equal(decide(d,{games:[a,b],roster:[WR],current:{kind:'game',id:'A'}}).id,'B');
+});
+
+test('break recovery: any configured game can fill in, but roster action always returns first',()=>{
+ const d=new Director({debounce:0}),mine=game('A','IND','MIN',{phase:'break'}),other=game('X','SF','SEA'),backups=new Set(['X']);
+ const input={games:[mine,other],roster:[RB],at:1000,current:{kind:'game',id:'A'},backups};
+ assert.equal(d.decide(input).id,'X');
+ assert.equal(d.decide({...input,current:{kind:'game',id:'X'}}).id,'X','keep a healthy filler stable');
+ assert.equal(d.decide({...input,games:[{...mine,phase:'live'},other],current:{kind:'game',id:'X'}}).id,'A');
+ assert.equal(d.decide({...input,games:[{...mine,phase:'live',possession:1},other],current:{kind:'game',id:'X'}}).id,'A','return to roster game between its possessions');
+ assert.equal(d.decide({...input,excluded:new Set(['X'])}).id,'A','never pick an unavailable backup');
+ assert.equal(d.decide({...input,games:[mine,{...other,phase:'break'}]}).id,'A','another break is not an improvement');
+ assert.equal(d.decide({...input,backups:new Set()}).id,'A','a missing stream is not a backup');
+ assert.equal(d.decide({...input,games:[{...mine,state:'post',phase:'final'},other]}).kind,'standby','backup ends when the fantasy slate ends');
+});
+test('break recovery: a detected ad overrides play protection and a celebration',()=>{
+ const d=new Director(),mine=game('A','IND','MIN',{phase:'play'}),other=game('X','SF','SEA');
+ const input={games:[mine,other],roster:[RB],at:1000,current:{kind:'game',id:'A',protected:true},excluded:new Set(['A']),backups:new Set(['X']),recentScore:()=>true};
+ assert.equal(d.decide(input).id,'X');
+});
+test('continuity: protected footage stays despite a newly urgent game, but finals do not',()=>{
+ const d=new Director(),mine=game('A','IND','MIN',{possession:1}),urgent=game('B','DAL','NYG',{phase:'play',yardsToGoal:3});
+ const input={games:[mine,urgent],roster:[RB,WR],at:1000,current:{kind:'game',id:'A',protected:true}};
+ assert.equal(d.decide(input).id,'A');
+ assert.equal(d.decide({...input,current:{kind:'highlight',id:'score',protected:true}}).id,'score');
+ assert.equal(d.decide({...input,games:[{...mine,state:'post',phase:'final'},urgent]}).id,'B');
 });

@@ -1,5 +1,7 @@
 # Viewing room redesign — October 31, 2026
 
+> Historical first pass. The later [workspace overhaul](continuity-and-workspace-overhaul.md) restores the red-dot logo and replaces this layout and several interaction policies.
+
 Baseline: `73e6d560ac7a3696f236124bf188a5a77bdd73c1`.
 
 The brief was to take inspiration from NTV.st while keeping Fantasy Stream

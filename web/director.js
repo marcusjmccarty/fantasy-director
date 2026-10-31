@@ -1,7 +1,5 @@
-// The director decides what is on screen. It only ever chooses a game where
-// one of your starters is on the field, prefers the offense closest to the end
-// zone, waits for the whistle before cutting, and backfills missed scores with
-// highlights at the next quiet moment.
+// Roster action comes first. During a break, another available game can fill
+// the screen until a roster game returns. Availability belongs to the caller.
 import {alias} from './scoring.js';
 
 export const KICK_RANGE=42;       // 4th down at or inside the opponent 42 (a 59-yard try)
@@ -65,7 +63,7 @@ export class Director{
  reset(){this.lastCut=-Infinity;this.challenger=null;}
  committed(at){this.lastCut=at;this.challenger=null;}
  // current: {kind:'game'|'highlight'|'standby', id}
- decide({games,roster,at,current={},excluded=new Set(),queue=[],includeDefense=true,recentScore=()=>false}){
+ decide({games,roster,at,current={},excluded=new Set(),queue=[],includeDefense=true,recentScore=()=>false,backups=new Set()}){
   const r=this.rules,ranked=rank(games,roster,{excluded,includeDefense,currentId:current.id}),best=ranked[0];
   const curGame=current.kind==='game'?games.find(g=>g.id===current.id&&!excluded.has(g.id)&&hasRoster(g,roster)):null;
   const cur=curGame?(ranked.find(e=>e.game.id===curGame.id)||{game:curGame,players:[],...rate(curGame,[])}):null;
@@ -80,10 +78,12 @@ export class Director{
    return {kind:'game',id:entry.game.id,entry,reason};
   };
   if(current.kind==='highlight'){
+   if(current.protected)return {kind:'highlight',id:current.id,reason:'Finishing your score replay'};
    const urgent=ranked.find(e=>e.critical&&(e.game.phase==='play'||e.game.nextSnapIn===null||e.game.nextSnapIn<10));
    if(urgent)return {kind:'game',id:urgent.game.id,entry:urgent,reason:'Back to live action'};
    return {kind:'highlight',id:current.id,reason:'Replaying a score you missed'};
   }
+  if(curGame&&curGame.state==='in'&&current.protected){this.challenger=null;return stay('Finishing the play');}
   // Never cut away from a live snap in a game you care about, nor in the seconds before one.
   if(cur&&cur.tier>0&&curGame.phase==='play'){this.challenger=null;return stay('Play in progress');}
   if(cur&&cur.tier>0&&curGame.phase==='live'&&curGame.nextSnapIn!==null&&curGame.nextSnapIn<=r.preSnap){this.challenger=null;return stay('Snap coming');}
@@ -92,8 +92,16 @@ export class Director{
    return {kind:'highlight',id:queue[0].id,reason:'Replaying a score you missed'};
   if(!best){
    this.challenger=null;
-   if(curGame&&curGame.state==='in'&&hasRoster(curGame,roster))return stay(curGame.phase==='break'?'Break in the action':'Your players are off the field');
+   if(curGame&&curGame.state==='in'&&curGame.phase!=='break')return stay('Your players are off the field');
    const fallback=games.filter(g=>g.state==='in'&&hasRoster(g,roster)&&!excluded.has(g.id)).sort((a,b)=>(a.phase==='break')-(b.phase==='break')||a.id.localeCompare(b.id))[0];
+   if(!fallback||fallback.phase==='break'){
+    // Never start an unrelated channel when the viewer's slate has ended.
+    const active=games.some(g=>g.state==='in'&&hasRoster(g,roster));
+    const filler=active&&games.filter(g=>g.state==='in'&&g.phase!=='break'&&backups.has(g.id)&&!excluded.has(g.id))
+     .sort((a,b)=>(b.id===current.id)-(a.id===current.id)||a.id.localeCompare(b.id))[0];
+    if(filler)return {kind:'game',id:filler.id,entry:{game:filler,players:[],...rate(filler,[])},reason:'Another game while your games take a break'};
+   }
+   if(curGame&&fallback?.phase==='break'&&curGame.state==='in')return stay('Break in the action');
    if(fallback)return {kind:'game',id:fallback.id,entry:{game:fallback,players:[],...rate(fallback,[])},reason:'Your players are off the field'};
    return {kind:'standby',id:null,reason:'None of your starters are playing right now'};
   }

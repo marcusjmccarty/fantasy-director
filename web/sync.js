@@ -1,7 +1,7 @@
 // Maps game time to a position in a full-game recording and back.
 //
-// The recordings cut out commercials and halftime but keep the football:
-// huddles, replays and the walk to the line stay at real speed. So ordinary
+// The recordings edit down many breaks, but can still contain commercials.
+// This model estimates retained footage rather than detecting it. Ordinary
 // snap-to-snap gaps map one-to-one, while each break (TV timeout, quarter
 // end, after a score, before a kickoff) keeps only `keep` seconds: half right
 // after the play, half leading into the next snap. Scorebug anchors pin the
