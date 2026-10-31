@@ -409,3 +409,9 @@ test('seen()/update(): slack widens the window after the snap for feeds whose ex
  const [item]=d.update([game],roster,100+30+9+12,30,12);
  assert.equal(item.id,'g:1');assert.equal(item.seen,false,'the delayed window [127,146] was not on screen');
 });
+
+test('watch preserves earlier intervals after a rewind and merges overlaps without double counting',()=>{
+ const c=new Coverage();c.watch('g',100,104);c.watch('g',90,94);assert.deepEqual(c.intervals.get('g'),[[90,94],[100,104]]);
+ c.watch('g',92,96);c.watch('g',95,100);assert.deepEqual(c.intervals.get('g'),[[90,104]]);
+ assert.equal(c.seen('g',97),true);assert.equal(c.seen('g',110),false);
+});

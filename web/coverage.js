@@ -11,8 +11,13 @@ export class Coverage{
  skipTo(games,at){for(const g of games)for(const s of g.scores||[])if(s.at<=at)this.judged.add(s.id);this.queue=this.queue.filter(q=>q.at>at);}
  watch(gameId,from,to,maxStep=5){
   if(!gameId||!(to>from)||to-from>maxStep)return;   // a jump is not watching
-  const list=this.intervals.get(gameId)||[],last=list.at(-1);
-  if(last&&from<=last[1]+.6)last[1]=Math.max(last[1],to);else list.push([from,to]);
+  let list=this.intervals.get(gameId)||[];const last=list.at(-1);
+  if(last&&from<last[0]){
+   // A rewind can insert footage before intervals already watched. Keep the
+   // union ordered so neither discarded footage nor overlap changes seen().
+   const ordered=[...list,[from,to]].sort((a,b)=>a[0]-b[0]);list=[];
+   for(const interval of ordered){const end=list.at(-1);if(end&&interval[0]<=end[1]+.6)end[1]=Math.max(end[1],interval[1]);else list.push([...interval]);}
+  }else if(last&&from<=last[1]+.6)last[1]=Math.max(last[1],to);else list.push([from,to]);
   if(list.length>400)list.splice(0,list.length-400);this.intervals.set(gameId,list);
  }
  // `slack` widens the window when the snap's exact on-screen moment is uncertain (a live stream's delay).

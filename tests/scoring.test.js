@@ -387,3 +387,10 @@ test('week7.json: the sample roster earns exactly the expected credits across th
  // Nobody on the sample roster is credited for the other side's scores.
  for(const {game:g,score:s} of allScores)for(const c of rosterCredit(s,g,SAMPLE))assert.equal(alias(g.teams[s.team].abbreviation),alias(c.player.team),`${g.name}: ${s.text}`);
 });
+
+test('an offensive fumble-recovery touchdown credits its scorer without crediting D/ST',()=>{
+ const parsed=parseScoringPlay('Example Player 0 Yd Fumble Recovery (Example Kicker Kick)','Fumble Recovery (Own)','touchdown');
+ assert.equal(parsed.defensive,false);assert.ok(parsed.players.some(p=>p.name==='Example Player'&&p.role==='scorer'));
+ const game={teams:[{abbreviation:'IND'},{abbreviation:'MIN'}]};const credited=rosterCredit({...parsed,team:0},game,[{name:'Example Player',team:'IND',position:'RB'},{name:'Colts D/ST',team:'IND',position:'D/ST'}]);
+ assert.deepEqual(credited.map(c=>c.role),['scorer']);
+});

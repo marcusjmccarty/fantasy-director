@@ -1,5 +1,5 @@
 import {ReplayArchive,Clock,timeLabel} from './archive.js';
-import {RecordingSync,addMark,wallForClock} from './sync.js';
+import {RecordingSync,addMark,wallForClock,mergeAnchors} from './sync.js';
 import {Director,RULES,rank,hasRoster,rosterTeams} from './director.js';
 import {Coverage} from './coverage.js';
 import {PlayerPool} from './players.js';
@@ -56,7 +56,7 @@ const archiveGame=id=>S.archive?.game(id);
 const gameState=id=>S.games.find(g=>g.id===id);
 function syncFor(game){
  let sync=S.syncs.get(game.id);
- if(!sync){sync=new RecordingSync(game,{types:S.archive.types,anchors:[...(game.anchors||[]),...(saved.marks[game.id]||[])]});S.syncs.set(game.id,sync);}
+ if(!sync){sync=new RecordingSync(game,{types:S.archive.types,anchors:mergeAnchors(game.anchors||[],saved.marks[game.id]||[])});S.syncs.set(game.id,sync);}
  return sync;
 }
 function sourceFor(id){
@@ -89,8 +89,8 @@ function frame(now){
 }
 function visibleConfirmed(){
  const p=S.program;if(p.kind!=='game')return false;
- if(picture(p.id)==='data')return true;
- return pool.visible===p.id&&!!pool.current?.progressing;
+ if(picture(p.id)==='data')return S.mode==='replay'&&saved.dataOnly;
+ return pool.visible===p.id&&pool.current?.kind!=='embed'&&!!pool.current?.progressing;
 }
 function advanceClock(now){
  if(S.mode==='live'){S.at=Date.now()/1000;return;}
@@ -140,7 +140,7 @@ function step(now){
 // The picture on screen stopped moving: ask the player again, then re-seek it, then give up on that game for a while.
 function nudge(now){
  const p=S.program,player=pool.current;
- if(p.kind!=='game'||!S.playing||picture(p.id)!=='video'||!player||pool.visible!==p.id||player.inAd||player.target!==null||player.progressing){S.stall=null;return;}
+ if(p.kind!=='game'||!S.playing||picture(p.id)!=='video'||!player||pool.visible!==p.id||player.inAd||player.target===null&&player.progressing){S.stall=null;return;}
  S.stall??={since:now,step:0};const stalled=now-S.stall.since;
  if(S.stall.step===0&&stalled>3000){S.stall.step=1;player.kick?.();}
  else if(S.stall.step===1&&stalled>10000){S.stall.step=2;const t=target(p.id);if(t!==null)player.seek(t);player.play();}
@@ -149,7 +149,7 @@ function nudge(now){
 
 // ---------- cuts ----------
 function cutTo(id,now){
- if(S.program.kind==='game'&&S.program.id===id&&!S.highlight&&S.pending?.id!==id)return;
+ if(S.program.kind==='game'&&S.program.id===id&&!S.highlight&&S.pending?.id!==id){S.pending=null;return;}
  if(picture(id)==='data'){commit(id);return;}
  const source=sourceFor(id);if(!source){commit(id);return;}
  if(S.pending?.id!==id)S.pending={id,since:now};
@@ -233,18 +233,32 @@ function updateHighlight(now){
   // The replay player runs from its start while hidden; show it as soon as footage is moving inside the clip.
   const p=pool.get(h.src.key)?.player,pos=p?p.currentTime-h.src.start:0;
   const ready=h.src.data||p&&p.progressing&&p.target===null&&pos>=-4&&pos<=h.src.duration-3;
-  if(ready){if(!h.src.data)pool.show(h.src.key);else pool.hide();if(h.previousKey&&h.previousKey!==h.src.key)pool.close(h.previousKey);h.previousKey=null;h.playing=true;h.until=now+(h.src.duration-Math.max(0,pos))*1000;S.program={kind:'highlight',id:h.item.id};render();}
+  if(ready){if(!h.src.data)pool.show(h.src.key);else pool.hide();if(h.previousKey&&h.previousKey!==h.src.key)pool.close(h.previousKey);h.previousKey=null;h.playing=true;h.until=now+(h.src.duration-Math.max(0,pos))*1000;h.watched=0;h.lastMedia=p?.currentTime;h.checkedAt=now;h.progressAt=now;S.program={kind:'highlight',id:h.item.id};render();}
   else if(now-h.since>15000)failHighlight('the replay did not start');
   return;
  }
- if(now>=h.until)finishHighlight();
+ if(h.src.data){if(now>=h.until)finishHighlight();return;}
+ const p=pool.get(h.src.key)?.player;trackHighlight(h,p,now);
+ const end=highlightEnd(h,p);
+ if(p&&p.currentTime>=end-.25)finishHighlight();
+ else if(now-h.progressAt>15000)failHighlight('the replay stopped responding');
+}
+function highlightEnd(h,p){return Math.min(h.src.start+h.src.duration,Number.isFinite(p?.duration)?p.duration:Infinity);}
+// Count advancing footage, not buffering, advertisements, or a seek to the end.
+function trackHighlight(h,p,now){
+ const elapsed=Math.max(0,(now-(h.checkedAt??now))/1000),delta=p?p.currentTime-h.lastMedia:0;
+ if(pool.visible===h.src.key&&!p?.inAd&&p?.target===null&&delta>0&&delta<=Math.max(2,elapsed*1.5)){
+  h.watched=(h.watched||0)+Math.min(delta,elapsed+1);h.progressAt=now;
+ }
+ h.lastMedia=p?.currentTime;h.checkedAt=now;
 }
 const item=h=>coverage.log.find(x=>x.id===h.item.id)||h.item;
 // The highlight stays on screen until the game we return to is ready.
 function finishHighlight(){
  const h=S.highlight;if(!h||h.done)return;
  if(!h.playing){failHighlight('the replay did not start');return;}
- const watched=(performance.now()-(h.until-h.src.duration*1000))/(h.src.duration*1000);
+ const p=pool.get(h.src.key)?.player;if(!h.src.data)trackHighlight(h,p,performance.now());
+ const watched=h.src.data?(performance.now()-(h.until-h.src.duration*1000))/(h.src.duration*1000):(h.watched||0)/Math.max(1,highlightEnd(h,p)-h.src.start);
  if(watched<.5&&!h.requeued){h.requeued=true;item(h).status='queued';coverage.requeue(h.item);}else item(h).status='replayed';
  h.done=true;
  if(!h.returnTo){closeHighlight();S.program={kind:'standby'};}
@@ -288,7 +302,7 @@ function setPlaying(playing,message){
  if(playing&&S.mode==='live'&&!hasLineup()){openLineup();return;}
  if(playing&&S.mode==='replay'&&!S.archive)return;
  if(S.playing!==playing){
-  if(playing&&S.pausedAt!=null){const paused=performance.now()-S.pausedAt;for(const state of [S.highlight,S.pending,S.stall])if(state){if(Number.isFinite(state.since))state.since+=paused;if(Number.isFinite(state.until))state.until+=paused;}S.pausedAt=null;}
+  if(playing&&S.pausedAt!=null){const paused=performance.now()-S.pausedAt;for(const state of [S.highlight,S.pending,S.stall])if(state){for(const key of ['since','until','checkedAt','progressAt'])if(Number.isFinite(state[key]))state[key]+=paused;}S.pausedAt=null;}
   else if(!playing)S.pausedAt=performance.now();
  }
  S.playing=playing;pool.setRunning(playing);clock.set(false,performance.now());
@@ -620,7 +634,7 @@ async function importLeague({refresh=false,quiet=false}={}){
  const cookies=saved.espn?.swid||saved.espn?.s2?{swid:saved.espn.swid,s2:saved.espn.s2}:{};
  $('importLeague').disabled=true;$('leagueStatus').textContent='Getting every franchise from ESPN…';
  try{
-  const r=await fetch('/api/league',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leagueId,week:S.mode==='replay'?7:undefined,...cookies}),signal:AbortSignal.timeout(15000)});
+  const r=await fetch('/api/league',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leagueId,...(S.mode==='replay'?{week:S.archive.data.week,season:S.archive.data.season}:{}),...cookies}),signal:AbortSignal.timeout(15000)});
   if(!r.headers.get('Content-Type')?.includes('application/json'))throw new Error('The roster service is unavailable. Try again, or add your players below.');
   const data=await r.json();if(request!==S.leagueRequest||mode!==S.mode)return;if(!r.ok){if(data.code==='LEAGUE_PRIVATE'){$('cookieDetails').open=true;}throw new Error(data.error||'Could not import this league.');}
   // Team IDs are local to a league: team "1" in a new league is not necessarily yours.

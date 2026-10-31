@@ -485,3 +485,15 @@ test('quarters with no plays are rejected, but the clock format is checked first
  assert.equal(wallForClock(ot,5,'10:00'),11535,'overtime exists for the one game that played it');
  assert.equal(wallForClock(ot,'5','10:00'),11535,'the overtime period may arrive as a string');
 });
+
+import {mergeAnchors} from '../web/sync.js';
+test('manual sync anchors displace conflicting automatic readings while preserving a monotonic curve',()=>{
+ const automatic=[{wall:0,media:0},{wall:10,media:10},{wall:20,media:20},{wall:30,media:30},{wall:40,media:40}];
+ const manual=[{wall:20,media:35}];assert.deepEqual(mergeAnchors(automatic,manual),[automatic[0],automatic[1],manual[0],automatic[4]]);
+ assert.deepEqual(mergeAnchors(automatic,[]),automatic);assert.equal(automatic.length,5);
+ const g=game('NE at CHI'),s=build(g,{anchors:mergeAnchors(g.anchors,[{wall:500,media:400}])});assert.ok(Math.abs(s.media(500)-400)<EPS);
+ let prior=-Infinity;for(let t=0;t<lastSnap(g);t+=5){const m=s.media(t);assert.ok(m>=prior);prior=m;}
+});
+test('sync clock input rejects impossible regulation clock readings',()=>{
+ for(const clock of ['15:01','16:00','99:59'])assert.throws(()=>wallForClock(game('NE at CHI'),1,clock),/15:00/);
+});

@@ -51,7 +51,7 @@ function app(fetcher=async()=>Response.json({events:[]}),{media=false,stored=nul
  class MediaPool extends PlayerPool{constructor(host,options){super(host,{...options,now:()=>time.now,create:source=>new Media(source)});}}
  const storage=new Map(stored===null?[]:[['fantasy-stream-v3',JSON.stringify(stored)]]);
  const ctx={...archive,...sync,...director,...coverage,...replays,...live,...scoring,...roster,...highlights,...preferences,PlayerPool:media?MediaPool:Pool,NFLSourceCatalog:class{},document,window:{addEventListener(){}},localStorage:{getItem:key=>storage.get(key)||null,setItem(key,value){if(storageBlocked)throw new Error('Storage unavailable');storage.set(key,value);}},performance:{now:()=>time.now},setTimeout:()=>0,clearTimeout(){},setInterval:()=>0,fetch:fetcher,AbortSignal,Response,URL,Date,console};
- vm.createContext(ctx);vm.runInContext(script+'\n globalThis.a={S,pool,director,coverage,clock,step,advanceClock,excluded,cutTo,warm,startHighlight,nfl,setMode,setPlaying,setDay,seekTo,replaySource,useRoster,importLeague,pollLive,pollLiveClips,prepareReplay,render,init,roster,get saved(){return saved;}};',ctx);
+ vm.createContext(ctx);vm.runInContext(script+'\n globalThis.a={S,pool,director,coverage,clock,step,advanceClock,excluded,cutTo,warm,startHighlight,updateHighlight,finishHighlight,syncFor,nudge,nfl,setMode,setPlaying,setDay,seekTo,replaySource,useRoster,importLeague,pollLive,pollLiveClips,prepareReplay,render,init,roster,get saved(){return saved;}};',ctx);
  return {...ctx.a,time,storage, get saved(){return ctx.a.saved;},el:id=>elements.get(id)};
 }
 const player={name:'Jonathan Taylor',team:'IND',position:'RB'};
@@ -266,4 +266,55 @@ test('family: live coverage does not count a long gap as watched after a fast re
 });
 test('family: unavailable browser storage is visible while the lineup remains usable for this session',()=>{
  const a=app(undefined,{storageBlocked:true});ready(a);assert.equal(a.saved.roster[0].team,'IND');assert.equal(a.el('storageNotice').hidden,false);assert.doesNotThrow(()=>a.setPlaying(true));
+});
+
+test('logic: abandoning a pending switch clears it and a later attempt gets a fresh deadline',()=>{
+ const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.com/a.mp4'};a.setPlaying(true);a.step(1000);
+ a.S.pending={id:'B',since:1000};a.cutTo('A',19000);assert.equal(a.S.pending,null);assert.equal(a.pool.visible,'A');
+ const b={...game,id:'B',name:'DAL @ NYG',teams:[{abbr:'DAL'},{abbr:'NYG'}]};a.S.games.push(b);a.saved.streams['DAL-NYG']='https://example.com/b.mp4';const p=a.pool.open('B',{url:a.saved.streams['DAL-NYG']}).player;p.moving=false;
+ a.time.now=25000;a.cutTo('B',25000);assert.equal(a.S.pending.since,25000);assert.equal(a.S.cooldown.has('B'),false);
+});
+test('logic: an unanswered seek on the visible replay recovers or times out',()=>{
+ const a=app(undefined,{media:true});replayReady(a);a.S.mode='replay';const mine=a.S.archive.games.find(g=>g.teams.some(t=>t.abbreviation==='IND'));
+ a.S.at=mine.start+300;a.S.games=a.S.archive.sample(a.S.at);a.S.program={kind:'game',id:mine.id};a.setPlaying(true);const p=a.pool.open(mine.id,{url:mine.embed}).player;a.pool.show(mine.id);p.target=999;p.moving=false;
+ a.nudge(1000);a.nudge(5000);a.nudge(12000);a.time.now=24000;a.nudge(24000);
+ assert.equal(p.destroyed,true);assert.equal(a.S.cooldown.has(mine.id),true);assert.equal(a.S.program.kind,'standby');
+});
+function playingHighlight(){
+ const a=app(undefined,{media:true});ready(a);a.setPlaying(true);const entry={id:'highlight-test',gameId:'A',score:{kind:'TD',text:'Jonathan Taylor 1 Yd Rush',team:0,players:[]},credits:[{player,role:'scorer'}],status:'queued'};
+ a.coverage.log.push(entry);a.coverage.queue.push(entry);a.S.sources.set(entry.id,{key:'hl:test',source:{url:'https://example.com/clip.mp4'},start:0,duration:10,label:'Official highlight'});a.startHighlight(entry.id);a.updateHighlight(1000);
+ return {a,entry,p:a.pool.current};
+}
+test('logic: buffering footage cannot be marked replayed by elapsed wall time',()=>{
+ const {a,entry,p}=playingHighlight();p.moving=false;a.time.now=12000;a.updateHighlight(12000);
+ assert.notEqual(entry.status,'replayed');assert.equal(a.S.highlight?.done,false);
+ a.time.now=17000;a.updateHighlight(17000);assert.equal(entry.status,'missed');assert.equal(p.destroyed,true);
+});
+test('logic: a progressing highlight finishes from its media position and records it as replayed',()=>{
+ const {a,entry,p}=playingHighlight();for(let second=1;second<=10;second++){a.time.now=1000+second*1000;p.currentTime=second;a.updateHighlight(a.time.now);}
+ assert.equal(entry.status,'replayed');assert.equal(a.coverage.queue.length,0);
+});
+test('logic: skipping to a highlight’s end cannot claim the skipped footage was watched',()=>{
+ const {a,entry,p}=playingHighlight();p.currentTime=10;a.time.now=1250;a.updateHighlight(1250);
+ assert.notEqual(entry.status,'replayed');assert.equal(a.coverage.queue[0]?.id,entry.id);
+});
+test('logic: buffering recovery and Pause preserve the highlight instead of consuming its deadline',()=>{
+ const {a,entry,p}=playingHighlight();a.time.now=2000;p.currentTime=1;a.updateHighlight(2000);a.setPlaying(false);a.time.now=62000;a.setPlaying(true);a.updateHighlight(62000);
+ assert.equal(a.S.highlight.done,false);for(let second=2;second<=10;second++){a.time.now=61000+second*1000;p.currentTime=second;a.updateHighlight(a.time.now);}assert.equal(entry.status,'replayed');
+});
+test('logic: a user sync mark overrides a conflicting built-in anchor',()=>{
+ const a=app();replayReady(a);const g=a.S.archive.games[0],anchor=g.anchors.find(x=>x.media>30&&x.media<g.recordingDuration-60);assert.ok(anchor);
+ a.saved.marks[g.id]=[{wall:anchor.wall,media:anchor.media+20}];const synced=a.syncFor(g);assert.ok(Math.abs(synced.media(anchor.wall)-(anchor.media+20))<.001);
+});
+test('logic: live trackers and unobservable page embeds cannot certify that video was watched',()=>{
+ for(const kind of ['tracker','embed']){
+  const a=app(undefined,{media:true});ready(a);a.S.program={kind:'game',id:'A'};a.S.started=true;a.S.playing=true;a.S.lastAt=999;
+  if(kind==='embed'){a.saved.streams={'IND-MIN':'https://example.com/watch'};const p=a.pool.open('A',{url:a.saved.streams['IND-MIN']}).player;p.kind='embed';a.pool.setRunning(true);a.pool.show('A');}
+  a.step(1000);assert.equal(a.coverage.intervals.size,0,kind+' cannot confirm moving game footage');
+ }
+});
+test('logic: replay league imports request the archive season and week while live imports use the current season',async()=>{
+ const requests=[];const a=app(async(url,options)=>{requests.push(JSON.parse(options.body));return Response.json({leagueId:'123',name:'League',teams:[{id:'1',name:'Team',players:[player]}]});});
+ a.S.archive=new archive.ReplayArchive(archiveData);a.S.mode='replay';a.el('leagueId').value='123';await a.importLeague();assert.equal(requests[0].season,archiveData.season);assert.equal(requests[0].week,archiveData.week);
+ a.S.mode='live';await a.importLeague();assert.equal(requests[1].season,undefined);assert.equal(requests[1].week,undefined);
 });

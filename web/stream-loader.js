@@ -7,7 +7,10 @@ export async function attachMediaSource(video,source,onFatal=()=>{}){
  // Chromium builds may answer "maybe" to canPlayType for HLS and then fail; trust hls.js wherever MSE exists.
  const nativeHLS=!('MediaSource' in globalThis)&&video.canPlayType('application/vnd.apple.mpegurl');
  if(!isHLS||nativeHLS){video.src=source.url;video.load();return null;}
- const Hls=await hls();if(!Hls.isSupported())throw new Error('HLS is unavailable in this browser.');
+ const Hls=await hls();if(!Hls.isSupported()){
+  if(video.canPlayType('application/vnd.apple.mpegurl')){video.src=source.url;video.load();return null;}
+  throw new Error('HLS is unavailable in this browser.');
+ }
  const controller=new Hls({enableWorker:true,maxBufferLength:24,maxMaxBufferLength:40,backBufferLength:10,capLevelToPlayerSize:true,startLevel:0,lowLatencyMode:false});
  let recoveries=0;
  controller.on(Hls.Events.ERROR,(_,event)=>{if(!event.fatal)return;if(event.type===Hls.ErrorTypes.MEDIA_ERROR&&recoveries++<1)controller.recoverMediaError();else onFatal();});

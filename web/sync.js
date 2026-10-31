@@ -88,6 +88,16 @@ export function addMark(marks,wall,media){
  return next;
 }
 
+// Viewer marks outrank automatic readings. Discard only built-in anchors that
+// would contradict those marks; the recording interpolation itself is unchanged.
+export function mergeAnchors(automatic,manual){
+ const marks=[];
+ for(const m of manual.filter(m=>Number.isFinite(m?.wall)&&Number.isFinite(m?.media)&&m.media>=0).sort((a,b)=>a.wall-b.wall)){
+  const last=marks.at(-1);if(!last||m.wall>last.wall&&m.media>last.media)marks.push(m);
+ }
+ return [...automatic.filter(a=>marks.every(m=>a.wall<m.wall?a.media<m.media:a.wall>m.wall&&a.media>m.media)),...marks].sort((a,b)=>a.wall-b.wall);
+}
+
 // Game-time window during which the scorebug shows this quarter and clock.
 // A running clock pins a single second. A stopped clock (the value the next
 // snap starts from) shows from the moment it stopped until that snap, so the
@@ -95,6 +105,7 @@ export function addMark(marks,wall,media){
 export function clockSpan(game,period,clock){
  const m=/^(\d{1,2}):([0-5]\d)$/.exec(String(clock).trim());if(!m)throw new Error('Enter the game clock as m:ss.');
  const target=Number(m[1])*60+Number(m[2]);
+ if(target>15*60)throw new Error('The game clock must be between 0:00 and 15:00.');
  const secs=c=>{const [a,b]=String(c).split(':').map(Number);return a*60+b;};
  const rows=game.plays.filter(p=>p[1]===Number(period));
  if(!rows.length)throw new Error('No plays in that quarter.');

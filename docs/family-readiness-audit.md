@@ -1,5 +1,9 @@
 # Family-readiness audit — 2026-10-31
 
+Historical report for commit `829cea6`. The subsequent
+[full logic audit](full-logic-audit.md) records further findings and corrections.
+Counts and preservation statements below describe this earlier pass.
+
 Reviewed baseline: `d019282b3eab75e3dc69802c8a29afaeeb745453`.
 This pass covers browser interaction, lineup persistence, asynchronous imports,
 player lifecycle, replay transitions, failure recovery, accessibility details,

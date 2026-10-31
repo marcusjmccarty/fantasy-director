@@ -20,8 +20,10 @@ export function parseScoringPlay(text,typeText='',scoringType=''){
  else if((m=/^(.+?)\s+\d+\s+Yd\s+pass from\s+(.+)$/i.exec(main))){add(m[1],'scorer');add(m[2],'passer');}
  else if((m=/^(.+?)\s+\d+\s+Yd\s+(?:Rush|Run)\b/i.exec(main)))add(m[1],'scorer');
  else if((m=/^(.+?)\s+\d+\s+Yd\s+.*Return/i.exec(main)))add(m[1],'scorer');
+ else if((m=/^(.+?)\s+\d+\s+Yd\s+(?:Offensive\s+)?Fumble Recovery/i.exec(main)))add(m[1],'scorer');
  else if((m=/^(.+?)\s+Defensive PAT Conversion/i.exec(main)))add(m[1],'scorer');
- const defensive=/return|defensive|safety/i.test(main)||/fumble recovery|interception|blocked/i.test(typeText)&&kind==='TD'||kind==='SAF'||kind==='D2P';
+ const ownRecovery=/fumble recovery\s*\(own\)/i.test(typeText);
+ const defensive=!ownRecovery&&(/return|defensive|safety/i.test(main)||/fumble recovery|interception|blocked/i.test(typeText)&&kind==='TD')||kind==='SAF'||kind==='D2P';
  for(const extra of t.matchAll(/\(([^)]*)\)/g)){
   const x=extra[1];
   if((m=/^(.+?)\s+(?:Kick|PAT)\b(?!.*(?:Failed|blocked))/i.exec(x)))add(m[1],'pat');
