@@ -9,7 +9,7 @@ export class EmbedPlayer{
   this.primed=true;this.advances=2;this.loadedAt=null;this.audioLocked=false;this.isMuted=true;this.duration=NaN;this.visible=false;
   const f=this.element=document.createElement('iframe');f.className='layer';f.title='Stream';
   f.allow='autoplay; fullscreen; picture-in-picture; encrypted-media';f.referrerPolicy='no-referrer';
-  f.addEventListener('load',()=>{if(this.visible)this.loadedAt=this.now();});
+  f.addEventListener('load',()=>{if(this.visible&&f.src===this.url)this.loadedAt=this.now();});
  }
  on(name,callback){if(!this.listeners.has(name))this.listeners.set(name,new Set());this.listeners.get(name).add(callback);}
  emit(name,detail){for(const callback of this.listeners.get(name)||[])callback(detail);}

@@ -11,8 +11,8 @@ const STUCK=15000;             // ms a seek may stay unanswered before it is sen
 const STALE=20000;             // ms an unwanted hidden player is kept before it is closed
 
 export class PlayerPool{
- constructor(host,{capacity=4,create=createPlayer,now=()=>performance.now(),onAd=()=>{},onEnded=()=>{},onError=()=>{},onAudioLocked=()=>{}}={}){
-  Object.assign(this,{host,capacity,create,now,onAd,onEnded,onError,onAudioLocked});
+ constructor(host,{capacity=4,create=createPlayer,now=()=>performance.now(),onAd=()=>{},onClose=()=>{},onEnded=()=>{},onError=()=>{},onAudioLocked=()=>{}}={}){
+  Object.assign(this,{host,capacity,create,now,onAd,onClose,onEnded,onError,onAudioLocked});
   this.slots=new Map();this.visible=null;this.muted=true;this.running=false;this.sequence=0;
  }
  get(key){return this.slots.get(key)||null;}
@@ -22,12 +22,13 @@ export class PlayerPool{
   if(slot)this.close(key);
   const player=this.create(source);
   slot={key,url:source.url,source,player,used:++this.sequence,usedAt:this.now(),openedAt:this.now(),seekAt:0};
-  player.on('ad',on=>this.onAd(key,on));player.on('ended',()=>this.onEnded(key));player.on('error',error=>this.onError(key,error));player.on?.('audiolocked',()=>this.onAudioLocked(key));
+  const current=()=>this.slots.get(key)===slot;
+  player.on('ad',on=>{if(current())this.onAd(key,on);});player.on('ended',()=>{if(current())this.onEnded(key);});player.on('error',error=>{if(current())this.onError(key,error);});player.on?.('audiolocked',()=>{if(current())this.onAudioLocked(key);});
   player.element.classList.add('layer');player.element.setAttribute('aria-hidden','true');player.element.tabIndex=-1;
   this.host.append(player.element);this.slots.set(key,slot);this.trim();return slot;
  }
  touch(slot){slot.used=++this.sequence;slot.usedAt=this.now();}
- close(key){const slot=this.slots.get(key);if(!slot)return;slot.player.destroy();this.slots.delete(key);if(this.visible===key)this.visible=null;}
+ close(key){const slot=this.slots.get(key);if(!slot)return;this.slots.delete(key);if(this.visible===key)this.visible=null;slot.player.destroy();this.onClose(key);}
  // Seconds a seek on this player takes to land; a moving target is led by this much.
  lead(key){const p=this.slots.get(key)?.player;return p?.kind==='provider'?Math.min(12,Math.max(1,(p.seekLatency||3000)/1000)):0;}
  // Players that cannot be driven (page embeds) are shown as soon as they have loaded.

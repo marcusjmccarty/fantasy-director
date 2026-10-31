@@ -24,7 +24,7 @@ export class NativePlayer{
  get currentTime(){return this.element.currentTime;}
  get progressing(){return !this.error&&!this.element.paused&&this.now()-this.lastAdvance<1200;}
  near(target,tolerance=2.5){const v=this.element;return this.primed&&!this.error&&this.target===null&&!v.seeking&&v.readyState>=3&&(this.progressing||!this.wantPlay)&&Math.abs(v.currentTime-target)<=tolerance;}
- play(){if(this.destroyed)return;this.wantPlay=true;if(!this.attached)return;this.element.play().catch(error=>{if(error.name==='NotAllowedError'){this.element.muted=true;this.element.play().catch(()=>{});}});}
+ play(){if(this.destroyed)return;this.wantPlay=true;if(!this.attached)return;this.element.play().catch(error=>{if(this.destroyed||!this.wantPlay)return;if(error.name==='NotAllowedError'){this.element.muted=true;this.element.play().catch(()=>{});}});}
  pause(){this.wantPlay=false;this.element.pause();}
  seek(time){const v=this.element,t=Math.max(0,Number(time)||0);this.target=Number.isFinite(v.duration)?Math.min(t,Math.max(0,v.duration-.5)):t;this.primed=false;v.currentTime=this.target;}
  // The browser may refuse sound without a gesture and pause the element on

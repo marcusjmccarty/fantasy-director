@@ -421,6 +421,7 @@ test('excluded current games cannot survive a celebration hold or fallback',()=>
  const o={games:[a],current:{kind:'game',id:'A'},excluded:new Set(['A']),recentScore:()=>true};
  assert.equal(decide(d,o).kind,'standby');
  const b=game('B','DAL','NYG');assert.equal(decide(d,{...o,games:[a,b]}).id,'B');
+ assert.equal(decide(d,{...o,recentScore:()=>false}).kind,'standby','an excluded current game is not a fallback either');
 });
 test('a previous lineup’s game is left immediately without debounce',()=>{
  const d=new Director(),a=game('A','IND','MIN'),b=game('B','DAL','NYG');

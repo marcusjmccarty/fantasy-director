@@ -1005,8 +1005,10 @@ test('ProviderPlayer.resume(): after the viewer\'s click paused the provider, as
  const q=h.make();q.resume();assert.equal(q.wantPlay,true);assert.deepEqual(actions(q),[]);
 });
 test('EmbedPlayer pause unloads the page to stop sound and play reloads it',()=>{
- const saved=globalThis.document;let frame;
- globalThis.document={createElement(){frame=fakeFrame();frame.addEventListener=()=>{};return frame;}};
- try{const p=new EmbedPlayer('https://stream.example/game');p.setVisible(true);p.play();p.pause();assert.equal(frame.src,'about:blank');assert.equal(p.wantPlay,false);p.play();assert.equal(frame.src,'https://stream.example/game');assert.equal(p.wantPlay,true);p.destroy();}
+ const saved=globalThis.document;let frame,load,now=0;
+ globalThis.document={createElement(){frame=fakeFrame();frame.addEventListener=(name,fn)=>{if(name==='load')load=fn;};return frame;}};
+ try{const p=new EmbedPlayer('https://stream.example/game',{now:()=>now});p.setVisible(true);p.play();p.pause();assert.equal(frame.src,'about:blank');assert.equal(p.wantPlay,false);
+  load();now=2000;assert.equal(p.progressing,false,'loading about:blank is not playback');
+  p.play();assert.equal(frame.src,'https://stream.example/game');assert.equal(p.wantPlay,true);assert.equal(p.progressing,false);load();now=4000;assert.equal(p.progressing,true);p.destroy();}
  finally{globalThis.document=saved;}
 });

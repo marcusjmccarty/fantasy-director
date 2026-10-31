@@ -72,7 +72,7 @@ Calibrating a recording is automatic: `node scripts/scorebug-ocr/jobs.mjs` resol
 
 ## Tests
 
-`npm test` runs 333 tests covering the director, coverage, alignment, scoring parser, archive sampling and play windows, replay matching, live normalization and the delayed live feed, the provider handshake, page embeds and the player pool, a full-Sunday rehearsal, and the server endpoints. They are deterministic simulations; real playback still needs a browser with the page in view (the provider's player stops reporting while the page is hidden).
+`npm test` runs 350 tests covering the director, coverage, alignment, scoring parser, archive sampling and play windows, replay matching, live normalization and the delayed live feed, the provider handshake, page embeds and the player pool, a full-Sunday rehearsal, and the server endpoints. They are deterministic simulations; real playback still needs a browser with the page in view (the provider's player stops reporting while the page is hidden).
 
 ## Reliability checks and live limits
 
@@ -82,6 +82,11 @@ explicit public-league team selection, and responses arriving after a mode or
 lineup change. Director tests also cover excluded streams during a celebration
 hold and standby. Import requests accept the supported ESPN cookie lengths and
 reject malformed JSON without a server error.
+
+[The logic audit](docs/logic-audit.md) records the original failures, corrections
+to the first review, and reproducible comparisons with the pre-review commit.
+`node scripts/audit-director.mjs` compares 60,000 eligible-stream decisions with
+that original director, including successive decisions and debounce state.
 
 Live decisions infer team possession from a polled scoreboard, not player-level
 on-field tracking or video analysis. A single delay setting cannot perfectly
