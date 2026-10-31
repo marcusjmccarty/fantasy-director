@@ -199,7 +199,7 @@ test('viewing room: the fullscreen fallback has a working named exit',async()=>{
  await a.el('fullButton').onclick();assert.equal(a.el('fullButton').textContent,'Full screen');
 });
 test('viewing room: selecting a game and returning to automatic switching have explicit labels',()=>{
- const a=app();ready(a);a.render();assert.match(a.el('games').html,/Jonathan Taylor/);assert.match(a.el('games').html,/Watch this game · stay until a break/);
+ const a=app();ready(a);a.render();assert.match(a.el('games').html,/Jonathan Taylor/);assert.match(a.el('games').html,/Open game tracker · add a stream link below for video/);
  a.el('games').onclick({target:{closest:()=>({dataset:{game:'A'}})}});assert.equal(a.S.pinned,'A');assert.equal(a.el('autoChip').textContent,'Your choice');assert.equal(a.el('resumeAuto').hidden,false);assert.match(a.el('games').html,/Your choice until a break · select again/);
  a.el('resumeAuto').onclick();assert.equal(a.S.pinned,null);assert.equal(a.el('autoChip').textContent,'Automatic');assert.equal(a.el('resumeAuto').hidden,true);
  a.S.cooldown.set('A',Infinity);a.render();assert.match(a.el('games').html,/<button[^>]* disabled>/);assert.match(a.el('games').html,/Try another stream link below/);
@@ -575,11 +575,10 @@ test('break recovery: a provider ad yields to a non-roster stream without counti
  a.setPlaying(true);a.cutTo('A',1000);a.S.lastAt=999;a.pool.current.emit('ad',true);a.step(1000);
  assert.equal(a.S.program.id,'X');assert.equal(a.coverage.intervals.size,0);
 });
-test('interface: guide tabs support selection and keyboard navigation without replacing the player',()=>{
- const a=app();a.el('rosterTab').onclick();assert.equal(a.el('rosterPanel').hidden,false);assert.equal(a.el('gamesPanel').hidden,true);
- assert.equal(a.el('rosterTab')['aria-selected'],'true');assert.equal(a.el('rosterTab').tabIndex,0);
- let prevented=false;a.el('rosterTab').onkeydown({key:'ArrowRight',preventDefault(){prevented=true;}});
- assert.equal(prevented,true);assert.equal(a.el('scoresPanel').hidden,false);assert.equal(a.el('scoresTab').focused,true);assert.equal(a.pool.destroyed,undefined);
+test('interface: the persistent lineup summary stays current during playback and opens its editor',()=>{
+ const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/live.mp4'};a.render();assert.match(a.el('lineupSummary').textContent,/My lineup/);assert.match(a.el('lineupPreview').textContent,/Jonathan Taylor/);
+ a.setPlaying(true);a.cutTo('A',1000);const video=a.pool.current;a.el('editLineup').onclick();assert.equal(a.el('lineupDialog').open,true);assert.equal(a.el('editLineup').textContent,'Edit lineup');assert.equal(a.pool.current,video);assert.equal(video.destroyed,undefined);
+ a.el('closeLineup').onclick();a.el('setupLineup').onclick();assert.equal(a.el('lineupDialog').open,true);
 });
 test('interface: start watching removes setup and folds streams; lineup remains available',()=>{
  const a=app();ready(a);a.render();assert.equal(a.el('setupSteps').hidden,false);a.setPlaying(true);

@@ -112,4 +112,6 @@ they do not verify the availability of third-party live broadcasts.
 
 ## Latest audit and interface changes
 
+See [viewing room refinement](docs/viewing-room-refinement.md) for the permanent lineup shortcut, always-visible game guide, separate starters/scores sections, compact playback controls, and validation limits.
+
 See [commercial logic follow-up](docs/commercial-logic-follow-up.md) for the Bucs scoring-break reproduction, commercial suppression, regression checks, and remaining detection limits. The [continuity and workspace overhaul](docs/continuity-and-workspace-overhaul.md) records the preceding structural UI and playback work. Earlier audit documents describe their respective historical revisions.
