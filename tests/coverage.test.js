@@ -26,6 +26,41 @@ const reichardFG=(id='s1',at=100)=>play(id,at,MIN,'Will Reichard 48 Yd Field Goa
 const pickSix=(id='s1',at=100)=>play(id,at,IND,'Kenny Moore II 40 Yd Interception Return (Spencer Shrader Kick)');
 const roles=credits=>credits.map(c=>`${c.player.name}:${c.role}`);
 
+test('corrections: invalid score times are never judged or queued',()=>{
+ const c=new Coverage();for(const at of [NaN,Infinity,undefined])c.update([game('g',[{...taylorTD('bad'),at}])],roster,200);
+ assert.equal(c.judged.size,0);assert.equal(c.log.length,0);assert.equal(c.queue.length,0);
+});
+test('corrections: an overturned score leaves neither replay queue nor history',()=>{
+ const c=new Coverage(),old=taylorTD();c.update([game('g',[old])],roster,200);
+ assert.deepEqual(c.reconcile(game('g',[]),[old],roster),[old.id]);assert.equal(c.log.length,0);assert.equal(c.queue.length,0);assert.equal(c.judged.has(old.id),false);
+});
+test('corrections: a newly credited starter is reconsidered even after the old score was judged',()=>{
+ const c=new Coverage(),old=nobody();c.update([game('g',[old])],roster,200);assert.equal(c.log.length,0);
+ const corrected=taylorTD();c.reconcile(game('g',[corrected]),[old],roster);c.update([game('g',[corrected])],roster,201);
+ assert.equal(c.queue.length,1);assert.equal(c.queue[0].credits[0].player.name,'Jonathan Taylor');
+});
+test('corrections: a reassigned score removes the old starter credit and requeues the new one',()=>{
+ const c=new Coverage(),old=taylorTD(),corrected=jeffersonTD();c.update([game('g',[old])],roster,200);
+ assert.deepEqual(c.reconcile(game('g',[corrected]),[old],roster),[old.id]);c.update([game('g',[corrected])],roster,201);
+ assert.equal(c.log.length,1);assert.equal(c.queue.length,1);assert.equal(c.queue[0].credits[0].player.name,'Justin Jefferson');
+});
+test('corrections: scoreboard and extra-point updates keep the current replay object',()=>{
+ const c=new Coverage(),old=taylorTD(),g=game('g',[old]);c.update([g],roster,200);const entry=c.log[0];
+ const corrected={...old,away:7,home:3,clock:'9:00',text:old.text.replace('Spencer Shrader Kick','Spencer Shrader Kick Failed'),players:old.players.filter(p=>p.role!=='pat')};
+ assert.deepEqual(c.reconcile(game('g',[corrected]),[old],roster),[]);assert.equal(c.log[0],entry);assert.equal(c.queue[0],entry);assert.equal(entry.score,corrected);
+});
+test('corrections: watched scores receive yardage edits without another replay',()=>{
+ for(const state of ['seen','replayed']){
+  const c=new Coverage(),old=taylorTD();c.update([game('g',[old])],roster,200);const entry=c.log[0];entry.status=state;entry.seen=state==='seen';c.take(old.id);
+  const corrected={...old,text:old.text.replace('4 Yd','5 Yd')};assert.deepEqual(c.reconcile(game('g',[corrected]),[old],roster),[old.id]);
+  c.update([game('g',[corrected])],roster,201);assert.equal(c.log[0],entry);assert.equal(entry.score,corrected);assert.equal(entry.status,state);assert.equal(c.queue.length,0);assert.equal(entry.watchUrl,null);
+ }
+});
+test('corrections: a pending yardage correction is prepared again instead of keeping a stale clip',()=>{
+ const c=new Coverage(),old=taylorTD();c.update([game('g',[old])],roster,200);const corrected={...old,text:old.text.replace('4 Yd','5 Yd')};
+ assert.deepEqual(c.reconcile(game('g',[corrected]),[old],roster),[old.id]);assert.equal(c.log.length,0);c.update([game('g',[corrected])],roster,201);assert.equal(c.queue[0].score,corrected);
+});
+
 // ---------- Coverage.watch ----------
 test('watch() rejects jumps larger than maxStep, backward and empty steps, and missing game ids',()=>{
  const c=new Coverage();

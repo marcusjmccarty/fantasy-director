@@ -1,8 +1,10 @@
 // Remembers what was actually on screen, so every score by one of your
 // starters is either seen live or queued as a highlight.
-import {rosterCredit,worthReplaying} from './scoring.js';
+import {rosterCredit,worthReplaying,normalName} from './scoring.js';
 const WINDOW=[-3,4];   // seconds around the snap that must have been visible
 const SETTLED=9;       // judge a score once the play is over
+const identity=s=>JSON.stringify([s.at,s.team,s.kind,!!s.defensive,(s.players||[]).filter(p=>p.role!=='pat').map(p=>[normalName(p.name),p.role]).sort()]);
+const replayText=s=>String(s.text||'').replace(/\s*\(.*$/,'').trim().toLowerCase().replace(/\s+/g,' ');
 
 export class Coverage{
  constructor(){this.reset();}
@@ -26,11 +28,30 @@ export class Coverage{
   for(const [x,y] of this.intervals.get(gameId)||[])covered+=Math.max(0,Math.min(b,y)-Math.max(a,x));
   return covered>=(b-a)*.7;
  }
+ // Reconcile an authoritative score list before settling new plays. Cosmetic
+ // scoreboard/PAT edits update the same item; changed replay matches are retired.
+ reconcile(game,previous,roster){
+  const current=new Map((game.scores||[]).map(s=>[s.id,s])),invalid=new Set();
+  const entries=new Map([...this.log,...this.queue].filter(e=>e.gameId===game.id).map(e=>[e.id,e]));
+  for(const old of previous){
+   const score=current.get(old.id),entry=entries.get(old.id),credits=score?rosterCredit(score,game,roster):[];
+   const same=score&&identity(old)===identity(score),changed=!same||replayText(old)!==replayText(score);
+   if(!score||entry&&!credits.length||changed){
+    invalid.add(old.id);
+    // A yardage edit does not make a watched touchdown unseen.
+    if(entry&&credits.length&&same&&(entry.seen||entry.status==='replayed')){
+     Object.assign(entry,{score,credits,at:score.at,watchUrl:null});continue;
+    }
+    this.judged.delete(old.id);this.drop(old.id);this.log=this.log.filter(e=>e.id!==old.id);
+   }else if(entry)Object.assign(entry,{score,credits,at:score.at});
+  }
+  return [...invalid];
+ }
  // Returns newly settled roster scores; misses join the queue.
  update(games,roster,at,delay=0,slack=0){
   const fresh=[];
   for(const game of games)for(const s of game.scores||[]){
-   if(this.judged.has(s.id)||at<s.at+delay+slack+SETTLED)continue;this.judged.add(s.id);
+   if(!Number.isFinite(s.at)||this.judged.has(s.id)||at<s.at+delay+slack+SETTLED)continue;this.judged.add(s.id);
    const credits=rosterCredit(s,game,roster);if(!credits.length)continue;
    const seen=this.seen(game.id,s.at+delay,slack),replay=!seen&&worthReplaying(credits);
    const item={id:s.id,gameId:game.id,gameName:game.name,score:s,credits,at:s.at,queuedAt:at,seen,queued:replay};

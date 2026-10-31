@@ -355,6 +355,61 @@ function playingHighlight(){
  a.coverage.log.push(entry);a.coverage.queue.push(entry);a.S.sources.set(entry.id,{key:'hl:test',source:{url:'https://example.com/clip.mp4'},start:0,duration:10,label:'Official highlight'});a.startHighlight(entry.id);a.updateHighlight(1000);
  return {a,entry,p:a.pool.current};
 }
+test('continuity: cancelled urgency clears the pending return deadline while a highlight continues',()=>{
+ const {a,p}=playingHighlight();a.saved.streams={'IND-MIN':'https://example.test/slow.mp4'};const back=a.pool.open('A',{url:a.saved.streams['IND-MIN']}).player;back.moving=false;a.S.highlight.returnTo='A';
+ let urgent=true;a.director.decide=()=>urgent?{kind:'game',id:'A'}:{kind:'highlight',id:a.S.highlight.item.id};a.step(1000);assert.equal(a.S.pending.id,'A');urgent=false;a.time.now=2000;p.currentTime=1;a.step(2000);assert.equal(a.S.pending,null);
+ urgent=true;a.time.now=5000;p.currentTime=4;a.step(5000);assert.equal(a.S.pending.since,5000);assert.equal(a.S.cooldown.has('A'),false);
+});
+test('continuity: failed summaries do not starve the fifth roster game',async()=>{
+ const names=['IND','DAL','BUF','SEA','KC'],calls=[],events=names.map((abbr,i)=>({id:String(i+1),date:'2026-11-01T18:00:00Z',competitions:[{status:{type:{state:'in'}},competitors:[{homeAway:'away',team:{id:String(i+1),abbreviation:abbr}},{homeAway:'home',team:{id:'100',abbreviation:'MIN'}}]}]}));
+ const a=app(async url=>{if(String(url).includes('scoreboard'))return Response.json({events});const id=String(url).split('event=')[1];calls.push(id);if(id!=='5')throw new Error('Summary unavailable');return Response.json({scoringPlays:[],videos:[]});});
+ a.useRoster(names.map((team,i)=>({name:'Player '+String.fromCharCode(65+i),team,position:'RB'})),{teamName:'Five games'});await a.pollLive(0);await a.pollLive(0);assert.ok(calls.includes('5'));assert.equal(calls.filter(id=>id==='1').length,1);
+});
+test('continuity: long polling cycles still give the least recently attempted game its turn',async()=>{
+ const names=['IND','DAL','BUF','SEA','KC'],calls=[],events=names.map((abbr,i)=>({id:String(i+1),competitions:[{status:{type:{state:'in'}},competitors:[{homeAway:'away',team:{id:String(i+1),abbreviation:abbr}},{homeAway:'home',team:{id:'100',abbreviation:'MIN'}}]}]}));
+ const a=app(async url=>{if(String(url).includes('scoreboard'))return Response.json({events});calls.push(String(url).split('event=')[1]);throw new Error('Slow summary failure');});
+ a.useRoster(names.map((team,i)=>({name:'Player '+String.fromCharCode(65+i),team,position:'RB'})),{teamName:'Five games'});
+ a.S.live.summaryAt=Object.fromEntries(['1','2','3','4'].map(id=>[id,Date.now()-30000]));await a.pollLive(0);assert.equal(calls[0],'5');assert.equal(calls.length,4);
+});
+async function correctionFixture(){
+ const now=Date.now(),event={id:'A',date:new Date(now-3600000).toISOString(),competitions:[{status:{type:{state:'in'}},competitors:[{homeAway:'away',team:{id:'11',abbreviation:'IND'}},{homeAway:'home',team:{id:'16',abbreviation:'MIN'}}]}]};
+ let summary={drives:{previous:[{plays:[{id:'td',wallclock:new Date(now-60000).toISOString(),start:{team:{id:'11'}}}]}]},scoringPlays:[{id:'td',team:{id:'11'},text:'Jonathan Taylor 4 Yd Rush',scoringType:{name:'touchdown'}}],videos:[]};
+ const a=app(async url=>Response.json(String(url).includes('scoreboard')?{events:[event]}:summary),{media:true});ready(a);a.S.at=now/1000;a.S.coverageStart=a.S.at-120;await a.pollLive(0);
+ const g=a.S.live.games[0];a.S.games=[g];a.coverage.update([g],a.roster(),a.S.at,0);const entry=a.coverage.log[0];
+ a.S.sources.set(entry.id,{status:'ready',key:'hl:correction',source:{url:'https://example.test/score.mp4'},start:0,duration:12,label:'ESPN highlight'});
+ const poll=async next=>{summary=next;a.S.live.summaryAt={};await a.pollLive(0);};
+ return {a,entry,poll,summary};
+}
+test('corrections: removing a score closes its visible replay and prevents it from returning',async()=>{
+ const {a,entry,poll}=await correctionFixture();a.setPlaying(true);a.startHighlight(entry.id);a.updateHighlight(1000);const p=a.pool.current;assert.ok(p);
+ await poll({scoringPlays:[],videos:[]});assert.equal(p.destroyed,true);assert.equal(a.S.highlight,null);assert.equal(a.S.sources.has(entry.id),false);assert.equal(a.coverage.log.length,0);assert.equal(a.coverage.queue.length,0);
+ a.step(1250);assert.equal(a.coverage.log.length,0);assert.equal(a.coverage.queue.length,0);
+});
+test('corrections: an incomplete summary keeps the active replay and known score',async()=>{
+ const {a,entry,poll}=await correctionFixture();a.setPlaying(true);a.startHighlight(entry.id);a.updateHighlight(1000);const h=a.S.highlight,p=a.pool.current;
+ await poll({videos:[]});assert.equal(a.S.highlight,h);assert.equal(a.pool.current,p);assert.equal(a.S.live.scores.get('A')[0].id,entry.id);
+});
+test('corrections: scoreboard and PAT edits update labels without interrupting footage',async()=>{
+ const {a,entry,poll,summary}=await correctionFixture();a.setPlaying(true);a.startHighlight(entry.id);a.updateHighlight(1000);const h=a.S.highlight,p=a.pool.current;
+ await poll({...summary,scoringPlays:[{...summary.scoringPlays[0],awayScore:7,text:'Jonathan Taylor 4 Yd Rush (Spencer Shrader Kick)'}]});
+ assert.equal(a.S.highlight,h);assert.equal(a.pool.current,p);assert.equal(entry.score.away,7);assert.match(entry.score.text,/Shrader/);assert.equal(a.S.sources.get(entry.id),h.src);
+});
+test('corrections: removing an outgoing replay preserves the next replay that is loading',async()=>{
+ const {a,entry,poll}=await correctionFixture();a.setPlaying(true);a.startHighlight(entry.id);a.updateHighlight(1000);const old=a.pool.current;a.S.highlight.done=true;entry.status='replayed';
+ const next={...entry,id:'B:next',gameId:'B',score:{...entry.score,id:'B:next'}};a.coverage.log.push(next);a.coverage.queue.push(next);a.S.sources.set(next.id,{status:'ready',key:'hl:next',source:{url:'https://example.test/next.mp4'},start:0,duration:12});a.startHighlight(next.id);const h=a.S.highlight,p=a.pool.get(h.src.key).player;p.moving=false;
+ await poll({scoringPlays:[],videos:[]});assert.equal(old.destroyed,true);assert.equal(a.S.highlight,h);assert.equal(p.destroyed,undefined);assert.equal(h.previousView,null);
+ p.moving=true;a.updateHighlight(1250);assert.equal(a.pool.current,p);assert.equal(a.S.program.id,next.id);
+});
+test('corrections: a late resolver cannot restore a removed score',async()=>{
+ const {a,entry,poll}=await correctionFixture(),pending=deferred();a.S.sources.delete(entry.id);a.S.liveClips=[{id:'nfl-correction',kind:'nfl',title:'Taylor scores',description:'Jonathan Taylor scores a 4-yard touchdown.',teams:['IND'],publishedAt:Date.now()-30000,url:'https://www.nfl.com/videos/taylor-touchdown'}];let resolving=false;a.nfl.resolve=()=>{resolving=true;return pending.promise;};
+ const work=a.prepareReplay(entry);assert.equal(resolving,true);assert.equal(a.S.sources.get(entry.id).status,'pending');
+ await poll({scoringPlays:[],videos:[]});pending.resolve({url:'https://example.test/stale.m3u8',duration:12});await work;assert.equal(a.S.sources.has(entry.id),false);assert.equal(a.coverage.queue.length,0);assert.equal(a.coverage.log.length,0);
+});
+test('corrections: a reassignment to a different player cannot keep the original replay',async()=>{
+ const {a,entry,poll,summary}=await correctionFixture();a.setPlaying(true);a.startHighlight(entry.id);a.updateHighlight(1000);const p=a.pool.current;
+ await poll({...summary,scoringPlays:[{...summary.scoringPlays[0],text:'Josh Downs 4 Yd Rush'}]});a.step(1250);
+ assert.equal(p.destroyed,true);assert.equal(a.S.highlight,null);assert.equal(a.coverage.log.length,0);assert.equal(a.coverage.queue.length,0);
+});
 test('watchability: a half-watched interruption stays queued and resumes near the interruption',()=>{
  const {a,entry,p}=playingHighlight();for(let second=1;second<=6;second++){a.time.now=1000+second*1000;p.currentTime=second;a.updateHighlight(a.time.now);}
  a.finishHighlight();assert.equal(entry.status,'queued');assert.equal(a.coverage.queue[0].id,entry.id);
@@ -398,6 +453,7 @@ test('watchability: a real native player reveals the opening and returns to the 
  const a=app(undefined,{media:true,native:true}),{item,clip}=liveReplay(a);a.saved.streams={'IND-MIN':'https://example.test/live.mp4'};a.setPlaying(true);
  const livePlayer=a.pool.open('A',{url:a.saved.streams['IND-MIN']}).player;await livePlayer.ready;livePlayer.play();livePlayer.element.currentTime=1;livePlayer.element.emit('timeupdate');a.cutTo('A',1000);assert.equal(a.pool.visible,'A');
  a.S.liveClips=[clip];a.nfl.resolve=async()=>({url:'https://dcs-vod.mp.lura.live/vod/tiny.m3u8',duration:2});await a.prepareReplay(item);a.startHighlight(item.id);const p=a.pool.get(a.S.highlight.src.key).player;await p.ready;p.element.duration=2;
+ a.time.now=1250;p.element.currentTime=0;p.element.emit('timeupdate');a.updateHighlight(1250);assert.equal(a.pool.current,livePlayer,'a landing frame alone must not replace moving game footage');
  a.time.now=1500;p.element.currentTime=.5;p.element.emit('timeupdate');a.updateHighlight(1500);assert.equal(a.pool.current,p);assert.equal(p.currentTime,0,'the hidden half-second must not be skipped');
  for(let i=1;i<=8;i++){a.time.now+=250;p.element.currentTime=i/4;p.element.emit('timeupdate');if(i<8)a.updateHighlight(a.time.now);}
  p.element.emit('ended');assert.equal(item.status,'replayed');assert.equal(p.wantPlay,false);const playCalls=p.element.calls.filter(c=>c==='play').length;a.setPlaying(false);a.setPlaying(true);assert.equal(p.element.calls.filter(c=>c==='play').length,playCalls,'resuming the channel must not restart an ended native clip');livePlayer.element.currentTime=4;livePlayer.element.emit('timeupdate');a.cutTo('A',a.time.now);assert.equal(a.pool.current,livePlayer);assert.equal(p.destroyed,true);assert.equal(livePlayer.wantPlay,true);

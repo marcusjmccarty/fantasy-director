@@ -134,7 +134,7 @@ function step(now){
  const decision=S.pinned&&gameState(S.pinned)?.state==='in'&&!blocked.has(S.pinned)&&hasRoster(gameState(S.pinned),roster())?{kind:'game',id:S.pinned,reason:'Pinned by you'}:
   director.decide({games:S.games,roster:roster(),at:S.at,current,excluded:blocked,queue,includeDefense:saved.includeDefense,recentScore});
  S.decision=decision;
- if(decision.kind==='highlight'){if(!S.highlight||S.highlight.done)startHighlight(decision.id);if(S.highlight&&!S.highlight.playing)updateHighlight(now);}
+ if(decision.kind==='highlight'){S.pending=null;if(!S.highlight||S.highlight.done)startHighlight(decision.id);if(S.highlight&&!S.highlight.playing)updateHighlight(now);}
  else if(decision.kind==='game'){if(S.highlight&&!S.highlight.done&&!S.highlight.playing)closeHighlight();cutTo(decision.id,now);}
  else if(decision.kind==='standby'){if(S.highlight){S.highlight.done=true;closeHighlight();}S.pending=null;if(S.program.kind!=='standby'){S.program={kind:'standby'};pool.hide();}}
  if(now-S.lastWarm>1000){S.lastWarm=now;warm(blocked);}
@@ -645,11 +645,20 @@ async function pollLive(generation){
   for(const g of games)g.scores=S.live.scores.get(g.id)||[];
   S.live.games=games;S.live.error='';S.live.fetched=Date.now();S.live.feed.push(games,Date.now()/1000);if($('streamsStatus').textContent==='Refreshing the schedule…')$('streamsStatus').textContent='Schedule updated.';
   const teams=rosterTeams(roster());
-  await Promise.allSettled(games.filter(g=>g.state!=='pre'&&g.teams.some(t=>teams.has(t.abbr))&&Date.now()-(S.live.summaryAt?.[g.id]||0)>25000).slice(0,4).map(async g=>{
+  await Promise.allSettled(games.filter(g=>g.state!=='pre'&&g.teams.some(t=>teams.has(t.abbr))&&Date.now()-(S.live.summaryAt?.[g.id]||0)>25000).sort((a,b)=>(S.live.summaryAt?.[a.id]||0)-(S.live.summaryAt?.[b.id]||0)).slice(0,4).map(async g=>{
+   // Space failed attempts too, so one unavailable group cannot starve later games.
+   S.live.summaryAt={...S.live.summaryAt,[g.id]:Date.now()};
    const summary=await espn('summary?event='+g.id,AbortSignal.timeout(10000));
    if(generation!==S.live.generation||S.mode!=='live')return;
-   S.live.summaryAt={...S.live.summaryAt,[g.id]:Date.now()};
-   const scores=liveScores(summary,g);S.live.scores.set(g.id,scores);g.scores=scores;
+   const previous=S.live.scores.get(g.id)||[],scores=liveScores(summary,g,previous);g.scores=scores;S.live.scores.set(g.id,scores);
+   for(const id of coverage.reconcile(g,previous,roster())){
+    // Retire in-flight resolvers as well as ready clips. Their identity guards
+    // prevent a late result from restoring an overturned or reassigned score.
+    S.sources.delete(id);
+    const h=S.highlight;
+    if(h?.item.id===id){h.done=true;closeHighlight();}
+    else if(h?.previousView?.item.id===id){if(h.previousKey)pool.close(h.previousKey);h.previousKey=null;h.previousView=null;if(S.program.kind==='highlight'&&S.program.id===id)S.program={kind:'standby'};}
+   }
    const clips=normalizeHighlights(summary,g).filter(c=>c.kind==='clip').map(c=>({...c,inlinePlayable:playable(c),athletes:[],short:!/(?:highlights|best plays|every|all .*plays)/i.test(c.title)}));
    S.liveClips=[...new Map([...S.liveClips,...clips].map(c=>[c.id,c])).values()].slice(-240);
   }));

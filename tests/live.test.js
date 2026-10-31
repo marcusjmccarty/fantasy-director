@@ -43,6 +43,27 @@ const scoringPlay=(id,teamId,text,{type='Passing Touchdown',scoringType='touchdo
  ({id:String(id),team:{id:String(teamId)},text,type:{text:type},scoringType:{name:scoringType},awayScore:away,homeScore:home,period:{number:period},clock:{displayValue:clock}});
 const WC1='2025-10-19T17:08:31Z',WC2='2025-10-19T17:20:00Z',WC3='2025-10-19T17:40:00Z';
 
+test('corrections: invalid timestamps cannot create immediately settled scores',()=>{
+ const g=one(scoreboard(event())),s=summary({previous:[[play(1,'not-a-date',11)]],scoringPlays:[scoringPlay(1,11,'Jonathan Taylor 4 Yd Rush')]});
+ assert.deepEqual(liveScores(s,g),[]);
+});
+test('corrections: a missing scoring list preserves the previous known plays',()=>{
+ const g=one(scoreboard(event())),previous=liveScores(summary({previous:[[play(1,WC1,11)]],scoringPlays:[scoringPlay(1,11,'Jonathan Taylor 4 Yd Rush')]}),g);
+ for(const incomplete of [{},null,{scoringPlays:null}])assert.deepEqual(liveScores(incomplete,g,previous),previous);
+ assert.deepEqual(liveScores({scoringPlays:[]},g,previous),[],'an explicit empty list removes overturned scores');
+});
+test('corrections: a retained score can use its last known time while drives are missing',()=>{
+ const g=one(scoreboard(event())),row=scoringPlay(1,11,'Jonathan Taylor 4 Yd Rush'),previous=liveScores(summary({previous:[[play(1,WC1,11)]],scoringPlays:[row]}),g);
+ const [updated]=liveScores({scoringPlays:[{...row,text:'Jonathan Taylor 5 Yd Rush'}]},g,previous);
+ assert.equal(updated?.at,Date.parse(WC1)/1000);assert.equal(updated?.text,'Jonathan Taylor 5 Yd Rush');
+ assert.deepEqual(liveScores({scoringPlays:[scoringPlay(2,11,'Jonathan Taylor 1 Yd Rush')]},g,previous),[],'a new play cannot borrow an unrelated timestamp');
+});
+test('corrections: a known defensive score retains its offense inference when drives disappear',()=>{
+ const g=one(scoreboard(event())),row=scoringPlay(1,16,'Unrecognized touchdown description'),previous=liveScores(summary({previous:[[play(1,WC1,11)]],scoringPlays:[row]}),g);
+ assert.equal(previous[0].defensive,true);assert.equal(liveScores({scoringPlays:[row]},g,previous)[0]?.defensive,true);
+ assert.equal(liveScores({scoringPlays:[{...row,text:row.text+' (Will Reichard Kick)'}]},g,previous)[0]?.defensive,true);
+});
+
 const roster=[
  {name:'Jonathan Taylor',team:'IND',position:'RB'},
  {name:'Spencer Shrader',team:'IND',position:'K'},

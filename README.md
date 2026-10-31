@@ -72,7 +72,7 @@ Calibrating a recording is automatic: `node scripts/scorebug-ocr/jobs.mjs` resol
 
 ## Tests
 
-`npm test` runs 435 tests covering the director, coverage, alignment, scoring parser, archive sampling and play windows, replay matching, live normalization and the delayed live feed, the provider handshake, page embeds and the player pool, a full-Sunday rehearsal, and the server endpoints. They are deterministic simulations; real playback still needs a browser with the page in view (the provider's player stops reporting while the page is hidden).
+`npm test` runs 460 tests covering the director, coverage, alignment, scoring parser, archive sampling and play windows, replay matching, live normalization and the delayed live feed, the provider handshake, page embeds and the player pool, a full-Sunday rehearsal, and the server endpoints. They are deterministic simulations; real playback still needs a browser with the page in view (the provider's player stops reporting while the page is hidden).
 
 ## Reliability checks and live limits
 
@@ -84,6 +84,8 @@ hold and standby. Import requests accept the supported ESPN cookie lengths and
 reject malformed JSON without a server error.
 
 [The highlight playback audit](docs/highlight-playback-audit.md) records reproduced transition failures, their corrections, an interruption/queue rehearsal, and the remaining browser verification boundary.
+
+[The continuity and score-correction audit](docs/continuity-and-score-corrections.md) covers playback races, fair summary polling, corrected/overturned scores, and 25 additional regression checks.
 [The live-highlight integration follow-up](docs/live-highlight-integration.md) records the new matching, retry and publisher-page fallbacks, including the provider metadata and real-browser checks still needed.
 [The full logic audit](docs/full-logic-audit.md) records the decision order and preceding reproduced defects, fixes, and verification limits.
 [The earlier family-readiness audit](docs/family-readiness-audit.md) records the preceding fixes and deployed-baseline browser evidence.

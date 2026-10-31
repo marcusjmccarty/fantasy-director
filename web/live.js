@@ -72,13 +72,18 @@ export class LiveFeed{
  }
 }
 // Scoring plays with the wallclock of the snap, from a game summary.
-export function liveScores(summary,game){
- const plays=[...(summary.drives?.previous||[]),summary.drives?.current].filter(Boolean).flatMap(d=>d.plays||[]);
- const at=new Map(plays.filter(p=>p.wallclock).map(p=>[String(p.id),{at:Date.parse(p.wallclock)/1000,offense:p.start?.team?.id}]));
- return (summary.scoringPlays||[]).map(s=>{
-  const when=at.get(String(s.id));if(!when)return null;
-  const team=game.teams.findIndex(t=>t.id===String(s.team?.id)),offense=game.teams.findIndex(t=>t.id===String(when.offense??''));
+export function liveScores(summary,game,previous=[]){
+ // Missing fields are not an authoritative removal. An explicit empty list is.
+ if(!Array.isArray(summary?.scoringPlays))return previous;
+ const plays=[...(Array.isArray(summary.drives?.previous)?summary.drives.previous:[]),summary.drives?.current].filter(Boolean).flatMap(d=>Array.isArray(d.plays)?d.plays:[]);
+ const at=new Map(plays.filter(p=>p?.wallclock&&Number.isFinite(Date.parse(p.wallclock))).map(p=>[String(p.id),{at:Date.parse(p.wallclock)/1000,offense:p.start?.team?.id}]));
+ const known=new Map(previous.map(s=>[s.id,s]));
+ return summary.scoringPlays.map(s=>{
+  if(s?.id===undefined||s.id===null)return null;
+  const id=`${game.id}:${s.id}`,old=known.get(id),when=at.get(String(s.id)),time=when?.at??old?.at;if(!Number.isFinite(time))return null;
+  const team=game.teams.findIndex(t=>t.id===String(s.team?.id)),offense=game.teams.findIndex(t=>t.id===String(when?.offense??''));
   const parsed=parseScoringPlay(s.text,s.type?.text,s.scoringType?.name);
-  return {id:`${game.id}:${s.id}`,at:when.at,team,kind:parsed.kind,defensive:parsed.defensive||team>=0&&offense>=0&&team!==offense,text:String(s.text||'').trim(),players:parsed.players,away:s.awayScore,home:s.homeScore,period:s.period?.number||0,clock:s.clock?.displayValue||''};
+  const retainedDefense=offense<0&&old?.defensive&&old.team===team&&old.kind===parsed.kind&&old.text.replace(/\s*\(.*$/,'')===String(s.text||'').trim().replace(/\s*\(.*$/,'');
+  return {id,at:time,team,kind:parsed.kind,defensive:!!(parsed.defensive||team>=0&&offense>=0&&team!==offense||retainedDefense),text:String(s.text||'').trim(),players:parsed.players,away:s.awayScore,home:s.homeScore,period:s.period?.number||0,clock:s.clock?.displayValue||''};
  }).filter(Boolean);
 }
