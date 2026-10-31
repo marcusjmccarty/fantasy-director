@@ -1,19 +1,19 @@
 const TEAM={1:'ATL',2:'BUF',3:'CHI',4:'CIN',5:'CLE',6:'DAL',7:'DEN',8:'DET',9:'GB',10:'TEN',11:'IND',12:'KC',13:'LV',14:'LAR',15:'MIA',16:'MIN',17:'NE',18:'NO',19:'NYG',20:'NYJ',21:'PHI',22:'ARI',23:'PIT',24:'LAC',25:'SF',26:'SEA',27:'TB',28:'WAS',29:'CAR',30:'JAC',33:'BAL',34:'HOU'};
 const POS={1:'QB',2:'RB',3:'WR',4:'TE',5:'K',16:'D/ST'};
 const json=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
-// Sites dispatch supplies a Site-scoped identity. Account UUIDs are not interchangeable.
+// The public Worker has no authenticated account session. A request header is
+// not proof of identity; shared environment credentials are local-preview only.
 function isOwner(request,env){
- const userId=request.headers.get('oai-authenticated-user-id');
- if(userId&&env.ESPN_OWNER_ID&&userId===env.ESPN_OWNER_ID)return true;
- // A local preview has no identity header; its env.json is the owner's own machine.
- try{return !userId&&LOOPBACK.has(new URL(request.url).hostname)&&!!env.ESPN_LOCAL;}catch{return false;}
+ try{return LOOPBACK.has(new URL(request.url).hostname)&&env.ESPN_LOCAL===true;}catch{return false;}
 }
 // Cookies pasted by the viewer for their own private league travel with the request and are used once.
 function ownCookies(data){
  const swid=String(data.swid||'').trim(),s2=String(data.s2||'').trim();
- if(!swid||!s2)return null;
- if(!/^\{?[0-9A-Fa-f-]{36}\}?$/.test(swid)||s2.length>2048||/[\s;]/.test(s2))throw new Error('The ESPN cookies look wrong: SWID is a {GUID} and espn_s2 is one long token.');
- return {swid:swid.startsWith('{')?swid:`{${swid}}`,s2};
+ if(!swid&&!s2)return null;
+ if(!swid||!s2)throw new Error('Paste both SWID and espn_s2, or leave both blank for a public league.');
+ const guid=swid.startsWith('{')&&swid.endsWith('}')?swid.slice(1,-1):swid;
+ if(!/^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/.test(guid)||s2.length>2048||/[\s;]/.test(s2))throw new Error('The ESPN cookies look wrong: SWID is a {GUID} and espn_s2 is one long token.');
+ return {swid:`{${guid}}`,s2};
 }
 // Same origin, treating the loopback names as one host for local previews.
 const LOOPBACK=new Set(['localhost','127.0.0.1','[::1]']);
@@ -22,8 +22,7 @@ export function sameSite(origin,url){
 }
 export function sessionAPI(request,env={}){
  if(request.method!=='GET')return json({error:'Use GET.'},405);
- const userId=request.headers.get('oai-authenticated-user-id')||null;
- return json({userId,savedLeagueId:isOwner(request,env)&&env.ESPN_SWID&&env.ESPN_S2?env.ESPN_LEAGUE_ID:null});
+ return json({userId:null,savedLeagueId:isOwner(request,env)&&env.ESPN_SWID&&env.ESPN_S2?env.ESPN_LEAGUE_ID:null});
 }
 export function normalizedLeague(raw,ownerSwid=''){
  if(!Array.isArray(raw.teams)||!raw.teams.length)throw new Error('No teams returned');
@@ -40,7 +39,6 @@ export async function leagueAPI(request,env={},fetcher=fetch){
  if(week!==null&&(!Number.isInteger(week)||week<1||week>25))return json({error:'Choose a valid scoring week.'},400);
  let own;try{own=ownCookies(data);}catch(error){return json({error:error.message},400);}
  const owner=isOwner(request,env);
- if(id===env.ESPN_LEAGUE_ID&&!owner&&!own)return json({error:'The saved ESPN connection is not linked to this signed-in session.',code:'CONNECTION_IDENTITY'},403);
  const useSaved=!own&&!!(owner&&id===env.ESPN_LEAGUE_ID&&env.ESPN_SWID&&env.ESPN_S2);
  if(!own&&owner&&id===env.ESPN_LEAGUE_ID&&!useSaved)return json({error:'The saved ESPN connection is missing its access credentials.',code:'CONNECTION_MISSING'},503);
  const headers={Accept:'application/json'};

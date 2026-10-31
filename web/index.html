@@ -9,6 +9,7 @@
 <main class="room" id="room">
  <section class="stage" aria-label="Your channel">
   <div class="setup-lineup"><span class="step-number">1</span><div><h2>Your lineup</h2><p id="lineupSummary">Choose the players you want to follow.</p></div><button id="editLineup" class="primary">Choose your players</button></div>
+  <p id="storageNotice" class="error" role="status" hidden>This browser couldn’t save your changes. They will last only until you close or reload this page.</p>
   <div class="screen" id="screen">
    <div class="layers" id="layers"></div>
    <div class="field-view" id="fieldView" hidden>
@@ -20,7 +21,7 @@
    <div class="lower" id="lower" hidden><div class="lower-kicker" id="lowerKicker"></div><div class="lower-main" id="lowerMain"></div><div class="lower-meta" id="lowerMeta"></div></div>
    <div class="toast" id="toast" role="status" hidden></div>
    <div class="switching" id="switching" hidden></div>
-   <div class="overlay" id="overlay"><div class="overlay-card"><span class="eyebrow" id="ovEyebrow">YOUR PERSONAL GAME DAY</span><h1 id="ovTitle">Every snap your starters take.</h1><p id="ovText">The channel follows your players on the field, goes to whoever is closest to the end zone, skips the breaks, and replays any score you missed.</p><button id="ovButton" class="primary big">Start watching</button><small id="ovHint"></small></div></div>
+   <div class="overlay" id="overlay"><div class="overlay-card"><span class="eyebrow" id="ovEyebrow">YOUR PERSONAL GAME DAY</span><h1 id="ovTitle">Your starters. One channel.</h1><p id="ovText">Choose your fantasy lineup, add your game streams, and watch the channel follow your starters’ teams.</p><button id="ovButton" class="primary big">Start watching</button><small id="ovHint"></small></div></div>
    <button class="unmute" id="unmute" hidden>🔇 Tap for sound</button>
    <div class="sound-hint" id="soundHint" hidden>🔇 <b>Click the video</b> once for sound</div>
   </div>
@@ -54,7 +55,7 @@
  </aside>
 </main>
 <dialog id="lineupDialog" aria-labelledby="lineupTitle"><form method="dialog" id="lineupForm">
- <div class="dialog-head"><h2 id="lineupTitle">Your lineup</h2><button type="button" id="closeLineup" aria-label="Close lineup">Done</button></div>
+ <div class="dialog-head"><h2 id="lineupTitle">Your lineup</h2><button type="button" id="closeLineup" aria-label="Close lineup">Close</button></div>
  <section>
   <label for="leagueId">ESPN league ID</label><div class="inline"><input id="leagueId" inputmode="numeric" autocomplete="off" placeholder="e.g. 12345678"><button type="button" id="importLeague" class="primary">Find my team</button></div>
   <p class="muted" id="leagueStatus" role="status">Enter the number in your ESPN league’s web address. We import starters only.</p>
@@ -65,29 +66,28 @@
   </details>
   <label id="franchiseLabel" for="franchise">Choose your team</label><select id="franchise" aria-label="Choose your team"></select>
   <p id="lineupStatus" role="status"></p>
-  <hr><h3>Or add your players</h3><p class="muted">Add only the players starting for you this week. Choose their NFL team and position.</p>
+  <hr><h3>Or add your players</h3><p class="muted">Add your starters, choose their NFL teams and positions, then choose Save my lineup below.</p>
   <div id="rosterRows"></div><button type="button" id="addPlayer">+ Add a player</button>
   <details><summary>Paste a whole lineup instead</summary><label for="manualRoster">One player per line</label><textarea id="manualRoster" rows="7" spellcheck="false" aria-describedby="rosterHelp"></textarea><p class="muted" id="rosterHelp">Name, team, position. Example: Jonathan Taylor, IND, RB</p><button type="button" id="pasteRoster">Fill in the players above</button></details>
-  <button type="button" id="saveRoster" class="primary">Save my lineup</button>
  </section>
-<p class="error" id="lineupError" role="alert"></p>
+ <div class="dialog-actions"><p class="error" id="lineupError" role="alert"></p><button type="button" id="saveRoster" class="primary">Save my lineup</button></div>
 </form></dialog>
 <dialog id="settings" aria-labelledby="settingsTitle"><form method="dialog" id="settingsForm">
  <div class="dialog-head"><h2 id="settingsTitle">Settings</h2><button type="button" id="closeSettings" class="icon ghost" aria-label="Close">✕</button></div>
- <div class="tabs" role="tablist" aria-label="Settings"><button type="button" role="tab" data-tab="viewing" aria-selected="true">Viewing</button><button type="button" role="tab" data-tab="sync" aria-selected="false">Replay timing</button></div>
- <section data-panel="viewing">
+ <div class="tabs" role="tablist" aria-label="Settings"><button type="button" id="viewingTab" role="tab" data-tab="viewing" aria-controls="viewingPanel" aria-selected="true">Viewing</button><button type="button" id="syncTab" role="tab" data-tab="sync" aria-controls="syncPanel" aria-selected="false" tabindex="-1">Replay timing</button></div>
+ <section id="viewingPanel" role="tabpanel" aria-labelledby="viewingTab" data-panel="viewing">
   <label class="check"><input type="checkbox" id="optDefense" checked> Follow my D/ST when no other starter is on the field</label>
   <label class="check"><input type="checkbox" id="optHighlights" checked> Replay scores I missed</label>
-  <label class="check"><input type="checkbox" id="optData"> Data-only picture (no video; allows up to 60× in the replay)</label>
+  <label class="check"><input type="checkbox" id="optData"> Use the game tracker instead of replay video (Try a replay only)</label>
   <label for="optDelay">Live stream delay (seconds)</label><input id="optDelay" type="number" min="0" max="600" step="5" value="30"><p class="muted">Set it so the clock in the corner of the channel matches the scorebug on your stream. The channel then follows the game as you see it: switching and score alerts timed to your picture. Timing is approximate and can vary between streams.</p>
   <div class="rules"><h3>How the channel decides</h3><ul>
-   <li>Only games where one of your starters is on the field. Never a game without your players.</li>
+   <li>Follows your starters’ teams using possession and field position. Individual player substitutions are not tracked.</li>
    <li>Offense first, closest to the end zone. Your D/ST only fills in when no offense is on.</li>
    <li>Kickers only on 4th down in field-goal range (inside the opponent 42).</li>
    <li>Tries to wait for the end of a play before switching. A rival drive needs to be 10+ yards closer, or entering the red zone, to take over.</li>
-   <li>Detected breaks and supported provider ads are skipped. If one of your players scores off screen, you get the replay at the next quiet moment.</li></ul></div>
+   <li>Detected breaks and supported provider ads are skipped. Missed scores are replayed when matching footage is available.</li></ul></div>
  </section>
- <section data-panel="sync" hidden><p class="muted">Each replay is aligned to the play-by-play with about two hundred scorebug readings taken from its footage. If a cut still lands on the wrong moment, pause on a snap and add a mark: the quarter and game clock on screen, at the current video position. Your marks take priority.</p>
+ <section id="syncPanel" role="tabpanel" aria-labelledby="syncTab" data-panel="sync" hidden><p class="muted">Each replay is aligned to the play-by-play with about two hundred scorebug readings taken from its footage. If a cut still lands on the wrong moment, pause on a snap and add a mark: the quarter and game clock on screen, at the current video position. Your marks take priority.</p>
   <div class="sync-row"><label>Game <select id="syncGame"></select></label><label>Quarter <select id="syncQuarter"><option value="1">1st</option><option value="2">2nd</option><option value="3">3rd</option><option value="4">4th</option><option value="5">OT</option></select></label><label>Clock <input id="syncClock" placeholder="12:34" size="6"></label></div>
   <div class="inline"><button type="button" id="addSync" class="primary">Mark current video position</button><button type="button" id="clearSync">Reset my marks</button></div><p class="muted" id="syncStatus"></p></section>
  <p class="error" id="settingsError" role="alert"></p>

@@ -12,7 +12,8 @@ export async function replaySourceAPI(request,catalog){
 // cookies, user-agent strings, roster details, or free-form browser messages.
 export async function playbackHealthAPI(request,catalog,env={},logger=console){
  if(request.method!=='POST')return mediaJSON({error:'Use POST.'},405);
- if(request.headers.get('Origin')!==new URL(request.url).origin||!env.ESPN_OWNER_ID||request.headers.get('oai-authenticated-user-id')!==env.ESPN_OWNER_ID)return mediaJSON({error:'Not authorized.'},403);
+ const url=new URL(request.url);
+ if(request.headers.get('Origin')!==url.origin||!['localhost','127.0.0.1','[::1]'].includes(url.hostname)||env.ESPN_LOCAL!==true)return mediaJSON({error:'Not authorized.'},403);
  if(Number(request.headers.get('Content-Length')||0)>1024)return mediaJSON({error:'Request too large.'},413);
  let data;try{const text=await request.text();if(text.length>1024)return mediaJSON({error:'Request too large.'},413);data=JSON.parse(text);}catch{return mediaJSON({error:'Invalid report.'},400);}
  if(!data||!['ready','failed'].includes(data.event)||!catalog.some(game=>game.id===data.game))return mediaJSON({error:'Invalid report.'},400);

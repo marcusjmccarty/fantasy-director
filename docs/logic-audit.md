@@ -1,5 +1,11 @@
 # Logic audit — 2026-10-31
 
+This document records the earlier audit delivered in `d019282`. See the
+[family-readiness audit](family-readiness-audit.md) for the subsequent full pass,
+current test count, and browser evidence. The file-preservation statements below
+describe that earlier revision; the later audit also adds pause/watchdog guards
+to `provider-player.js` while preserving its handshake and seek logic.
+
 Baseline: `22d3d1d031fa3adf9b9b61e658c387271cbc31bf` (before the review).
 First review: `daf5d176eb2e8c0403c5b448b52a58807e8b4aa7`.
 

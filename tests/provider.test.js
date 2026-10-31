@@ -1012,3 +1012,15 @@ test('EmbedPlayer pause unloads the page to stop sound and play reloads it',()=>
   p.play();assert.equal(frame.src,'https://stream.example/game');assert.equal(p.wantPlay,true);assert.equal(p.progressing,false);load();now=4000;assert.equal(p.progressing,true);p.destroy();}
  finally{globalThis.document=saved;}
 });
+test('only the visible player is keyboard reachable and exposed to assistive technology',()=>{
+ const {pool,open,player}=poolHarness();open('A');open('B');pool.show('A');
+ assert.equal(player('A').element.tabIndex,0);assert.equal(player('B').element.tabIndex,-1);assert.equal(player('A').element.getAttribute('aria-hidden'),'false');
+ pool.hide();assert.equal(player('A').element.tabIndex,-1);assert.equal(player('A').element.getAttribute('aria-hidden'),'true');
+});
+test('pausing cancels provider sound recovery without mistaking the pause for an audio lock',t=>{
+ const h=harness(t),outer={setTimeout:globalThis.setTimeout,clearTimeout:globalThis.clearTimeout},timers=new Map();let sequence=0;
+ globalThis.setTimeout=fn=>{const id=++sequence;timers.set(id,fn);return id;};globalThis.clearTimeout=id=>timers.delete(id);
+ t.after(()=>{globalThis.setTimeout=outer.setTimeout;globalThis.clearTimeout=outer.clearTimeout;});
+ const p=h.init(h.make());p.play();h.prime(p,100);p.muted=false;assert.equal(timers.size,1);const callback=[...timers.values()][0];p.pause();assert.equal(timers.size,0);clear(p);callback();
+ assert.equal(p.audioLocked,false);assert.equal(p.muted,false);assert.equal(p.wantPlay,false);assert.deepEqual(actions(p),[]);p.destroy();
+});

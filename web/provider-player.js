@@ -34,7 +34,7 @@ export class ProviderPlayer{
  play(){this.wantPlay=true;if(this.initialized)this.bootstrap();}
  // The viewer's click inside the frame pauses the provider's player: ask it straight to play again.
  resume(){this.wantPlay=true;if(this.initialized)this.send('play');}
- pause(){this.wantPlay=false;this.advances=0;this.stopBootstrap();if(this.initialized)this.send('pause');}
+ pause(){this.wantPlay=false;this.advances=0;this.stopBootstrap();clearTimeout(this.audioWatch);this.audioWatch=null;if(this.initialized)this.send('pause');}
  // The provider drops a play sent before its player is ready (observed: one
  // play after `inited` yields nothing, a half-second retry starts footage), so
  // keep asking until a time report proves the footage is moving.
@@ -69,7 +69,7 @@ export class ProviderPlayer{
   this.applyVolume();
   if(!this.isMuted&&this.wantPlay){
    const mark=this.lastTime;
-   this.audioWatch=setTimeout(()=>{this.audioWatch=null;if(this.isMuted||this.inAd)return;if(this.lastTime<=mark+.5){this.audioLocked=true;this.isMuted=true;this.applyVolume(true);this.kick();this.emit('audiolocked');}},3000);
+   this.audioWatch=setTimeout(()=>{this.audioWatch=null;if(!this.wantPlay||this.isMuted||this.inAd)return;if(this.lastTime<=mark+.5){this.audioLocked=true;this.isMuted=true;this.applyVolume(true);this.kick();this.emit('audiolocked');}},3000);
    this.audioWatch.unref?.();
   }
  }

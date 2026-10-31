@@ -8,8 +8,9 @@ const code=readFileSync(new URL('../web/native-player.js',import.meta.url),'utf8
 const deferred=()=>{let resolve,reject;const promise=new Promise((yes,no)=>{resolve=yes;reject=no;});return {promise,resolve,reject};};
 function harness(attachment,play=()=>Promise.resolve()){
  const video={paused:true,calls:[],listeners:{},addEventListener(name,fn){this.listeners[name]=fn;},play(){this.calls.push('play');return play();},pause(){this.paused=true;this.calls.push('pause');},load(){},remove(){},removeAttribute(){}};
- const ctx={document:{createElement:()=>video},attachMediaSource:()=>attachment,clearTimeout(){},performance:{now:()=>0}};vm.createContext(ctx);vm.runInContext(code+'\nglobalThis.Player=NativePlayer;',ctx);
- return {player:new ctx.Player({url:'https://example.com/clip.mp4'}),video};
+ const timers=new Map();let sequence=0;
+ const ctx={document:{createElement:()=>video},attachMediaSource:()=>attachment,setTimeout(fn){timers.set(++sequence,fn);return sequence;},clearTimeout:id=>timers.delete(id),performance:{now:()=>0}};vm.createContext(ctx);vm.runInContext(code+'\nglobalThis.Player=NativePlayer;',ctx);
+ return {player:new ctx.Player({url:'https://example.com/clip.mp4'}),video,timers};
 }
 test('a native player destroyed while attaching disposes the late controller without restarting video',async()=>{
  const pending=deferred(),h=harness(pending.promise);let disposed=0;h.player.play();h.player.destroy();pending.resolve({destroy(){disposed++;}});await h.player.ready;
@@ -18,4 +19,12 @@ test('a native player destroyed while attaching disposes the late controller wit
 for(const action of ['pause','destroy'])test(`an autoplay rejection arriving after ${action} cannot restart a native video`,async()=>{
  const pending=deferred(),h=harness(Promise.resolve(null),()=>pending.promise);await h.player.ready;h.player.play();h.player[action]();pending.reject(Object.assign(new Error('gesture needed'),{name:'NotAllowedError'}));await Promise.resolve();await Promise.resolve();
  assert.equal(h.video.calls.filter(c=>c==='play').length,1);assert.equal(h.player.wantPlay,false);
+});
+test('pausing cancels native sound recovery, including an already queued callback',async()=>{
+ const h=harness(Promise.resolve(null));await h.player.ready;h.player.play();h.player.muted=false;assert.equal(h.timers.size,1);const callback=[...h.timers.values()][0];h.player.pause();assert.equal(h.timers.size,0);callback();
+ assert.equal(h.video.calls.filter(c=>c==='play').length,1);assert.equal(h.player.audioLocked,false);assert.equal(h.player.wantPlay,false);
+});
+test('an audible autoplay rejection exposes the gesture hint while retrying muted',async()=>{
+ let calls=0;const h=harness(Promise.resolve(null),()=>++calls===1?Promise.reject(Object.assign(new Error('gesture needed'),{name:'NotAllowedError'})):Promise.resolve());await h.player.ready;let notices=0;h.player.on('audiolocked',()=>notices++);h.player.muted=false;h.player.play();await Promise.resolve();
+ assert.equal(h.player.audioLocked,true);assert.equal(h.video.muted,true);assert.equal(notices,1);assert.equal(calls,2);
 });

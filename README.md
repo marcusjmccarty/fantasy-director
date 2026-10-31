@@ -1,10 +1,10 @@
 # Fantasy Stream
 
-A RedZone-style channel for one fantasy roster. It watches every game your starters are in, keeps the picture on whoever is closest to the end zone, skips the breaks, and replays any score you missed. Plain browser JavaScript plus a small Cloudflare Worker; no framework.
+A RedZone-style channel for one fantasy roster. It follows your starters’ teams using possession and field position, favors drives near the end zone, skips detected breaks, and replays missed scores when footage is available. Plain browser JavaScript plus a small Cloudflare Worker; no framework.
 
 ## Live site
 
-The channel runs on Cloudflare Workers at **https://fantasy-stream.fantasy-hub.workers.dev** (free plan, one Worker, no other services). Open it on any device; there is nothing to run locally. The page opens in Live games. Choose **Your lineup** above the video, import your ESPN league and select your team (or enter players with the name/team/position form), then paste and save your game links in **Game streams** directly below the player. Press **Start watching**. **Try a replay** opens the included Week 7 rehearsal. Your lineup takes an ESPN league ID (public leagues need nothing else; a private league needs your SWID and espn_s2 cookies pasted under the ID, or set once with `npx wrangler secret put ESPN_SWID` / `ESPN_S2` / `ESPN_LEAGUE_ID`).
+The channel runs on Cloudflare Workers at **https://fantasy-stream.fantasy-hub.workers.dev** (free plan, one Worker, no other services). Open it on any device; there is nothing to run locally. The page opens in Live games. Choose **Your lineup** above the video, import your ESPN league and select your team (or enter players with the name/team/position form), then paste and save your game links in **Game streams** directly below the player. Press **Start watching**. **Try a replay** opens the included Week 7 rehearsal. Your lineup takes an ESPN league ID (public leagues need nothing else; a private league needs your own SWID and espn_s2 cookies pasted under the ID).
 
 Redeploy after a change with `npm run deploy` (builds `dist/` and uploads it with the Cloudflare account that `npx wrangler login` authorized; `wrangler.toml` names the Worker).
 
@@ -17,16 +17,16 @@ npm run build   # dist/server/index.js + hosting manifest
 npm run dev     # http://127.0.0.1:4187 (reloads the bundle after each build)
 ```
 
-Public leagues import with just the league ID. A private league needs the owner's ESPN cookies: on the deployed Site they are its saved connection (`ESPN_LEAGUE_ID`, `ESPN_SWID`, `ESPN_S2`, `ESPN_OWNER_ID`), so the owner's league fills in by itself; locally, put them in `.sites-runtime/env.json` with `"ESPN_LOCAL": true`, or paste SWID and espn_s2 under the league ID in Your lineup (they travel with that one request and are not stored anywhere else).
+Public leagues import with just the league ID. For private leagues, viewers paste their own SWID and espn_s2 under the ID in **Your lineup**. These values are saved in that browser’s local storage and sent to this site’s roster endpoint, which forwards them only to ESPN for the import; the Worker does not persist them. Shared Cloudflare ESPN secrets and caller-supplied identity headers do not authorize public visitors. For an explicitly enabled local preview only, `.sites-runtime/env.json` can provide `ESPN_LEAGUE_ID`, `ESPN_SWID`, `ESPN_S2` and the boolean `"ESPN_LOCAL": true`. Do not commit that file.
 
 ## Modes
 
-- **Week 7 replay** – the full 2026 Week 7 slate (14 games, 2,493 timestamped plays, 115 scoring plays) with the original full-game recordings. A deterministic rehearsal of the director: pick a day, press Start, and watch it work.
-- **Live** – ESPN's public scoreboard, polled every 5 s during games, seen through the stream's delay (below). The viewer supplies a stream link per game: a direct MP4/WebM/HLS link (warmed in the background, cut to instantly, muted and unmuted by the channel) or any https page (embedded as-is and loaded only while on screen, since a hidden page would play its own sound; each cut to it reloads the page). Without a link the game is still tracked and its scores still produce alerts and replays, but there is no picture for it.
+- **Week 7 replay** – the full 2026 Week 7 slate (14 games, 2,493 timestamped plays, 115 scoring plays) with the original full-game recordings. A deterministic rehearsal of the director: pick a day, press Start, and watch it work. The first visit starts near your lineup’s first action. Historical roster imports and replay lineup edits are kept separate from your saved live lineup; replay-only edits last for the current page session.
+- **Live** – ESPN's public scoreboard, polled every 5 s during games, seen through the stream's delay (below). The viewer supplies a stream link per game: a direct MP4/WebM/HLS link (warmed in the background, cut to instantly, muted and unmuted by the channel) or any https page (embedded as-is and loaded only while on screen, since a hidden page would play its own sound; each cut to it reloads the page). Without a link the game is still tracked and its scores still produce alerts and can have replays when matching footage is available, but there is no live picture for it.
 
 ## How the channel decides (`web/director.js`)
 
-1. **Only your players.** A game is a candidate only while one of your starters is on the field. Offensive starters count when their team has the ball on a scrimmage down; kickers only on 4th down at or inside the opponent 42; D/ST when the opponent has the ball. The automatic channel never chooses a game that contains none of your roster's teams; between series it stays on a game you have players in, and with nothing on it shows a standby card with the next kickoff.
+1. **Only your players.** A game is ranked using inferred involvement of your starters’ teams; individual substitutions are not tracked. Offensive starters count when their team has the ball on a scrimmage down; kickers only on 4th down at or inside the opponent 42; D/ST when the opponent has the ball. The automatic channel never chooses a game that contains none of your roster's teams; between series it stays on a game you have players in, and with nothing on it shows a standby card with the next kickoff.
 2. **Closest to the end zone wins.** Offense outranks D/ST; among offenses, fewer yards to goal wins. Inside the 20, or a kick/go-for-it on 4th, is *critical*.
 3. **No twitchy cuts.** Avoid cutting while the data says a play is live in a game you care about, nor in the 5 s before its next snap. A play owns the screen from the snap for 5 s plus a little per yard the ball travels (a 70-yard run is a quarter of a minute), then 3 s for the whistle and the spot (`playWindow` in `web/archive.js`). Stay 12 s after a cut unless something critical appears. A rival drive must be 10 yards closer to take over. Leaving a live game waits 1.5 s of the same challenger, which absorbs feed jitter. After one of your players scores, stay for the celebration.
 4. **Breaks and ads.** Timeouts, quarter ends, halftime and the dead time after a score are *breaks*; the director leaves them. When a supported provider player reports an ad, that game is excluded until the ad ends. If all available streams are excluded the channel waits in standby. Generic embedded pages cannot report ads or accept sound controls; pausing the channel unloads their page to stop sound, and resuming reloads it.
@@ -37,11 +37,11 @@ A live stream runs 20–90 s behind the real game, and ESPN runs its own way beh
 
 ## Missed scores (`web/coverage.js`, `web/replays.js`)
 
-Coverage records exactly which seconds of which game were on screen. Nine seconds after any scoring play by one of your starters (scorer, passer, kicker, D/ST, two-point), it checks whether the snap was on screen. If not, the score joins the replay queue. At the next quiet moment (nothing critical anywhere) the channel plays the best footage it has: the official NFL.com clip of that play when one matches, otherwise the moment itself cut from the game's own recording. A critical snap elsewhere preempts the replay and re-queues it. Extra points alone are never replayed.
+Coverage records intervals confirmed by the player as progressing on screen. This is a playback estimate, not video recognition. Nine seconds after any scoring play by one of your starters (scorer, passer, kicker, D/ST, two-point), it checks whether the snap was on screen. If not, the score joins the replay queue. At the next quiet moment (nothing critical anywhere) the channel plays the best footage it has: the official NFL.com clip of that play when one matches, otherwise the moment itself cut from the game's own recording. A critical snap elsewhere preempts the replay and re-queues it. Extra points alone are never replayed.
 
 ## Players (`web/players.js`, `web/provider-player.js`, `web/native-player.js`)
 
-A pool of up to three stacked players: the one on screen plus the next likely game warming silently at the right moment (one at a time, so the picture on screen is never starved of bandwidth). A cut is a swap between players that are already showing footage, never a fresh load in front of the viewer. Recordings play inside the provider's own embedded player and are driven through the postMessage interface its public player ships (`play`, `pause`, `seek`, `mute`, `volume`; events `inited`, `started`, `resumed`, `timeupdate`, `rewound`, `adShown`, `ended`, `error`). The provider ignores a `play` sent before it is ready and restarts from its own remembered position, so `ProviderPlayer` keeps asking (`bootstrap()`) until two advancing time reports prove the footage is moving at our target; a seek on a moving target is led by the measured seek latency, and a player that goes quiet is nudged (play, then pause/play, then a re-seek) before the channel gives up on that game for a minute. No provider code is bundled; media never leaves the provider.
+A pool of up to three stacked players: the one on screen plus the next likely game warming silently at the right moment (one at a time, so the picture on screen is never starved of bandwidth). A normal cut swaps to a player confirmed ready. If the first video needs a Play click, it becomes visible after eight seconds while the twenty-second startup deadline remains enforced. Recordings play inside the provider's own embedded player and are driven through the postMessage interface its public player ships (`play`, `pause`, `seek`, `mute`, `volume`; events `inited`, `started`, `resumed`, `timeupdate`, `rewound`, `adShown`, `ended`, `error`). The provider ignores a `play` sent before it is ready and restarts from its own remembered position, so `ProviderPlayer` keeps asking (`bootstrap()`) until two advancing time reports prove the footage is moving at our target; a seek on a moving target is led by the measured seek latency, and a player that goes quiet is nudged (play, then pause/play, then a re-seek) before the channel gives up on that game for a minute. No provider code is bundled; media never leaves the provider.
 
 ### Sound
 
@@ -53,7 +53,7 @@ The timeline spans the game on screen by default (a few hours), a 15-minute wind
 
 ## Replay alignment (`web/sync.js`, `scripts/scorebug-anchors.json`)
 
-The recordings have commercials and halftime edited out, so a straight duration ratio drifts by minutes. `RecordingSync` maps game time to recording time by keeping ordinary snap-to-snap gaps one-to-one and giving each break (timeout, quarter end, after a score, before a kickoff) a solved retention. Every recording is pinned by about two hundred scorebug readings read off its own footage (a frame every 15 s, Vision OCR of the bug; `scripts/scorebug-anchors.json`, one `[seconds, quarter, clock, kind]` per reading). A reading with the clock running pins the second the clock reached that value; a run of identical readings is a stopped clock, and the moment it resumed (the clock difference before the next reading) pins the snap; a lone stopped-clock reading is placed inside its stoppage by the alignment of the pinned ones. OCR slips are rejected three ways: the longest chain of readings whose game clock never runs backwards or faster than the footage, a neighbour test (footage never outruns the game), and a worst-first pass that drops any anchor more than 45 s from what its neighbours predict. Leave-one-out error is under a second at the median and 5–25 s at the 90th percentile per game, so cuts land on the snap; the viewer can still add marks in Settings → Replay sync (pause on a snap, enter the quarter and clock), which take priority.
+The recordings have commercials and halftime edited out, so a straight duration ratio drifts by minutes. `RecordingSync` maps game time to recording time by keeping ordinary snap-to-snap gaps one-to-one and giving each break (timeout, quarter end, after a score, before a kickoff) a solved retention. Every recording is pinned by about two hundred scorebug readings read off its own footage (a frame every 15 s, Vision OCR of the bug; `scripts/scorebug-anchors.json`, one `[seconds, quarter, clock, kind]` per reading). A reading with the clock running pins the second the clock reached that value; a run of identical readings is a stopped clock, and the moment it resumed (the clock difference before the next reading) pins the snap; a lone stopped-clock reading is placed inside its stoppage by the alignment of the pinned ones. OCR slips are rejected three ways: the longest chain of readings whose game clock never runs backwards or faster than the footage, a neighbour test (footage never outruns the game), and a worst-first pass that drops any anchor more than 45 s from what its neighbours predict. Leave-one-out error is under a second at the median and 5–25 s at the 90th percentile per game, which improves approximate snap alignment; the viewer can still add marks in Settings → Replay sync (pause on a snap, enter the quarter and clock), which take priority.
 
 ## Data (`scripts/build-archive.mjs`)
 
@@ -63,16 +63,16 @@ Calibrating a recording is automatic: `node scripts/scorebug-ocr/jobs.mjs` resol
 
 ## Server (`server/`)
 
-- `POST /api/league` – ESPN fantasy roster import (starters only; private leagues need the owner's saved credentials, never forwarded elsewhere).
-- `GET /api/session` – which saved league the signed-in Site owner may use.
+- `POST /api/league` – ESPN fantasy roster import (starters only; public visitors supply their own cookies for a private league).
+- `GET /api/session` – no authenticated account or saved league on the public Worker; an explicitly enabled local preview may return its configured league.
 - `GET /api/nfl-source?id=` – resolves an official NFL.com clip to its short-lived HLS URL through NFL's normal anonymous playback flow; tokens stay in memory.
 - `GET /api/nfl-highlights` – the current NFL.com highlight playlist, refreshed every five minutes in live mode.
 - `GET /api/replay-source?id=` – the original provider embed for a catalog game.
-- `POST /api/playback-health` – owner-only, bounded diagnostics.
+- `POST /api/playback-health` – bounded diagnostics, enabled only in the explicit local preview.
 
 ## Tests
 
-`npm test` runs 350 tests covering the director, coverage, alignment, scoring parser, archive sampling and play windows, replay matching, live normalization and the delayed live feed, the provider handshake, page embeds and the player pool, a full-Sunday rehearsal, and the server endpoints. They are deterministic simulations; real playback still needs a browser with the page in view (the provider's player stops reporting while the page is hidden).
+`npm test` runs 376 tests covering the director, coverage, alignment, scoring parser, archive sampling and play windows, replay matching, live normalization and the delayed live feed, the provider handshake, page embeds and the player pool, a full-Sunday rehearsal, and the server endpoints. They are deterministic simulations; real playback still needs a browser with the page in view (the provider's player stops reporting while the page is hidden).
 
 ## Reliability checks and live limits
 
@@ -83,7 +83,8 @@ lineup change. Director tests also cover excluded streams during a celebration
 hold and standby. Import requests accept the supported ESPN cookie lengths and
 reject malformed JSON without a server error.
 
-[The logic audit](docs/logic-audit.md) records the original failures, corrections
+[The family-readiness audit](docs/family-readiness-audit.md) records the latest fixes, negative controls, browser evidence, and deployment checks.
+[The earlier logic audit](docs/logic-audit.md) records the original failures, corrections
 to the first review, and reproducible comparisons with the pre-review commit.
 `node scripts/audit-director.mjs` compares 60,000 eligible-stream decisions with
 that original director, including successive decisions and debounce state.

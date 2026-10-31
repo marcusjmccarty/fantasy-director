@@ -139,6 +139,7 @@ button.pill{border-radius:20px;height:38px}
 .g-names span.on{color:#04150c;background:var(--go);font-weight:700}
 .tag{font-size:10px;font-weight:800;letter-spacing:.7px;border-radius:4px;padding:2px 6px;white-space:nowrap;background:#ffffff12;color:#aab6ae}
 .tag.live{background:var(--live);color:#fff}.tag.next{background:#2fe08a26;color:var(--go)}.tag.go{background:#2fe08a1f;color:var(--go)}.tag.red{background:#ff4f4f26;color:#ff8080}.tag.amber{background:#ffb62724;color:var(--amber)}.tag.blue{background:#5aa9ff22;color:var(--blue)}
+.tag.live,.bug-tag{background:#b91c1c}
 .roster li{display:flex;align-items:center;gap:10px;padding:5px 4px;border-radius:6px}
 .roster li.on{background:#2fe08a12}
 .pos{width:38px;flex:none;text-align:center;font-size:11px;font-weight:800;color:var(--muted);background:#ffffff0d;border-radius:4px;padding:2px 0}
@@ -227,6 +228,13 @@ summary{cursor:pointer;padding:8px 0;min-height:44px;color:var(--text)}
 #settingsButton{font-size:15px}
 dialog{width:min(760px,calc(100vw - 24px))}
 dialog form{padding:22px;gap:16px}
+/* Keep Close, validation and Save reachable while a long lineup scrolls. */
+#lineupDialog{overflow:hidden}
+#lineupForm{max-height:calc(100vh - 48px);max-height:calc(100dvh - 48px)}
+#lineupForm>.dialog-head,#lineupForm>.dialog-actions{flex:none}
+#lineupForm>section{overflow-y:auto;min-height:0;padding:2px}
+.dialog-actions{display:grid;gap:8px;border-top:1px solid var(--line-2);padding-top:12px}
+.dialog-actions .error:empty{display:none}
 dialog h3{font-size:19px;margin:10px 0 0}
 dialog label,dialog p,dialog textarea{font-size:16px}
 dialog .dialog-head h2{font-size:25px}

@@ -24,8 +24,8 @@ export class NativePlayer{
  get currentTime(){return this.element.currentTime;}
  get progressing(){return !this.error&&!this.element.paused&&this.now()-this.lastAdvance<1200;}
  near(target,tolerance=2.5){const v=this.element;return this.primed&&!this.error&&this.target===null&&!v.seeking&&v.readyState>=3&&(this.progressing||!this.wantPlay)&&Math.abs(v.currentTime-target)<=tolerance;}
- play(){if(this.destroyed)return;this.wantPlay=true;if(!this.attached)return;this.element.play().catch(error=>{if(this.destroyed||!this.wantPlay)return;if(error.name==='NotAllowedError'){this.element.muted=true;this.element.play().catch(()=>{});}});}
- pause(){this.wantPlay=false;this.element.pause();}
+ play(){if(this.destroyed)return;this.wantPlay=true;if(!this.attached)return;this.element.play().catch(error=>{if(this.destroyed||!this.wantPlay)return;if(error.name==='NotAllowedError'){this.audioLocked=true;this.element.muted=true;this.emit('audiolocked');this.element.play().catch(()=>{});}});}
+ pause(){this.wantPlay=false;clearTimeout(this.audioWatch);this.audioWatch=null;this.element.pause();}
  seek(time){const v=this.element,t=Math.max(0,Number(time)||0);this.target=Number.isFinite(v.duration)?Math.min(t,Math.max(0,v.duration-.5)):t;this.primed=false;v.currentTime=this.target;}
  // The browser may refuse sound without a gesture and pause the element on
  // unmute; if that happens, go back to muted playback and flag it.
@@ -33,7 +33,7 @@ export class NativePlayer{
   const v=this.element;v.muted=!!value;clearTimeout(this.audioWatch);this.audioWatch=null;
   if(!value&&this.wantPlay){
    const mark=v.currentTime;
-   this.audioWatch=setTimeout(()=>{this.audioWatch=null;if(v.muted||this.error)return;if(v.paused||v.currentTime<=mark+.3){this.audioLocked=true;v.muted=true;v.play().catch(()=>{});this.emit('audiolocked');}},1500);
+   this.audioWatch=setTimeout(()=>{this.audioWatch=null;if(this.destroyed||!this.wantPlay||v.muted||this.error)return;if(v.paused||v.currentTime<=mark+.3){this.audioLocked=true;v.muted=true;v.play().catch(()=>{});this.emit('audiolocked');}},1500);
    this.audioWatch.unref?.();
   }
  }

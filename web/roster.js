@@ -11,10 +11,14 @@ export function parseRoster(value){
  const lines=value.split('\n').map(x=>x.trim()).filter(Boolean);
  if(!lines.length)throw new Error('Add at least one starter.');
  if(lines.length>20)throw new Error('Use up to 20 starters.');
+ const seen=new Set();
  return lines.map((line,index)=>{
   const [name,rawTeam,rawPosition,...rest]=line.split(',').map(x=>x.trim());
   const team=alias(rawTeam?.toUpperCase()),position=rawPosition?.toUpperCase().replace(/^(DST|DEF|D)$/,'D/ST');
-  if(!name||name.length>60||!TEAMS.includes(team)||!POSITIONS.includes(position)||rest.length)throw new Error(`Line ${index+1}: use name, NFL team, position.`);
+  const field=!name||name.length>60?0:!TEAMS.includes(team)?1:!POSITIONS.includes(position)?2:rest.length?0:null;
+  if(field!==null)throw Object.assign(new Error(`Player ${index+1}: ${['enter a name of 1–60 characters','choose an NFL team','choose a position'][field]}. Use name, NFL team, position.`),{line:index+1,field});
+  const key=[name.toLowerCase().replace(/\s+/g,' '),team,position].join('|');
+  if(seen.has(key))throw Object.assign(new Error(`${name} appears twice. Remove the duplicate player.`),{line:index+1,field:0});seen.add(key);
   return {name,team,position};
  });
 }
@@ -27,8 +31,8 @@ export function safeVideo(value){
  return u.href;
 }
 export function streamType(url){
- if(/\.m3u8(?:\?|$)/i.test(url))return 'application/vnd.apple.mpegurl';
- if(/\.(mp4|webm|mov)(?:\?|$)/i.test(url))return 'video/mp4';
+ if(/\.m3u8(?:[?#]|$)/i.test(url))return 'application/vnd.apple.mpegurl';
+ if(/\.(mp4|webm|mov)(?:[?#]|$)/i.test(url))return 'video/mp4';
  return 'embed/page';
 }
 export function gameKey(game){return game.teams.map(t=>alias(t.abbreviation||t.abbr)).sort().join('-');}
