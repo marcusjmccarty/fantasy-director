@@ -2,12 +2,13 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b0f0d"><meta name="description" content="A RedZone-style channel for your fantasy roster: every snap your starters take, every point they score."><title>Fantasy Stream</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/style.css"></head><body>
 <header class="bar">
  <a href="/" class="brand"><span class="dot" aria-hidden="true"></span>Fantasy Stream</a>
- <div class="modes" role="group" aria-label="Viewing mode"><button id="replayMode" aria-pressed="true">Week 7 replay</button><button id="liveMode" aria-pressed="false">Live</button></div>
- <label class="franchise"><span class="sr">Franchise</span><select id="franchise" aria-label="Franchise"></select></label>
+ <div class="modes" role="group" aria-label="Viewing mode"><button id="liveMode" aria-pressed="true">Live games</button><button id="replayMode" aria-pressed="false">Try a replay</button></div>
+ <button id="lineupButton" class="primary">Your lineup</button>
  <button id="settingsButton" class="ghost">Settings</button>
 </header>
 <main class="room" id="room">
  <section class="stage" aria-label="Your channel">
+  <div class="setup-lineup"><span class="step-number">1</span><div><h2>Your lineup</h2><p id="lineupSummary">Choose the players you want to follow.</p></div><button id="editLineup" class="primary">Choose your players</button></div>
   <div class="screen" id="screen">
    <div class="layers" id="layers"></div>
    <div class="field-view" id="fieldView" hidden>
@@ -19,7 +20,7 @@
    <div class="lower" id="lower" hidden><div class="lower-kicker" id="lowerKicker"></div><div class="lower-main" id="lowerMain"></div><div class="lower-meta" id="lowerMeta"></div></div>
    <div class="toast" id="toast" role="status" hidden></div>
    <div class="switching" id="switching" hidden></div>
-   <div class="overlay" id="overlay"><div class="overlay-card"><span class="eyebrow" id="ovEyebrow">WEEK 7 · SUNDAY OCT 25</span><h1 id="ovTitle">Every snap your starters take.</h1><p id="ovText">The channel follows your players on the field, goes to whoever is closest to the end zone, skips the breaks, and replays any score you missed.</p><button id="ovButton" class="primary big">Start watching</button><small id="ovHint"></small></div></div>
+   <div class="overlay" id="overlay"><div class="overlay-card"><span class="eyebrow" id="ovEyebrow">YOUR PERSONAL GAME DAY</span><h1 id="ovTitle">Every snap your starters take.</h1><p id="ovText">The channel follows your players on the field, goes to whoever is closest to the end zone, skips the breaks, and replays any score you missed.</p><button id="ovButton" class="primary big">Start watching</button><small id="ovHint"></small></div></div>
    <button class="unmute" id="unmute" hidden>🔇 Tap for sound</button>
    <div class="sound-hint" id="soundHint" hidden>🔇 <b>Click the video</b> once for sound</div>
   </div>
@@ -37,40 +38,55 @@
    <button id="fullButton" class="icon" aria-label="Full screen">⛶</button>
   </div>
   <div class="status-line"><span id="autoChip" class="chip on">AUTO</span><span id="reason">Loading the Week 7 slate…</span><button id="resumeAuto" class="link" hidden>Resume auto</button><span class="spacer"></span><span id="pictureNote" class="muted"></span></div>
+  <section class="stream-panel" aria-labelledby="streamsTitle">
+   <div class="setup-heading"><span class="step-number">2</span><div><h2 id="streamsTitle">Game streams</h2><p id="streamsHelp">Paste a video link for each game you want to watch, then save.</p></div></div>
+   <p id="streamsModeNote" class="muted"></p>
+   <div id="streamInputs"></div>
+   <div class="stream-actions"><button type="button" id="saveStreams" class="primary">Save stream links</button><button type="button" id="refreshStreams">Refresh games</button><span id="streamsStatus" role="status"></span></div>
+   <p class="error" id="streamsError" role="alert"></p>
+   <details class="stream-help"><summary>Need help with a stream?</summary><p>Fantasy Stream does not supply live broadcasts. Use a stream you have access to. Direct video and .m3u8 links work best. Some websites block playback here; if a page will not play, try a direct video link. Website players may need you to press Play again after a game change, and their ads cannot always be detected.</p></details>
+  </section>
  </section>
  <aside class="rail">
   <section aria-labelledby="gamesHead"><div class="rail-head"><h2 id="gamesHead">Your games</h2><span class="muted" id="gamesNote"></span></div><ol class="games" id="games"></ol></section>
-  <section aria-labelledby="rosterHead"><div class="rail-head"><h2 id="rosterHead">Your starters</h2><span class="muted" id="rosterNote"></span></div><ul class="roster" id="roster"></ul></section>
+  <section aria-labelledby="rosterHead"><div class="rail-head"><h2 id="rosterHead">Your starters</h2><button id="railLineup" class="link">Edit lineup</button></div><p class="muted" id="rosterNote"></p><ul class="roster" id="roster"></ul></section>
   <section aria-labelledby="scoresHead"><div class="rail-head"><h2 id="scoresHead">Your scores</h2><span class="muted" id="scoresNote"></span></div><ul class="scores" id="scores"></ul></section>
  </aside>
 </main>
+<dialog id="lineupDialog" aria-labelledby="lineupTitle"><form method="dialog" id="lineupForm">
+ <div class="dialog-head"><h2 id="lineupTitle">Your lineup</h2><button type="button" id="closeLineup" aria-label="Close lineup">Done</button></div>
+ <section>
+  <label for="leagueId">ESPN league ID</label><div class="inline"><input id="leagueId" inputmode="numeric" autocomplete="off" placeholder="e.g. 12345678"><button type="button" id="importLeague" class="primary">Find my team</button></div>
+  <p class="muted" id="leagueStatus" role="status">Enter the number in your ESPN league’s web address. We import starters only.</p>
+  <details id="cookieDetails"><summary>Private league? Add your ESPN cookies</summary>
+   <p class="muted">ESPN only shows private leagues to a signed-in browser. In a browser where you are signed in to ESPN, open its developer tools → Application → Cookies → espn.com, and copy these two values. They are saved in this browser and sent to the roster service only to import your league.</p>
+   <label for="espnSwid">SWID</label><input type="password" id="espnSwid" autocomplete="off" spellcheck="false" placeholder="{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}">
+   <label for="espnS2">espn_s2</label><input type="password" id="espnS2" autocomplete="off" spellcheck="false" placeholder="AEB…">
+  </details>
+  <label id="franchiseLabel" for="franchise">Choose your team</label><select id="franchise" aria-label="Choose your team"></select>
+  <p id="lineupStatus" role="status"></p>
+  <hr><h3>Or add your players</h3><p class="muted">Add only the players starting for you this week. Choose their NFL team and position.</p>
+  <div id="rosterRows"></div><button type="button" id="addPlayer">+ Add a player</button>
+  <details><summary>Paste a whole lineup instead</summary><label for="manualRoster">One player per line</label><textarea id="manualRoster" rows="7" spellcheck="false" aria-describedby="rosterHelp"></textarea><p class="muted" id="rosterHelp">Name, team, position. Example: Jonathan Taylor, IND, RB</p><button type="button" id="pasteRoster">Fill in the players above</button></details>
+  <button type="button" id="saveRoster" class="primary">Save my lineup</button>
+ </section>
+<p class="error" id="lineupError" role="alert"></p>
+</form></dialog>
 <dialog id="settings" aria-labelledby="settingsTitle"><form method="dialog" id="settingsForm">
  <div class="dialog-head"><h2 id="settingsTitle">Settings</h2><button type="button" id="closeSettings" class="icon ghost" aria-label="Close">✕</button></div>
- <div class="tabs" role="tablist"><button type="button" role="tab" data-tab="league" aria-selected="true">League</button><button type="button" role="tab" data-tab="viewing" aria-selected="false">Viewing</button><button type="button" role="tab" data-tab="sources" aria-selected="false">Streams</button><button type="button" role="tab" data-tab="sync" aria-selected="false">Replay sync</button></div>
- <section data-panel="league">
-  <label for="leagueId">ESPN league ID</label><div class="inline"><input id="leagueId" inputmode="numeric" autocomplete="off" placeholder="e.g. 12345678"><button type="button" id="importLeague" class="primary">Import</button></div>
-  <p class="muted" id="leagueStatus">Public leagues need only the ID. Starters only; bench and IR are ignored.</p>
-  <details id="cookieDetails"><summary>Private league? Add your ESPN cookies</summary>
-   <p class="muted">ESPN only shows private leagues to a signed-in browser. In a browser where you are signed in to ESPN, open its developer tools → Application → Cookies → espn.com, and copy these two values. They stay in this browser and are sent only with your import.</p>
-   <label for="espnSwid">SWID</label><input id="espnSwid" autocomplete="off" spellcheck="false" placeholder="{XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX}">
-   <label for="espnS2">espn_s2</label><input id="espnS2" autocomplete="off" spellcheck="false" placeholder="AEB…">
-  </details>
-  <label for="manualRoster">Or type your starters</label><textarea id="manualRoster" rows="9" spellcheck="false" aria-describedby="rosterHelp"></textarea><p class="muted" id="rosterHelp">One per line: name, team, position (QB, RB, WR, TE, K, D/ST). Example: <code>Jonathan Taylor, IND, RB</code></p>
-  <button type="button" id="saveRoster">Use this roster</button>
- </section>
- <section data-panel="viewing" hidden>
+ <div class="tabs" role="tablist" aria-label="Settings"><button type="button" role="tab" data-tab="viewing" aria-selected="true">Viewing</button><button type="button" role="tab" data-tab="sync" aria-selected="false">Replay timing</button></div>
+ <section data-panel="viewing">
   <label class="check"><input type="checkbox" id="optDefense" checked> Follow my D/ST when no other starter is on the field</label>
   <label class="check"><input type="checkbox" id="optHighlights" checked> Replay scores I missed</label>
   <label class="check"><input type="checkbox" id="optData"> Data-only picture (no video; allows up to 60× in the replay)</label>
-  <label for="optDelay">Live stream delay (seconds)</label><input id="optDelay" type="number" min="0" max="600" step="5" value="30"><p class="muted">Set it so the clock in the corner of the channel matches the scorebug on your stream. The channel then follows the game as you see it: no cuts mid-play, no spoilers, and missed scores judged by what was really on screen.</p>
+  <label for="optDelay">Live stream delay (seconds)</label><input id="optDelay" type="number" min="0" max="600" step="5" value="30"><p class="muted">Set it so the clock in the corner of the channel matches the scorebug on your stream. The channel then follows the game as you see it: switching and score alerts timed to your picture. Timing is approximate and can vary between streams.</p>
   <div class="rules"><h3>How the channel decides</h3><ul>
    <li>Only games where one of your starters is on the field. Never a game without your players.</li>
    <li>Offense first, closest to the end zone. Your D/ST only fills in when no offense is on.</li>
    <li>Kickers only on 4th down in field-goal range (inside the opponent 42).</li>
-   <li>Never cuts mid-play. A rival drive needs to be 10+ yards closer, or entering the red zone, to take over.</li>
-   <li>Breaks and provider ads are skipped. If one of your players scores off screen, you get the replay at the next quiet moment.</li></ul></div>
+   <li>Tries to wait for the end of a play before switching. A rival drive needs to be 10+ yards closer, or entering the red zone, to take over.</li>
+   <li>Detected breaks and supported provider ads are skipped. If one of your players scores off screen, you get the replay at the next quiet moment.</li></ul></div>
  </section>
- <section data-panel="sources" hidden><p class="muted">Live mode plays your own link per game. A direct video file or an HLS <code>.m3u8</code> link is the smooth option: the channel warms it in the background, cuts to it instantly and controls its sound. Any other https page is embedded as-is and loaded only while it is on screen (a hidden page would play its own sound), so each cut to it reloads the page and you may need to press play inside it. The Week 7 replay imports its recordings automatically.</p><div id="streamInputs"></div><button type="button" id="saveStreams">Save streams</button></section>
  <section data-panel="sync" hidden><p class="muted">Each replay is aligned to the play-by-play with about two hundred scorebug readings taken from its footage. If a cut still lands on the wrong moment, pause on a snap and add a mark: the quarter and game clock on screen, at the current video position. Your marks take priority.</p>
   <div class="sync-row"><label>Game <select id="syncGame"></select></label><label>Quarter <select id="syncQuarter"><option value="1">1st</option><option value="2">2nd</option><option value="3">3rd</option><option value="4">4th</option><option value="5">OT</option></select></label><label>Clock <input id="syncClock" placeholder="12:34" size="6"></label></div>
   <div class="inline"><button type="button" id="addSync" class="primary">Mark current video position</button><button type="button" id="clearSync">Reset my marks</button></div><p class="muted" id="syncStatus"></p></section>

@@ -189,3 +189,66 @@ dialog p{margin:0;font-size:13px}
  .bug{top:8px;left:8px;font-size:12px}.toast{top:auto;bottom:70px;right:8px;left:8px;max-width:none}
  .timeline{order:9;flex-basis:100%}#daySelect{max-width:130px}
 }
+
+/* Clear game-day setup: lineup first, streams immediately below the picture. */
+:root{--muted:#a8b7ae;--faint:#8b9a91}
+body{font-size:17px}
+button,select,input:not([type=checkbox]):not([type=range]){min-height:46px}
+button.icon{height:46px;min-width:46px}
+button.big{font-size:18px;min-height:52px}
+#playButton,#muteButton{min-width:78px}
+.bar{gap:12px;flex-wrap:wrap}
+.brand{font-size:21px}
+#lineupButton{margin-left:auto}
+.modes button{min-height:44px}
+.setup-lineup,.setup-heading{display:flex;gap:14px;align-items:center}
+.setup-lineup{background:var(--panel);border:1px solid var(--line-2);border-radius:12px;padding:16px 18px;margin-bottom:14px}
+.setup-lineup>div{flex:1;min-width:0}
+.setup-lineup h2,.setup-heading h2{font-size:20px;margin:0 0 3px;letter-spacing:-.3px}
+.setup-lineup p,.setup-heading p{margin:0;color:var(--muted);font-size:16px}
+.step-number{display:grid;place-items:center;flex:none;width:34px;height:34px;border:1px solid #2fe08a55;border-radius:50%;background:#2fe08a16;color:var(--go);font-size:17px;font-weight:800}
+.stream-panel{margin-top:24px;padding:20px;background:var(--panel);border:1px solid var(--line-2);border-radius:12px}
+.stream-panel p{font-size:16px}
+.stream-panel .error:empty{display:none}
+#streamInputs{display:grid;gap:12px;margin:16px 0}
+.stream{grid-template-columns:minmax(130px,1fr) minmax(160px,3fr);font-size:17px}
+.stream small{display:block;color:var(--muted);font-size:14px;font-weight:400;margin-top:2px}
+.stream input{width:100%;font-size:16px}
+.stream-actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px}
+#streamsStatus{font-size:15px;color:var(--go)}
+.stream-help{border-top:1px solid var(--line-2);padding-top:14px;margin-top:18px;color:var(--muted)}
+summary{cursor:pointer;padding:8px 0;min-height:44px;color:var(--text)}
+.rail h2{font-size:15px;letter-spacing:.4px;text-transform:none}
+.rail-head .muted,.g-mid,.g-names span,.who small,.empty{font-size:14px}
+.who b{font-size:16px}.pos,.tag{font-size:12px}
+#rosterNote{font-size:14px;margin:0 0 12px}
+.rail-head{align-items:center}.rail-head button{font-size:14px}
+.status-line{flex-wrap:wrap}
+#settingsButton{font-size:15px}
+dialog{width:min(760px,calc(100vw - 24px))}
+dialog form{padding:22px;gap:16px}
+dialog h3{font-size:19px;margin:10px 0 0}
+dialog label,dialog p,dialog textarea{font-size:16px}
+dialog .dialog-head h2{font-size:25px}
+dialog hr{width:100%;border:0;border-top:1px solid var(--line-2);margin:12px 0 0}
+#rosterRows{display:grid;gap:12px}
+.roster-entry{display:grid;grid-template-columns:minmax(100px,1fr) 100px 110px auto;gap:10px;align-items:end;background:#0d1210;border:1px solid var(--line);border-radius:8px;padding:12px}
+.roster-entry label{display:grid;gap:5px;font-size:14px}
+.roster-entry input,.roster-entry select{width:100%;font-size:16px}
+.remove-player{font-size:14px;font-weight:500}
+#lineupStatus{color:var(--go)}
+[aria-invalid=true]{border-color:var(--red)!important}
+.stage:fullscreen .setup-lineup,.stage:-webkit-full-screen .setup-lineup,.stage.theater .setup-lineup,.stage:fullscreen .stream-panel,.stage:-webkit-full-screen .stream-panel,.stage.theater .stream-panel{display:none}
+.stage:fullscreen:focus-within .transport,.stage:-webkit-full-screen:focus-within .transport,.stage.theater:focus-within .transport{opacity:1}
+@media(max-width:640px){
+ .brand{width:100%}.bar{position:static}.modes{flex:1;min-width:0}.modes button{padding:6px 10px;font-size:15px}
+ #lineupButton{margin-left:0}.room{padding:12px 12px 28px}
+ .setup-lineup{flex-wrap:wrap;padding:14px}.setup-lineup>button{width:100%}
+ .screen{aspect-ratio:auto;min-height:330px}.overlay{padding:20px 16px}.overlay h1{font-size:27px}.overlay p{font-size:16px;margin-bottom:16px}
+ .stream-panel{padding:16px}.stream{grid-template-columns:1fr;gap:6px}
+ .roster-entry{grid-template-columns:1fr 1fr}.roster-entry label:first-child{grid-column:1/-1}.remove-player{grid-column:1/-1}
+ dialog form{padding:16px}.tabs{margin:0 -16px;padding:0 16px}.rail{grid-template-columns:minmax(0,1fr)}
+ .bug{max-width:calc(100% - 16px);flex-wrap:wrap}.sound-hint{top:auto;bottom:100px}.lower-main{white-space:normal;line-height:1.25}
+ .setup-heading{align-items:flex-start}.stream-actions button{flex:1}
+}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}

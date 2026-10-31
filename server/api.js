@@ -32,7 +32,8 @@ export function normalizedLeague(raw,ownerSwid=''){
 export async function leagueAPI(request,env={},fetcher=fetch){
  if(request.method!=='POST')return json({error:'Use POST.'},405);
  const origin=request.headers.get('Origin');if(origin&&!sameSite(origin,request.url))return json({error:'Invalid request origin.'},403);
- let data;try{if(Number(request.headers.get('Content-Length')||0)>1024)return json({error:'Request too large.'},413);const text=await request.text();if(text.length>1024)return json({error:'Request too large.'},413);data=JSON.parse(text);}catch{return json({error:'Enter a valid league ID.'},400);}
+ let data;try{if(Number(request.headers.get('Content-Length')||0)>4096)return json({error:'Request too large.'},413);const text=await request.text();if(text.length>4096)return json({error:'Request too large.'},413);data=JSON.parse(text);}catch{return json({error:'Enter a valid league ID.'},400);}
+ if(!data||typeof data!=='object'||Array.isArray(data))return json({error:'Enter a valid league ID.'},400);
  const id=String(data.leagueId||'');const now=new Date();const season=now.getUTCFullYear()-(now.getUTCMonth()<5?1:0);const year=Number(data.season||season);
  if(!/^\d{1,12}$/.test(id)||!Number.isInteger(year)||year<2018||year>season+1)return json({error:'Enter a numeric ESPN league ID.'},400);
  const week=data.week==null?null:Number(data.week);

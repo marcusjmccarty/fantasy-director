@@ -415,3 +415,14 @@ test('decide: includeDefense=false never chooses a game for your D/ST alone',()=
  assert.equal(decide(d,{games:[def,idle],includeDefense:false,current:{kind:'game',id:'I'}}).id,'I','and stays put when already on one');
  assert.equal(decide(d,{games:[def,idle],includeDefense:false,queue:[{id:'s1',queuedAt:1000}]}).kind,'highlight');
 });
+
+test('excluded current games cannot survive a celebration hold or fallback',()=>{
+ const d=new Director(),a=game('A','IND','MIN');
+ const o={games:[a],current:{kind:'game',id:'A'},excluded:new Set(['A']),recentScore:()=>true};
+ assert.equal(decide(d,o).kind,'standby');
+ const b=game('B','DAL','NYG');assert.equal(decide(d,{...o,games:[a,b]}).id,'B');
+});
+test('a previous lineup’s game is left immediately without debounce',()=>{
+ const d=new Director(),a=game('A','IND','MIN'),b=game('B','DAL','NYG');
+ assert.equal(decide(d,{games:[a,b],roster:[WR],current:{kind:'game',id:'A'}}).id,'B');
+});

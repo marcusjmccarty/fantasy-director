@@ -4,7 +4,7 @@ A RedZone-style channel for one fantasy roster. It watches every game your start
 
 ## Live site
 
-The channel runs on Cloudflare Workers at **https://fantasy-stream.fantasy-hub.workers.dev** (free plan, one Worker, no other services). Open it on any device; there is nothing to run locally. Settings → League takes an ESPN league ID (public leagues need nothing else; a private league needs your SWID and espn_s2 cookies pasted under the ID, or set once with `npx wrangler secret put ESPN_SWID` / `ESPN_S2` / `ESPN_LEAGUE_ID`).
+The channel runs on Cloudflare Workers at **https://fantasy-stream.fantasy-hub.workers.dev** (free plan, one Worker, no other services). Open it on any device; there is nothing to run locally. The page opens in Live games. Choose **Your lineup** above the video, import your ESPN league and select your team (or enter players with the name/team/position form), then paste and save your game links in **Game streams** directly below the player. Press **Start watching**. **Try a replay** opens the included Week 7 rehearsal. Your lineup takes an ESPN league ID (public leagues need nothing else; a private league needs your SWID and espn_s2 cookies pasted under the ID, or set once with `npx wrangler secret put ESPN_SWID` / `ESPN_S2` / `ESPN_LEAGUE_ID`).
 
 Redeploy after a change with `npm run deploy` (builds `dist/` and uploads it with the Cloudflare account that `npx wrangler login` authorized; `wrangler.toml` names the Worker).
 
@@ -17,7 +17,7 @@ npm run build   # dist/server/index.js + hosting manifest
 npm run dev     # http://127.0.0.1:4187 (reloads the bundle after each build)
 ```
 
-Public leagues import with just the league ID. A private league needs the owner's ESPN cookies: on the deployed Site they are its saved connection (`ESPN_LEAGUE_ID`, `ESPN_SWID`, `ESPN_S2`, `ESPN_OWNER_ID`), so the owner's league fills in by itself; locally, put them in `.sites-runtime/env.json` with `"ESPN_LOCAL": true`, or paste SWID and espn_s2 under the league ID in Settings → League (they travel with that one request and are not stored anywhere else).
+Public leagues import with just the league ID. A private league needs the owner's ESPN cookies: on the deployed Site they are its saved connection (`ESPN_LEAGUE_ID`, `ESPN_SWID`, `ESPN_S2`, `ESPN_OWNER_ID`), so the owner's league fills in by itself; locally, put them in `.sites-runtime/env.json` with `"ESPN_LOCAL": true`, or paste SWID and espn_s2 under the league ID in Your lineup (they travel with that one request and are not stored anywhere else).
 
 ## Modes
 
@@ -26,10 +26,10 @@ Public leagues import with just the league ID. A private league needs the owner'
 
 ## How the channel decides (`web/director.js`)
 
-1. **Only your players.** A game is a candidate only while one of your starters is on the field. Offensive starters count when their team has the ball on a scrimmage down; kickers only on 4th down at or inside the opponent 42; D/ST when the opponent has the ball. The channel never shows a game that contains none of your roster's teams; between series it stays on a game you have players in, and with nothing on it shows a standby card with the next kickoff.
+1. **Only your players.** A game is a candidate only while one of your starters is on the field. Offensive starters count when their team has the ball on a scrimmage down; kickers only on 4th down at or inside the opponent 42; D/ST when the opponent has the ball. The automatic channel never chooses a game that contains none of your roster's teams; between series it stays on a game you have players in, and with nothing on it shows a standby card with the next kickoff.
 2. **Closest to the end zone wins.** Offense outranks D/ST; among offenses, fewer yards to goal wins. Inside the 20, or a kick/go-for-it on 4th, is *critical*.
-3. **No twitchy cuts.** Never cut while a play is live in a game you care about, nor in the 5 s before its next snap. A play owns the screen from the snap for 5 s plus a little per yard the ball travels (a 70-yard run is a quarter of a minute), then 3 s for the whistle and the spot (`playWindow` in `web/archive.js`). Stay 12 s after a cut unless something critical appears. A rival drive must be 10 yards closer to take over. Leaving a live game waits 1.5 s of the same challenger, which absorbs feed jitter. After one of your players scores, stay for the celebration.
-4. **Breaks and ads.** Timeouts, quarter ends, halftime and the dead time after a score are *breaks*; the director leaves them. When the visible provider player reports an ad, that game is excluded until the ad ends and the overlay says so.
+3. **No twitchy cuts.** Avoid cutting while the data says a play is live in a game you care about, nor in the 5 s before its next snap. A play owns the screen from the snap for 5 s plus a little per yard the ball travels (a 70-yard run is a quarter of a minute), then 3 s for the whistle and the spot (`playWindow` in `web/archive.js`). Stay 12 s after a cut unless something critical appears. A rival drive must be 10 yards closer to take over. Leaving a live game waits 1.5 s of the same challenger, which absorbs feed jitter. After one of your players scores, stay for the celebration.
+4. **Breaks and ads.** Timeouts, quarter ends, halftime and the dead time after a score are *breaks*; the director leaves them. When a supported provider player reports an ad, that game is excluded until the ad ends. If all available streams are excluded the channel waits in standby. Generic embedded pages cannot report ads or accept sound controls; pausing the channel unloads their page to stop sound, and resuming reloads it.
 
 ## Live games through the stream's delay (`web/live.js`)
 
@@ -72,4 +72,23 @@ Calibrating a recording is automatic: `node scripts/scorebug-ocr/jobs.mjs` resol
 
 ## Tests
 
-`npm test` runs 314 tests covering the director, coverage, alignment, scoring parser, archive sampling and play windows, replay matching, live normalization and the delayed live feed, the provider handshake, page embeds and the player pool, a full-Sunday rehearsal, and the server endpoints. They are deterministic simulations; real playback still needs a browser with the page in view (the provider's player stops reporting while the page is hidden).
+`npm test` runs 333 tests covering the director, coverage, alignment, scoring parser, archive sampling and play windows, replay matching, live normalization and the delayed live feed, the provider handshake, page embeds and the player pool, a full-Sunday rehearsal, and the server endpoints. They are deterministic simulations; real playback still needs a browser with the page in view (the provider's player stops reporting while the page is hidden).
+
+## Reliability checks and live limits
+
+The app-level regression suite covers live startup without the replay archive,
+lineup and stream replacement, pause/resume, preserving an imported league,
+explicit public-league team selection, and responses arriving after a mode or
+lineup change. Director tests also cover excluded streams during a celebration
+hold and standby. Import requests accept the supported ESPN cookie lengths and
+reject malformed JSON without a server error.
+
+Live decisions infer team possession from a polled scoreboard, not player-level
+on-field tracking or video analysis. A single delay setting cannot perfectly
+align streams with different delays. Direct MP4/HLS sources must permit browser
+playback and, for HLS, cross-origin segment requests. Some website URLs prohibit
+embedding, require another Play click after a cut, or show undetectable ads.
+The channel cannot bypass those provider restrictions or guarantee every snap.
+Before Sunday, use your actual streams in Live games and check picture, sound,
+and the stream-delay setting. Automated tests rehearse decision/state behavior;
+they do not verify the availability of third-party live broadcasts.

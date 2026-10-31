@@ -62,3 +62,12 @@ test('replay import requests the selected historical scoring week for all franch
  const response=await leagueAPI(replay,env,async(url)=>{assert.equal(new URL(url).searchParams.get('scoringPeriodId'),'7');return Response.json({...raw,scoringPeriodId:7,teams:[...raw.teams,{...raw.teams[0],id:2,name:'Second franchise',owners:['OTHER']} ]});});
  const data=await response.json();assert.equal(data.week,7);assert.equal(data.teams.length,2);assert.equal(data.teams[1].name,'Second franchise');
 });
+
+test('long valid ESPN cookies fit the import request limit',async()=>{
+ const request=new Request('https://test.example/api/league',{method:'POST',body:JSON.stringify({leagueId:'456',swid:'{12345678-1234-1234-1234-123456789012}',s2:'a'.repeat(1800)})});
+ const response=await leagueAPI(request,{},async()=>Response.json(raw));assert.equal(response.status,200);
+});
+test('non-object JSON and oversized imports return controlled errors',async()=>{
+ for(const body of ['null','[]','"text"'])assert.equal((await leagueAPI(new Request('https://test.example/api/league',{method:'POST',body}))).status,400);
+ assert.equal((await leagueAPI(new Request('https://test.example/api/league',{method:'POST',body:'x'.repeat(4097)}))).status,413);
+});

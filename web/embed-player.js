@@ -21,8 +21,8 @@ export class EmbedPlayer{
  get currentTime(){return 0;}
  get progressing(){return !this.visible||this.loadedAt!==null&&this.now()-this.loadedAt>1500;}
  near(){return this.progressing;}
- play(){this.wantPlay=true;}
- pause(){this.wantPlay=false;}
+ play(){this.wantPlay=true;if(this.visible)this.setVisible(true);}
+ pause(){this.wantPlay=false;if(this.visible){this.loadedAt=null;this.element.src='about:blank';}}
  seek(){}
  set muted(value){this.isMuted=!!value;}
  get muted(){return this.isMuted;}

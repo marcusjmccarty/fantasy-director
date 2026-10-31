@@ -67,7 +67,7 @@ export class Director{
  // current: {kind:'game'|'highlight'|'standby', id}
  decide({games,roster,at,current={},excluded=new Set(),queue=[],includeDefense=true,recentScore=()=>false}){
   const r=this.rules,ranked=rank(games,roster,{excluded,includeDefense,currentId:current.id}),best=ranked[0];
-  const curGame=current.kind==='game'?games.find(g=>g.id===current.id):null;
+  const curGame=current.kind==='game'?games.find(g=>g.id===current.id&&!excluded.has(g.id)&&hasRoster(g,roster)):null;
   const cur=curGame?(ranked.find(e=>e.game.id===curGame.id)||{game:curGame,players:[],...rate(curGame,[])}):null;
   const stay=reason=>({kind:'game',id:curGame.id,entry:cur,reason});
   // Leaving a watchable game waits out feed jitter; leaving a break or a final does not.
