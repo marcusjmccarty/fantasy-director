@@ -1,15 +1,19 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#0b0f0d"><meta name="description" content="A RedZone-style channel for your fantasy roster: every snap your starters take, every point they score."><title>Fantasy Stream</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/style.css"></head><body>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#11121c"><meta name="description" content="One channel for your fantasy starters. Choose your lineup, add your streams, and settle in."><title>Fantasy Stream</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="/style.css"></head><body>
+<a class="skip-link" href="#room">Skip to your channel</a>
 <header class="bar">
- <a href="/" class="brand"><span class="dot" aria-hidden="true"></span>Fantasy Stream</a>
- <div class="modes" role="group" aria-label="Viewing mode"><button id="liveMode" aria-pressed="true">Live games</button><button id="replayMode" aria-pressed="false">Try a replay</button></div>
- <button id="lineupButton" class="primary">Your lineup</button>
+ <a href="/" class="brand" aria-label="Fantasy Stream home"><span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><path d="m9 5 11 7-11 7V5Z" fill="currentColor"/><path d="M4 5v14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg></span><span>Fantasy<span class="brand-accent">Stream</span></span></a>
+ <nav class="modes" aria-label="Viewing mode"><button id="liveMode" aria-pressed="true"><span class="mode-dot" aria-hidden="true"></span>Live games</button><button id="replayMode" aria-pressed="false"><span aria-hidden="true">↺</span> Try a replay</button></nav>
+ <button id="lineupButton" class="lineup-shortcut">Your lineup</button>
  <button id="settingsButton" class="ghost">Settings</button>
 </header>
-<main class="room" id="room">
+<div class="page-heading"><div><p class="eyebrow">FOOTBALL, WITH YOUR PLAYERS FIRST</p><h1>Your viewing room</h1></div><nav class="page-links" aria-label="On this page"><a href="#watchTitle">Watch</a><a href="#gamesHead">Your games</a><a href="#streamsTitle">Game streams <span aria-hidden="true">↓</span></a></nav></div>
+<main class="room" id="room" tabindex="-1">
  <section class="stage" aria-label="Your channel">
-  <div class="setup-lineup"><span class="step-number">1</span><div><h2>Your lineup</h2><p id="lineupSummary">Choose the players you want to follow.</p></div><button id="editLineup" class="primary">Choose your players</button></div>
+  <div class="setup-lineup"><span class="setup-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><circle cx="9" cy="8" r="3"/><path d="M3 20v-2a6 6 0 0 1 12 0v2M16 5a3 3 0 0 1 0 6m2 3a5 5 0 0 1 3 5"/></svg></span><div><h2>Your lineup</h2><p id="lineupSummary">Choose the players you want to follow.</p></div><button id="editLineup" class="primary">Choose your players</button></div>
   <p id="storageNotice" class="error" role="status" hidden>This browser couldn’t save your changes. They will last only until you close or reload this page.</p>
+  <div class="player-frame">
+  <div class="watch-heading"><h2 id="watchTitle" tabindex="-1">Your channel</h2><span class="channel-mode" id="channelMode">Live games</span></div>
   <div class="screen" id="screen">
    <div class="layers" id="layers"></div>
    <div class="field-view" id="fieldView" hidden>
@@ -21,26 +25,32 @@
    <div class="lower" id="lower" hidden><div class="lower-kicker" id="lowerKicker"></div><div class="lower-main" id="lowerMain"></div><div class="lower-meta" id="lowerMeta"></div></div>
    <div class="toast" id="toast" role="status" hidden></div>
    <div class="switching" id="switching" hidden></div>
-   <div class="overlay" id="overlay"><div class="overlay-card"><span class="eyebrow" id="ovEyebrow">YOUR PERSONAL GAME DAY</span><h1 id="ovTitle">Your starters. One channel.</h1><p id="ovText">Choose your fantasy lineup, add your game streams, and watch the channel follow your starters’ teams.</p><button id="ovButton" class="primary big">Start watching</button><small id="ovHint"></small></div></div>
-   <button class="unmute" id="unmute" hidden>🔇 Tap for sound</button>
-   <div class="sound-hint" id="soundHint" hidden>🔇 <b>Click the video</b> once for sound</div>
+   <div class="overlay" id="overlay"><div class="overlay-card"><span class="screen-emblem" aria-hidden="true"><svg viewBox="0 0 40 40" fill="none"><rect x="3" y="7" width="34" height="25" rx="5" stroke="currentColor" stroke-width="2"/><path d="m17 14 10 6-10 6V14Z" fill="currentColor"/><path d="M14 37h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg></span><span class="eyebrow" id="ovEyebrow">YOUR PERSONAL GAME DAY</span><h2 id="ovTitle">Your starters. One channel.</h2><p id="ovText">Choose your fantasy lineup, add your game streams, and settle in.</p><div class="overlay-actions"><button id="ovButton" class="primary big">Choose your players</button><button id="previewReplay" class="ghost big" hidden>Try a replay first <span aria-hidden="true">→</span></button></div><small id="ovHint"></small></div></div>
+   <button class="unmute" id="unmute" hidden>Turn sound on</button>
+   <div class="sound-hint" id="soundHint" hidden><b>Click the video</b> once for sound</div>
   </div>
   <div class="transport" id="transport">
-   <button id="playButton" class="icon primary" aria-label="Play">▶</button>
-   <button id="backButton" class="icon" aria-label="Back 30 seconds">−30</button>
-   <button id="forwardButton" class="icon" aria-label="Forward 30 seconds">+30</button>
-   <button id="nextButton" class="pill" title="Skip ahead to your next drive">Next drive ⏭</button>
+   <div class="playback-actions">
+   <button id="playButton" class="primary" aria-label="Play">Play</button>
+   <button id="backButton" class="seek-button" aria-label="Back 30 seconds">−30 sec</button>
+   <button id="forwardButton" class="seek-button" aria-label="Forward 30 seconds">+30 sec</button>
+   <button id="nextButton" class="pill" title="Skip ahead to your next drive">Next drive <span aria-hidden="true">→</span></button>
+   <span class="spacer"></span>
+   <button id="muteButton" aria-label="Turn sound on">Turn sound on</button>
+   <button id="fullButton" aria-label="Full screen">Full screen</button>
+   </div>
+   <div class="replay-controls" id="replayControls" hidden>
+   <div class="replay-progress">
    <div class="timeline"><div class="ticks" id="ticks" aria-hidden="true"></div><div class="scrub-tip" id="scrubTip" hidden></div><input type="range" id="timeline" min="0" max="1" step="1" value="0" aria-label="Replay time"></div>
-   <select id="scope" aria-label="Timeline range" title="What the timeline spans"><option value="game">This game</option><option value="tight">15 minutes</option><option value="day">Whole day</option></select>
    <span class="time" id="timeLabel">—</span>
-   <select id="daySelect" aria-label="Replay day"></select>
-   <select id="speed" aria-label="Speed" hidden><option value="1">1×</option><option value="4">4×</option><option value="16">16×</option><option value="60">60×</option></select>
-   <button id="muteButton" class="icon" aria-label="Unmute">🔇</button>
-   <button id="fullButton" class="icon" aria-label="Full screen">⛶</button>
+   </div>
+   <div class="replay-options"><div><label for="daySelect">Replay day</label><select id="daySelect" aria-label="Replay day"></select></div><div><label for="scope">Timeline</label><select id="scope" aria-label="Timeline range"><option value="game">This game</option><option value="tight">15 minutes</option><option value="day">Whole day</option></select></div><div id="speedControl" hidden><label for="speed">Playback speed</label><select id="speed" aria-label="Speed" hidden><option value="1">1×</option><option value="4">4×</option><option value="16">16×</option><option value="60">60×</option></select></div></div>
+   </div>
   </div>
-  <div class="status-line"><span id="autoChip" class="chip on">AUTO</span><span id="reason">Loading the Week 7 slate…</span><button id="resumeAuto" class="link" hidden>Resume auto</button><span class="spacer"></span><span id="pictureNote" class="muted"></span></div>
+  <div class="status-line"><span id="autoChip" class="chip on">Automatic</span><span id="reason">Choose your lineup to get started.</span><button id="resumeAuto" class="link" hidden>Switch games automatically</button><span class="spacer"></span><span id="pictureNote" class="muted"></span></div>
+  </div>
   <section class="stream-panel" aria-labelledby="streamsTitle">
-   <div class="setup-heading"><span class="step-number">2</span><div><h2 id="streamsTitle">Game streams</h2><p id="streamsHelp">Paste a video link for each game you want to watch, then save.</p></div></div>
+   <div class="setup-heading"><span class="setup-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><rect x="3" y="4" width="18" height="13" rx="3"/><path d="M8 21h8m-4-4v4M10 8l5 3-5 3V8Z"/></svg></span><div><h2 id="streamsTitle" tabindex="-1">Game streams</h2><p id="streamsHelp">Add a video link for each game, then save your links.</p></div><span class="section-tag" id="streamBadge">Your video links</span></div>
    <p id="streamsModeNote" class="muted"></p>
    <div id="streamInputs"></div>
    <div class="stream-actions"><button type="button" id="saveStreams" class="primary">Save stream links</button><button type="button" id="refreshStreams">Refresh games</button><span id="streamsStatus" role="status"></span></div>
@@ -48,15 +58,17 @@
    <details class="stream-help"><summary>Need help with a stream?</summary><p>Fantasy Stream does not supply live broadcasts. Use a stream you have access to. Direct video and .m3u8 links work best. Some websites block playback here; if a page will not play, try a direct video link. Website players may need you to press Play again after a game change, and their ads cannot always be detected.</p></details>
   </section>
  </section>
- <aside class="rail">
-  <section aria-labelledby="gamesHead"><div class="rail-head"><h2 id="gamesHead">Your games</h2><span class="muted" id="gamesNote"></span></div><ol class="games" id="games"></ol></section>
-  <section aria-labelledby="rosterHead"><div class="rail-head"><h2 id="rosterHead">Your starters</h2><button id="railLineup" class="link">Edit lineup</button></div><p class="muted" id="rosterNote"></p><ul class="roster" id="roster"></ul></section>
-  <section aria-labelledby="scoresHead"><div class="rail-head"><h2 id="scoresHead">Your scores</h2><span class="muted" id="scoresNote"></span></div><ul class="scores" id="scores"></ul></section>
+ <aside class="rail" aria-label="Your game guide">
+  <section aria-labelledby="gamesHead"><div class="rail-head"><h2 id="gamesHead" tabindex="-1">Your games</h2><span class="section-tag" id="gamesNote"></span></div><p class="rail-description">Let the channel choose, or select a game to stay with it.</p><ol class="games" id="games"></ol></section>
+  <section aria-labelledby="rosterHead"><div class="rail-head"><h2 id="rosterHead">Your starters</h2><button id="railLineup" class="link">Edit lineup</button></div><p class="rail-description" id="rosterNote"></p><ul class="roster" id="roster"></ul></section>
+  <section aria-labelledby="scoresHead"><div class="rail-head"><h2 id="scoresHead">Scores &amp; highlights</h2><span class="section-tag" id="scoresNote"></span></div><ul class="scores" id="scores"></ul></section>
  </aside>
 </main>
+<footer class="page-footer"><span>Fantasy Stream</span><p>Your lineup. Your streams. Your game day.</p><a href="#room">Back to your channel ↑</a></footer>
 <dialog id="lineupDialog" aria-labelledby="lineupTitle"><form method="dialog" id="lineupForm">
  <div class="dialog-head"><h2 id="lineupTitle">Your lineup</h2><button type="button" id="closeLineup" aria-label="Close lineup">Close</button></div>
  <section>
+  <div class="form-intro"><span class="section-tag">OPTION 1</span><h3>Bring in your ESPN team</h3><p class="muted">Connect your league and choose your team. We’ll use its starters.</p></div>
   <label for="leagueId">ESPN league ID</label><div class="inline"><input id="leagueId" inputmode="numeric" autocomplete="off" placeholder="e.g. 12345678"><button type="button" id="importLeague" class="primary">Find my team</button></div>
   <p class="muted" id="leagueStatus" role="status">Enter the number in your ESPN league’s web address. We import starters only.</p>
   <details id="cookieDetails"><summary>Private league? Add your ESPN cookies</summary>
@@ -66,14 +78,14 @@
   </details>
   <label id="franchiseLabel" for="franchise">Choose your team</label><select id="franchise" aria-label="Choose your team"></select>
   <p id="lineupStatus" role="status"></p>
-  <hr><h3>Or add your players</h3><p class="muted">Add your starters, choose their NFL teams and positions, then choose Save my lineup below.</p>
+  <hr><div class="form-intro"><span class="section-tag">OPTION 2</span><h3>Add your players yourself</h3><p class="muted">No account needed. Enter your starters below, then choose Save my lineup.</p></div>
   <div id="rosterRows"></div><button type="button" id="addPlayer">+ Add a player</button>
   <details><summary>Paste a whole lineup instead</summary><label for="manualRoster">One player per line</label><textarea id="manualRoster" rows="7" spellcheck="false" aria-describedby="rosterHelp"></textarea><p class="muted" id="rosterHelp">Name, team, position. Example: Jonathan Taylor, IND, RB</p><button type="button" id="pasteRoster">Fill in the players above</button></details>
  </section>
  <div class="dialog-actions"><p class="error" id="lineupError" role="alert"></p><button type="button" id="saveRoster" class="primary">Save my lineup</button></div>
 </form></dialog>
 <dialog id="settings" aria-labelledby="settingsTitle"><form method="dialog" id="settingsForm">
- <div class="dialog-head"><h2 id="settingsTitle">Settings</h2><button type="button" id="closeSettings" class="icon ghost" aria-label="Close">✕</button></div>
+ <div class="dialog-head"><h2 id="settingsTitle">Settings</h2><button type="button" id="closeSettings" class="ghost" aria-label="Close settings">Close</button></div>
  <div class="tabs" role="tablist" aria-label="Settings"><button type="button" id="viewingTab" role="tab" data-tab="viewing" aria-controls="viewingPanel" aria-selected="true">Viewing</button><button type="button" id="syncTab" role="tab" data-tab="sync" aria-controls="syncPanel" aria-selected="false" tabindex="-1">Replay timing</button></div>
  <section id="viewingPanel" role="tabpanel" aria-labelledby="viewingTab" data-panel="viewing">
   <label class="check"><input type="checkbox" id="optDefense" checked> Follow my D/ST when no other starter is on the field</label>

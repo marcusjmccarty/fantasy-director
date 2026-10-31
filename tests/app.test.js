@@ -21,7 +21,7 @@ const html=readFileSync(new URL('../web/index.html',import.meta.url),'utf8');
 const script=readFileSync(process.env.FANTASY_AUDIT_APP||new URL('../web/app.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace(/\ninit\(\);\s*$/,'');
 const archiveData=JSON.parse(readFileSync(new URL('../web/week7.json',import.meta.url),'utf8'));
 class Element{
- constructor(){this.children=[];this.style={};this.dataset={};this.value='';this.classList={add(){},remove(){},toggle(){},contains(){return false;}};this.parentElement={hidden:false};}
+ constructor(){this.children=[];this.style={};this.dataset={};this.value='';const classes=new Set();this.classList={add(name){classes.add(name);},remove(name){classes.delete(name);},toggle(name,on){if(on??!classes.has(name))classes.add(name);else classes.delete(name);},contains(name){return classes.has(name);}};this.parentElement={hidden:false};}
  set innerHTML(value){this.html=value;this.children=[];for(const m of value.matchAll(/<(input|select|button)\b([^>]*)(?:>([\s\S]*?)<\/\1>)?/g)){
   const e=new Element();e.tag=m[1];e.value=/value="([^"]*)"/.exec(m[2])?.[1]||'';e.dataset.key=/data-key="([^"]*)"/.exec(m[2])?.[1];
   if(e.tag==='select')e.value=/<option selected>([^<]*)/.exec(m[3]||'')?.[1]||'';this.children.push(e);
@@ -52,7 +52,7 @@ class Media{
 }
 function app(fetcher=async()=>Response.json({events:[]}),{media=false,native=false,stored=null,storageBlocked=false}={}){
  const elements=new Map([...html.matchAll(/id="([^"]+)"/g)].map(m=>[m[1],new Element()]));
- const document={getElementById(id){assert.ok(elements.has(id),`Missing UI element: ${id}`);return elements.get(id);},querySelectorAll(){return [];},querySelector(){return new Element();},createElement(tag){return tag==='video'?new Video():new Element();},addEventListener(){},body:new Element()};
+ const stage=new Element(),document={getElementById(id){assert.ok(elements.has(id),`Missing UI element: ${id}`);return elements.get(id);},querySelectorAll(){return [];},querySelector(selector){return selector==='.stage'?stage:new Element();},createElement(tag){return tag==='video'?new Video():new Element();},addEventListener(){},body:new Element()};
  const time={now:1000};
  class MediaPool extends PlayerPool{constructor(host,options){super(host,{...options,now:()=>time.now,create:source=>native?new ctx.Native(source):new Media(source)});}}
  const storage=new Map(stored===null?[]:[['fantasy-stream-v3',JSON.stringify(stored)]]);
@@ -183,6 +183,24 @@ test('paused highlights retain their remaining playback time after resuming',()=
 test('successful archive loading leaves live mode intact and prepares a valid replay clock',async()=>{
  const a=app(async url=>Response.json(url==='/week7.json'?archiveData:String(url).includes('scoreboard')?{events:[]}:{clips:[]}));await a.init();
  assert.equal(a.S.mode,'live');assert.ok(a.S.archive);assert.ok(a.clock.at>=a.S.archive.sessions[a.S.day].start);
+});
+test('viewing room: the first-visit replay shortcut enters replay without starting playback',async()=>{
+ const a=app(async url=>Response.json(url==='/week7.json'?archiveData:String(url).includes('scoreboard')?{events:[]}:{clips:[]}));a.render();assert.equal(a.el('previewReplay').hidden,true);await a.init();assert.equal(a.el('previewReplay').hidden,false);
+ await a.el('previewReplay').onclick();assert.equal(a.S.mode,'replay');assert.equal(a.S.playing,false);assert.equal(a.el('replayControls').hidden,false);assert.match(a.el('streamsHelp').textContent,/No stream links needed/);assert.equal(a.el('previewReplay').hidden,true);
+});
+test('viewing room: switching back to live hides replay-only settings and restores stream instructions',async()=>{
+ const a=app();replayReady(a);await a.setMode('replay');a.saved.dataOnly=true;a.render();assert.equal(a.el('speedControl').hidden,false);
+ await a.setMode('live');assert.equal(a.el('replayControls').hidden,true);assert.equal(a.el('speedControl').hidden,true);assert.equal(a.el('channelMode').textContent,'Live games');assert.match(a.el('streamsHelp').textContent,/video link/);
+});
+test('viewing room: the fullscreen fallback has a working named exit',async()=>{
+ const a=app();ready(a);await a.el('fullButton').onclick();assert.equal(a.el('fullButton').textContent,'Exit full screen');assert.equal(a.el('fullButton')['aria-label'],'Exit full screen');
+ await a.el('fullButton').onclick();assert.equal(a.el('fullButton').textContent,'Full screen');
+});
+test('viewing room: selecting a game and returning to automatic switching have explicit labels',()=>{
+ const a=app();ready(a);a.render();assert.match(a.el('games').html,/Jonathan Taylor/);assert.match(a.el('games').html,/Select to stay with this game/);
+ a.el('games').onclick({target:{closest:()=>({dataset:{game:'A'}})}});assert.equal(a.S.pinned,'A');assert.equal(a.el('autoChip').textContent,'Your selection');assert.equal(a.el('resumeAuto').hidden,false);assert.match(a.el('games').html,/Selected · choose again/);
+ a.el('resumeAuto').onclick();assert.equal(a.S.pinned,null);assert.equal(a.el('autoChip').textContent,'Automatic');assert.equal(a.el('resumeAuto').hidden,true);
+ a.S.cooldown.set('A',Infinity);a.render();assert.match(a.el('games').html,/<button[^>]* disabled>/);assert.match(a.el('games').html,/Try another stream link below/);
 });
 test('saving an unchanged imported lineup retains its ESPN connection',()=>{
  const a=app();ready(a);a.saved.leagueId='123';a.saved.league={teams:[{id:'1',name:'My ESPN team',players:[player]}]};a.saved.teamId='1';
