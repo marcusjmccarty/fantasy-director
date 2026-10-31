@@ -3,22 +3,23 @@
 import {F,playWindow,sampleGame} from './archive.js';
 import {involvement} from './director.js';
 
+export function replayPlayBounds(game,types,sync,index){
+ const p=game.plays[index],window=p&&playWindow(types[p[F.TYPE]],p[F.TEXT]);if(!window)return null;
+ // Honor both minimum video time and the mapped end, with a finite cap for
+ // expanded anchor intervals. These estimates cannot identify a whistle.
+ const from=sync.media(p[F.T]),seconds=game.scores.some(s=>s.i===index)?32:Math.max(20,window+6);
+ return {index,from,to:Math.max(from+seconds,Math.min(from+60,sync.media(p[F.T]+window)+8))};
+}
 export function protectedReplayPlay(game,types,sync,media,roster,{includeDefense=true,allAction=false}={}){
  if(!Number.isFinite(media))return null;
  for(let i=game.plays.length-1;i>=0;i--){
   const p=game.plays[i],window=playWindow(types[p[F.TYPE]],p[F.TEXT]);
   if(!window)continue;
-  const from=sync.media(p[F.T]);
+  const bounds=replayPlayBounds(game,types,sync,i),{from,to}=bounds;
   if(from>media)continue;
-  // Room for alignment error and the finish of the action. Scores get extra
-  // room for a long run and celebration; no wall-clock expiry while paused.
-  const seconds=game.scores.some(s=>s.i===i)?32:Math.max(20,window+6);
-  // An expanded anchor interval has the opposite risk: its estimated end
-  // can be much later than start + duration. Honor both, with a finite cap.
-  const to=Math.max(from+seconds,Math.min(from+60,sync.media(p[F.T]+window)+8));
   if(media>=to)continue;
   const snap=sampleGame(game,game.start+p[F.T]+.01,types);
-  if(allAction||involvement(snap,roster,{includeDefense}).length)return {index:i,from,to};
+  if(allAction||involvement(snap,roster,{includeDefense}).length)return bounds;
  }
  return null;
 }

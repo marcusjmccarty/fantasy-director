@@ -16,6 +16,7 @@ import * as highlights from '../web/highlights.js';
 import * as preferences from '../web/preferences.js';
 import * as liveHighlights from '../web/live-highlights.js';
 import * as continuity from '../web/continuity.js';
+import * as breaks from '../web/breaks.js';
 import {PlayerPool} from '../web/players.js';
 const html=readFileSync(new URL('../web/index.html',import.meta.url),'utf8');
 // Point at a historical app.js to reproduce the audit cases against that revision.
@@ -57,10 +58,10 @@ function app(fetcher=async()=>Response.json({events:[]}),{media=false,native=fal
  const time={now:1000};
  class MediaPool extends PlayerPool{constructor(host,options){super(host,{...options,now:()=>time.now,create:source=>native?new ctx.Native(source):new Media(source)});}}
  const storage=new Map(stored===null?[]:[['fantasy-stream-v3',JSON.stringify(stored)]]);
- const ctx={...archive,...sync,...director,...coverage,...replays,...live,...scoring,...roster,...highlights,...preferences,...liveHighlights,...continuity,PlayerPool:media?MediaPool:Pool,NFLSourceCatalog:class{},document,window:{addEventListener(){}},localStorage:{getItem:key=>storage.get(key)||null,setItem(key,value){if(storageBlocked)throw new Error('Storage unavailable');storage.set(key,value);}},performance:{now:()=>time.now},setTimeout:()=>0,clearTimeout(){},setInterval:()=>0,fetch:fetcher,AbortSignal,Response,URL,Date,console};
+ const ctx={...archive,...sync,...director,...coverage,...replays,...live,...scoring,...roster,...highlights,...preferences,...liveHighlights,...continuity,...breaks,PlayerPool:media?MediaPool:Pool,NFLSourceCatalog:class{},document,window:{addEventListener(){}},localStorage:{getItem:key=>storage.get(key)||null,setItem(key,value){if(storageBlocked)throw new Error('Storage unavailable');storage.set(key,value);}},performance:{now:()=>time.now},setTimeout:()=>0,clearTimeout(){},setInterval:()=>0,fetch:fetcher,AbortSignal,Response,URL,Date,console};
  vm.createContext(ctx);
  if(native){ctx.attachMediaSource=async()=>null;const code=readFileSync(new URL('../web/native-player.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace('export class NativePlayer','class NativePlayer');vm.runInContext(code+'\nglobalThis.Native=NativePlayer;',ctx);}
- vm.runInContext(script+'\n globalThis.a={S,pool,director,coverage,clock,step,advanceClock,skipBreak,selectGame,excluded,cutTo,warm,startHighlight,updateHighlight,finishHighlight,syncFor,nudge,nfl,setMode,setPlaying,setDay,seekTo,replaySource,useRoster,importLeague,pollLive,pollLiveClips,prepareReplay,retryMissedReplays,failHighlight,render,init,roster,get saved(){return saved;}};',ctx);
+ vm.runInContext(script+'\n globalThis.a={S,pool,director,coverage,clock,step,updateBreaks,advanceClock,skipBreak,selectGame,excluded,cutTo,warm,startHighlight,updateHighlight,finishHighlight,syncFor,nudge,nfl,setMode,setPlaying,setDay,seekTo,replaySource,useRoster,importLeague,pollLive,pollLiveClips,prepareReplay,retryMissedReplays,failHighlight,render,init,roster,get saved(){return saved;}};',ctx);
  return {...ctx.a,time,storage, get saved(){return ctx.a.saved;},el:id=>elements.get(id)};
 }
 const player={name:'Jonathan Taylor',team:'IND',position:'RB'};
@@ -517,7 +518,8 @@ test('watchability: the real director finishes short highlights before urgent ac
   a.step(a.time.now);if(urgent&&a.pool.visible==='A'){returned=true;assert.equal(entries[0].status,'replayed','finish the visible short clip before returning');}if(frame>=36&&a.S.highlight?.item.id===entries[0].id&&a.S.highlight.playStart>0)resumed=true;
   if(a.S.highlight&&!a.S.highlight.src.data)assert.ok(a.pool.get(a.S.highlight.src.key),'active highlight stays in its player slot');
  }
- assert.equal(returned,true);assert.equal(resumed,false);assert.ok(entries.every(e=>e.status==='replayed'));assert.equal(a.coverage.queue.length,0);assert.equal(a.pool.visible,'A');
+ assert.equal(returned,true);assert.equal(resumed,false);assert.ok(entries.every(e=>e.status==='replayed'));assert.equal(a.coverage.queue.length,0);assert.equal(a.pool.visible,null);assert.equal(a.S.program.kind,'standby');
+ a.S.live.feed.push([{...game,phase:'live'}],a.S.at);a.step(a.time.now+250);assert.equal(a.pool.visible,'A');
 });
 test('logic: buffering footage cannot be marked replayed by elapsed wall time',()=>{
  const {a,entry,p}=playingHighlight();p.moving=false;a.time.now=12000;a.updateHighlight(12000);
@@ -562,9 +564,10 @@ test('break recovery: an in-band commercial can be skipped to a configured non-r
  a.time.now=91001;assert.equal(a.excluded().has('A'),false);
  a.step(91001);assert.equal(a.S.program.id,'A');
 });
-test('break recovery: no alternative video keeps the current game and explains what to do',()=>{
- const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.setPlaying(true);a.cutTo('A',1000);a.skipBreak();
- assert.equal(a.S.breaks.size,0);assert.equal(a.S.program.id,'A');assert.match(a.el('toast').textContent,/No other game video/);
+test('break recovery: no alternative video hides and mutes the commercial until a stream is available',()=>{
+ const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.setPlaying(true);a.cutTo('A',1000);const p=a.pool.current;a.pool.setMuted(false);a.skipBreak();
+ assert.equal(a.S.breaks.size,1);assert.equal(a.S.program.kind,'standby');assert.equal(a.pool.visible,null);assert.equal(p.muted,true);assert.match(a.el('toast').textContent,/break is hidden/);
+ a.time.now=91001;a.step(a.time.now);assert.equal(a.pool.visible,'A');
 });
 test('break recovery: a provider ad yields to a non-roster stream without counting ad coverage',()=>{
  const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/a.mp4','SEA-SF':'https://example.test/x.mp4'};
@@ -607,8 +610,8 @@ test('break recovery: reported in-band commercials are not watched coverage whil
 });
 
 test('replay continuity: the app passes media protection to the director, but an ad releases it',()=>{
- const a=app(undefined,{media:true});replayReady(a);a.S.mode='replay';a.useRoster([{name:'Zay Flowers',team:'BAL',position:'WR'},player],{teamName:'Replay team'});a.saved.highlights=false;
- const g=a.S.archive.game('401873012'),p=g.plays[136],other=a.S.archive.game('401873014');a.S.at=g.start+p[0]+15;
+ const a=app(undefined,{media:true});replayReady(a);a.S.mode='replay';a.useRoster([{name:'Zay Flowers',team:'BAL',position:'WR'},{name:'Tyrone Tracy',team:'NYG',position:'RB'}],{teamName:'Replay team'});a.saved.highlights=false;
+ const g=a.S.archive.game('401873012'),p=g.plays[136],other=a.S.archive.game('401873016');a.S.at=g.start+p[0]+15;
  const current=archive.sampleGame(g,a.S.at,a.S.archive.types),urgent={...archive.sampleGame(other,a.S.at,a.S.archive.types),state:'in',phase:'play',possession:0,down:1,special:false,yardsToGoal:3};
  a.S.archive.sample=()=>[current,urgent];a.S.games=[current,urgent];a.setPlaying(true);const video=a.pool.open(g.id,{url:g.embed}).player;video.currentTime=a.syncFor(g).media(p[0])+10;a.pool.show(g.id);a.S.program={kind:'game',id:g.id};
  a.step(1000);assert.equal(a.S.program.id,g.id);assert.equal(a.S.decision.reason,'Finishing the play');
@@ -649,10 +652,10 @@ test('manual choice: selecting during a highlight holds its last picture until t
  assert.equal(entry.status,'skipped');assert.equal(a.pool.current,p);assert.equal(p.wantPlay,false);assert.equal(p.destroyed,undefined);assert.equal(a.S.pending.id,'X');
  target.moving=true;a.step(2000);assert.equal(a.S.program.id,'X');assert.equal(p.destroyed,true);assert.equal(a.coverage.queue.length,0);
 });
-test('manual choice: old break metadata cannot cancel a click before it appears, then gets a bounded grace period',()=>{
+test('manual choice: a game already in a detected break is not revealed even by a manual click',()=>{
  const a=app(undefined,{media:true}),{x,push}=manualStreams(a);push({...x,phase:'break'});const target=a.pool.open('X',{url:a.saved.streams['SEA-SF']}).player;target.moving=false;
- a.selectGame('X');a.time.now=9000;a.step(9000);assert.equal(a.S.pinned,'X');assert.equal(a.S.selection.shownAt,null);
- target.moving=true;a.step(9250);a.step(9500);assert.equal(a.S.program.id,'X');a.step(19000);assert.equal(a.S.program.id,'X');a.step(19500);assert.equal(a.S.pinned,null);assert.equal(a.S.program.id,'A');
+ a.selectGame('X');a.time.now=9000;a.step(9000);assert.equal(a.S.pinned,null);assert.equal(a.pool.visible,'A');
+ target.moving=true;a.step(9250);assert.equal(a.pool.visible,'A');push(x);a.selectGame('X');assert.equal(a.pool.visible,'X');assert.equal(a.S.pinned,'X');
 });
 test('manual choice: a provider ad, a stream failure, or the end of the game releases the choice',()=>{
  for(const reason of ['ad','error','final','ended']){
@@ -673,4 +676,79 @@ test('manual choice: selecting a later replay opens that exact recording instead
 
 test('highlight recovery: a reported provider ad releases the replay instead of protecting the advertisement',()=>{
  const {a,entry,p}=playingHighlight();a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.S.highlight.returnTo='A';p.emit('ad',true);assert.equal(p.destroyed,true);assert.notEqual(entry.status,'replayed');a.step(1250);assert.equal(a.S.program.id,'A');
+});
+
+for(const index of [14,38,46,64,83,109,137])test(`Bucs integration: a manual selection releases after score row ${index}`,()=>{
+ const a=app(undefined,{media:true});replayReady(a);a.S.mode='replay';a.saved.highlights=false;
+ const g=a.S.archive.game('401873018'),mapping=a.syncFor(g),start=mapping.media(g.plays[index][0]),next=breaks.nextFootball(g,a.S.archive.types,index);
+ const end=Math.min(continuity.replayPlayBounds(g,a.S.archive.types,mapping,index).to,mapping.media(next[0]));
+ a.S.at=g.start+mapping.wall(start+.01);a.clock.seek(a.S.at,1000);a.S.games=a.S.archive.sample(a.S.at,a.S.archive.sessions[a.S.day].gameIds);a.selectGame(g.id);
+ assert.equal(a.pool.visible,g.id);assert.equal(a.S.pinned,g.id);const video=a.pool.current;
+ for(let media=start+.25;media<end;media+=.25){
+  video.currentTime=media;a.time.now+=250;a.advanceClock(a.time.now);a.step(a.time.now);
+  assert.equal(a.S.pinned,g.id,'do not cut the scoring footage short');assert.equal(a.pool.visible,g.id);
+ }
+ video.currentTime=end+.01;a.time.now+=250;a.advanceClock(a.time.now);a.step(a.time.now);
+ assert.equal(a.S.pinned,null,'even a fully edited commercial ends the manual selection');
+ if(a.S.detectedBreaks.has(g.id)){assert.notEqual(a.pool.visible,g.id);assert.equal(video.muted,true);}
+});
+test('commercial suppression is immediate even while the replacement stream buffers',()=>{
+ const a=app(undefined,{media:true}),{y,push}=manualStreams(a);push(undefined,{...y,phase:'break'});a.selectGame('A');a.pool.setMuted(false);const outgoing=a.pool.current;
+ const backup=a.pool.open('X',{url:a.saved.streams['SEA-SF']}).player;backup.moving=false;
+ outgoing.emit('ad',true);assert.equal(a.pool.visible,null,'hide without waiting for a director tick');assert.equal(outgoing.muted,true);
+ a.step(1250);assert.equal(a.S.pending.id,'X');assert.equal(a.pool.visible,null);assert.equal(a.S.program.kind,'standby');
+ backup.moving=true;a.step(1500);assert.equal(a.pool.visible,'X');assert.equal(outgoing.muted,true);
+});
+test('a background player ad cannot hide a healthy game or visible highlight',()=>{
+ for(const highlight of [false,true]){
+  const a=highlight?playingHighlight().a:app(undefined,{media:true});if(!highlight){manualStreams(a);a.selectGame('A');}
+  const shown=a.pool.visible,p=a.pool.current,background=a.pool.open('other',{url:'https://example.test/other.mp4'}).player;
+  background.emit('ad',true);assert.equal(a.pool.visible,shown);assert.equal(a.pool.current,p);
+ }
+});
+test('a delayed live scoreboard increase ends a manual choice even when timeout metadata is missing',()=>{
+ const a=app(undefined,{media:true}),{x,push}=manualStreams(a);a.selectGame('X');
+ push({...x,score:[7,0],lastPlayId:'td'});a.step(1250);assert.equal(a.S.pinned,null);assert.equal(a.pool.visible,'A');assert.equal(a.excluded().has('X'),true);
+ push({...x,score:[7,0],lastPlayId:'next-drive',possession:1});a.step(1500);assert.equal(a.excluded().has('X'),false);
+});
+test('when the only replay is in a break, the channel skips to its next football play',()=>{
+ const a=app(undefined,{media:true});replayReady(a);a.S.mode='replay';a.saved.highlights=false;a.useRoster([{name:'Bucky Irving',team:'TB',position:'RB'}],{teamName:'Bucs'});
+ const g=a.S.archive.game('401873018');a.S.archive.sessions[a.S.day].gameIds=[g.id];const mapping=a.syncFor(g),start=mapping.media(g.plays[14][0]);
+ a.S.at=g.start+mapping.wall(start+.01);a.clock.seek(a.S.at,1000);a.S.games=a.S.archive.sample(a.S.at,[g.id]);a.selectGame(g.id);const video=a.pool.current;
+ video.currentTime=start+33;a.time.now=34000;a.advanceClock(a.time.now);a.step(a.time.now);
+ assert.equal(a.pool.visible,null);assert.equal(video.muted,true);assert.equal(a.S.at,g.start+g.plays[16][0]);
+ a.time.now+=250;a.step(a.time.now);assert.equal(a.pool.visible,g.id);assert.equal(a.S.pinned,null);
+});
+
+test('adding a backup stream does not erase a known scoring break',()=>{
+ const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.selectGame('A');
+ const scored={...game,score:[7,0],lastPlayId:'td'};a.S.live.feed.push([scored],970);a.step(1250);assert.equal(a.pool.visible,null);
+ a.render();a.el('saveStreams').onclick();a.step(1500);assert.equal(a.excluded().has('A'),true);assert.equal(a.pool.visible,null);
+});
+test('seeking back to the scoring play uses the requested position while the player seek is pending',()=>{
+ const a=app(undefined,{media:true});replayReady(a);a.S.mode='replay';a.saved.highlights=false;const g=a.S.archive.game('401873018'),mapping=a.syncFor(g),start=mapping.media(g.plays[14][0]);
+ a.S.at=g.start+g.plays[14][0]+1;a.S.games=a.S.archive.sample(a.S.at,a.S.archive.sessions[a.S.day].gameIds);a.selectGame(g.id);const p=a.pool.current;
+ a.seekTo(g.start+g.plays[14][0]+1);p.currentTime=start+50;a.updateBreaks();
+ assert.equal(a.S.detectedBreaks.has(g.id),false,'stale pre-seek media cannot finish the scoring guard');assert.equal(a.S.pinned,g.id);
+});
+test('scrubbing inside the provider discards future break evidence after the clock follows the seek',()=>{
+ const a=app(undefined,{media:true});replayReady(a);a.S.mode='replay';a.saved.highlights=false;const g=a.S.archive.game('401873018'),mapping=a.syncFor(g),start=mapping.media(g.plays[14][0]);
+ a.S.at=g.start+g.plays[14][0]+1;a.clock.seek(a.S.at,1000);a.S.games=a.S.archive.sample(a.S.at,a.S.archive.sessions[a.S.day].gameIds);a.selectGame(g.id);const p=a.pool.current;
+ p.currentTime=start+35;a.S.at=g.start+mapping.wall(p.currentTime);a.clock.seek(a.S.at,1000);a.updateBreaks();assert.equal(a.S.detectedBreaks.has(g.id),true);
+ // Model a provider scrub on a subsequently selected picture, with the old
+ // future break evidence still present until the discontinuity is accepted.
+ a.pool.show(g.id);a.S.program={kind:'game',id:g.id};p.currentTime=start+1;a.advanceClock(1100);a.advanceClock(4000);
+ a.S.games=a.S.archive.sample(a.S.at,a.S.archive.sessions[a.S.day].gameIds);a.updateBreaks();assert.equal(a.S.detectedBreaks.has(g.id),false);
+});
+
+test('editing the lineup retains game-level break evidence and user-reported commercial timers',()=>{
+ const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.selectGame('A');a.S.breaks.set('other',91000);
+ a.S.live.feed.push([{...game,score:[7,0]}],970);a.step(1250);assert.equal(a.pool.visible,null);
+ a.useRoster([{name:'Daniel Jones',team:'IND',position:'QB'}],{teamName:'Updated'});a.step(1500);
+ assert.equal(a.excluded().has('A'),true);assert.equal(a.excluded().has('other'),true);assert.equal(a.pool.visible,null);
+});
+test('changing live delay discards break evidence from the old point in the feed',()=>{
+ const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.selectGame('A');
+ a.S.live.feed.push([{...game,score:[7,0]}],980);a.saved.delay=0;a.step(1250);assert.equal(a.pool.visible,null);
+ a.el('optDelay').onchange({target:{value:60}});a.step(1500);assert.equal(a.excluded().has('A'),false);assert.equal(a.pool.visible,'A');
 });

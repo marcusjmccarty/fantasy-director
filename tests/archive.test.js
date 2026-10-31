@@ -220,7 +220,7 @@ test('between snaps the feed shows the upcoming situation and skips stoppage row
  assert.equal(s.possession,1,'the ball has changed hands');
  assert.equal(s.down,1);assert.equal(s.distance,10);assert.equal(s.yardsToGoal,54);
  assert.equal(s.downDistance,'1st & 10');assert.equal(s.special,false);
- assert.equal(s.nextSnapIn,13);
+ assert.equal(s.nextSnapIn,176,'next football snap, not the timeout marker');
  assert.deepEqual(s.score,[0,0]);
  assert.match(s.lastPlay,/^D\.Maye sacked/);
 });

@@ -2,6 +2,8 @@
 
 Baseline: `7ac7dc38b2279e4783e3d7d17ef145916a3dc178`.
 
+Historical revision. The [commercial logic follow-up](commercial-logic-follow-up.md) supersedes the ten-second grace for video breaks and the behavior that kept a lone commercial on screen; it also fixes compressed scoring-break transitions.
+
 This revision responds to the reported Zay Flowers cutaway, a commercial that
 stayed on screen, the request for a structural interface overhaul, and the
 requirement that a viewer's game choice takes priority over automatic ranking.

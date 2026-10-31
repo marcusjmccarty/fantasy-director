@@ -50,16 +50,16 @@ export function sampleGame(game,at,types){
  // Never below the scoring summary: ESPN's marker rows can carry a stale pre-conversion tally.
  const score=[Math.max(p[F.AWAY],tally?.away??0),Math.max(p[F.HOME],tally?.home??0)];
  if(!next&&age>20)return {...base,state:'post',phase:'final',score,possession:-1,period:p[F.PERIOD],detail:'Final',scores,lastPlay:marker[F.TEXT]};
- const gap=next?next[F.T]-p[F.T]:Infinity,nextType=next?types[next[F.TYPE]]:'';
  const window=playWindow(type,p[F.TEXT]),live=window>0&&age<window;
  // Between snaps the feed already shows the upcoming situation (past any stoppage rows).
  let k=i+1;while(plays[k]&&STOPPAGE.test(types[plays[k][F.TYPE]]))k++;
  const upcoming=plays[k];
+ const gap=upcoming?upcoming[F.T]-p[F.T]:Infinity,nextType=upcoming?types[upcoming[F.TYPE]]:'';
  const s=live||!upcoming?p:upcoming,sType=live||!upcoming?type:types[upcoming[F.TYPE]];
  let phase=live?'play':'live',breakKind=null;
  if(!live&&next){
-  const untilSnap=next[F.T]-rel;
-  const scored=game.scores.some(x=>x.i===i);
+  const untilSnap=(upcoming||next)[F.T]-rel;
+  const scored=game.scores.some(x=>x.i===first+group.indexOf(p));
   if(markerType==='End of Half'){phase='break';breakKind='halftime';}
   else if(untilSnap>SETTLE&&STOPPAGE.test(markerType)){phase='break';breakKind=/End Period|End of Regulation/.test(markerType)?'quarter':/Two-minute/.test(markerType)?'two-minute':'timeout';}
   else if(untilSnap>SETTLE&&scored&&age>25){phase='break';breakKind='score';}
@@ -72,7 +72,7 @@ export function sampleGame(game,at,types){
   special:SPECIAL.test(sType)||down<=0,period,clock:live?p[F.CLOCK]:(next?.[F.CLOCK]??p[F.CLOCK]),
   detail:phase==='break'?breakLabel(breakKind,period):`Q${period>4?'OT':period} ${live?p[F.CLOCK]:(next?.[F.CLOCK]??'')}`.trim(),
   downDistance:down&&!SPECIAL.test(sType)?`${ordinal(down)} & ${ytg!==null&&s[F.DISTANCE]>=ytg?'Goal':s[F.DISTANCE]}`:'',
-  lastPlay:live?p[F.TEXT]:marker[F.TEXT],playType:live?type:markerType,playIndex:first+group.indexOf(p),playAge:age,playEndsIn:live?window-age:0,nextSnapIn:next?next[F.T]-rel:null,scores};
+  lastPlay:live?p[F.TEXT]:marker[F.TEXT],playType:live?type:markerType,playIndex:first+group.indexOf(p),playAge:age,playEndsIn:live?window-age:0,nextSnapIn:upcoming?upcoming[F.T]-rel:null,scores};
 }
 function breakLabel(kind,period){return {halftime:'Halftime',quarter:`End of Q${period-1||1}`,'two-minute':'Two-minute warning',timeout:'Timeout',score:'After the score',stoppage:'Break'}[kind]||'Break';}
 
