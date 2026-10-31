@@ -62,7 +62,7 @@ export function liveClipCandidates(item,clips,games,{now=Date.now(),used=new Map
   // Same-player, same-distance repeat scores cannot be distinguished without
   // additional evidence. Do not turn one clip into two different replays.
   const possible=scores.filter(s=>clipMatchesScore(clip,s,{requireDistance:unscoped&&mentionedTeams(clip,game).length<2}));
-  if(possible.length!==1)continue;
+  if(possible.length!==1||item.score.id&&possible[0].id!==item.score.id)continue;
   result.push({...clip,gameId:game.id,association:unscoped?(clip.publishedAt?'time-team-score':'season-week-teams-score'):'provider-game'});
  }
  return result.sort((a,b)=>Number(!!b.mediaUrl)-Number(!!a.mediaUrl)||Number(!!b.description)-Number(!!a.description)||String(a.id).localeCompare(String(b.id)));

@@ -34,6 +34,7 @@ test('explicit publication and season/week fields survive while malformed entrie
  const s=server(),page=playlist([null,{}, {...clip,publishDate:Date.parse(pub)/1000,description:'Week 8 of the 2026 NFL season',tags:[null,'bad',...clip.tags]}]);
  const rows=s.parseNFLCatalog(page);assert.equal(rows.length,1);assert.equal(rows[0].publishedAt,Date.parse(pub));assert.equal(rows[0].season,2026);assert.equal(rows[0].week,8);
  assert.equal(s.parseNFLCatalog('<script id="video-config-bad">bad JSON</script>').length,0);
+ assert.equal(s.parseNFLCatalog('<script id="video-config-null">null</script>').length,0);
 });
 test('live catalog enrichment is bounded, tolerates page failures and shares its pending request/cache',async()=>{
  const s=server(),clips=Array.from({length:12},(_,i)=>({...clip,id:`aaaaaaaa-aaaa-aaaa-aaaa-${String(i).padStart(12,'0')}`,slug:`touchdown-${i}`,title:`Touchdown ${i}`})),calls=[];

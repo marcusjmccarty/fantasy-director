@@ -45,7 +45,7 @@ const clock=new Clock(),director=new Director(),coverage=new Coverage(),nfl=new 
 const pool=new PlayerPool($('layers'),{capacity:3,
  onAd:(key,on)=>{if(on)S.ads.add(key);else S.ads.delete(key);render();},
  onClose:key=>S.ads.delete(key),
- onEnded:key=>{if(S.highlight?.src.key===key)finishHighlight();},
+ onEnded:key=>{if(S.highlight?.src.key===key)finishHighlight({ended:true});},
  onError:(key,error)=>{if(S.highlight?.src.key===key){failHighlight(error.message);return;}cool(key,error.message);},
  onAudioLocked:key=>{if(key===pool.visible){if(S.audioAsked>=1)toast('The provider only unmutes from a click inside its own player: hover the video and use its speaker button.','warn');render();}}
 });
@@ -126,15 +126,16 @@ function step(now){
  retryMissedReplays();
  for(const item of coverage.queue)prepareReplay(item);
  if(!S.started||!S.playing)return;
- updateHighlight(now);
+ // Decide whether live action needs the screen before revealing a loading clip.
+ if(S.highlight?.playing)updateHighlight(now);
  const blocked=excluded();
  const queue=coverage.queue.filter(q=>S.sources.get(q.id)?.status==='ready');
  const current=S.highlight&&!S.highlight.done?{kind:'highlight',id:S.highlight.item.id}:S.highlight?.done?{kind:'game',id:S.highlight.returnTo}:S.program.kind==='game'?{kind:'game',id:S.program.id}:{};
  const decision=S.pinned&&gameState(S.pinned)?.state==='in'&&!blocked.has(S.pinned)&&hasRoster(gameState(S.pinned),roster())?{kind:'game',id:S.pinned,reason:'Pinned by you'}:
   director.decide({games:S.games,roster:roster(),at:S.at,current,excluded:blocked,queue,includeDefense:saved.includeDefense,recentScore});
  S.decision=decision;
- if(decision.kind==='highlight'){if(!S.highlight||S.highlight.done)startHighlight(decision.id);}
- else if(decision.kind==='game'){if(S.highlight&&!S.highlight.done&&S.highlight.playing)finishHighlight();if(!S.highlight?.playing||S.highlight.done)cutTo(decision.id,now);}
+ if(decision.kind==='highlight'){if(!S.highlight||S.highlight.done)startHighlight(decision.id);if(S.highlight&&!S.highlight.playing)updateHighlight(now);}
+ else if(decision.kind==='game'){if(S.highlight&&!S.highlight.done&&!S.highlight.playing)closeHighlight();cutTo(decision.id,now);}
  else if(decision.kind==='standby'){if(S.highlight){S.highlight.done=true;closeHighlight();}S.pending=null;if(S.program.kind!=='standby'){S.program={kind:'standby'};pool.hide();}}
  if(now-S.lastWarm>1000){S.lastWarm=now;warm(blocked);}
  nudge(now);
@@ -166,6 +167,8 @@ function cutTo(id,now){
 }
 function commit(id){
  const was=S.program.kind==='game'?S.program.id:null,confirming=S.pending?.id===id;
+ // Keep an unfinished replay moving until the replacement picture is ready.
+ if(S.highlight?.playing&&!S.highlight.done)finishHighlight();
  if(picture(id)==='video'){pool.show(id);if(S.highlight)closeHighlight();}else{pool.hide();if(S.highlight)closeHighlight();}
  S.program={kind:'game',id,since:S.at};S.pending=null;director.committed(S.at);
  S.unmuteHint=false;
@@ -178,8 +181,10 @@ function warm(blocked){
  const want=new Set();
  const p=S.program;if(p.kind==='game')want.add(p.id);
  if(S.pending)want.add(S.pending.id);
- if(S.highlight){want.add(S.highlight.src.key);if(S.highlight.returnTo)want.add(S.highlight.returnTo);}
- if(S.started&&S.playing){
+ if(S.highlight){want.add(S.highlight.src.key);if(S.highlight.previousKey)want.add(S.highlight.previousKey);const back=S.pending?.id||S.highlight.returnTo;if(back)want.add(back);}
+ // A transition can need three slots: outgoing clip, incoming clip, return game.
+ // Do not warm a fourth player that could evict the incoming clip.
+ if(S.started&&S.playing&&!S.highlight){
   const current=p.kind==='game'?p.id:S.highlight?.returnTo;
   const options={excluded:blocked,includeDefense:saved.includeDefense};
   const now=rank(S.games,roster(),options).filter(e=>e.game.id!==current).map(e=>e.game.id);
@@ -195,15 +200,16 @@ function warm(blocked){
   const source=sourceFor(key);if(!source)continue;
   pool.open(key,source);pool.hold(key,target(key),{play:S.playing||key===S.pending?.id});
  }
- if(pool.visible&&S.playing&&!pool.current?.wantPlay)pool.current?.play();
+ if(pool.visible&&S.playing&&!heldHighlight(pool.visible)&&!pool.current?.wantPlay)pool.current?.play();
  pool.keep(want);
 }
+function heldHighlight(key){const h=S.highlight;return h&&(h.done&&key===h.src.key||key===h.previousKey);}
 
 // ---------- missed-score replays ----------
-async function prepareReplay(item){
+async function prepareReplay(item,previous=null){
  if(S.sources.has(item.id))return;
  const pending={status:'pending'};S.sources.set(item.id,pending);
- try{const source=await replaySource(item);if(S.sources.get(item.id)!==pending)return;S.sources.set(item.id,{status:'ready',...source});}
+ try{const source=await replaySource(item);if(S.sources.get(item.id)!==pending)return;if(source.clipId&&source.clipId===previous?.clipId)Object.assign(source,{ranges:previous.ranges,resumeAt:previous.resumeAt,incompleteEnds:previous.incompleteEnds});S.sources.set(item.id,{status:'ready',...source});}
  catch(error){if(S.sources.get(item.id)!==pending)return;S.sources.set(item.id,{status:'none',reason:error.message,retryAt:Date.now()+REPLAY_RETRY_MS});coverage.drop(item.id);item.unavailable=!(S.mode==='live'&&canRetryReplay(item,S.at));item.status=item.unavailable?'missed':'waiting';render();}
 }
 function retryMissedReplays(){
@@ -220,14 +226,14 @@ async function replaySource(item){
  const failed=S.failedClips;
  const games=S.live.games.map(g=>({...g,scores:S.live.scores.get(g.id)||g.scores||[]}));
  const candidates=S.mode==='replay'?[officialClip(item,S.clips)].filter(Boolean):liveClipCandidates(item,S.liveClips,games,{used:S.usedClips,failed});
- if(S.mode==='live'){const page=liveClipCandidates(item,S.liveClips,games,{used:S.usedClips,allowUnavailable:true}).map(c=>highlightPage(c.url)).find(Boolean);if(page)item.watchUrl=page;}
+ if(S.mode==='live'){const page=liveClipCandidates(item,S.liveClips,games,{used:S.usedClips,allowUnavailable:true}).map(c=>highlightPage(c.url)).find(Boolean);item.watchUrl=page||null;}
  for(const clip of candidates.slice(0,3)){
   const page=highlightPage(clip.url);if(page)item.watchUrl=page;
   try{
-   const info={clipId:clip.id,watchUrl:page,expiresAt:clip.expiresAt||0};
-   if(clip.mediaUrl)return {...info,key:'hl:'+item.id+':'+clip.id,source:{url:clip.mediaUrl,type:'video/mp4'},start:0,duration:Math.min(45,clip.duration||30),label:'ESPN highlight',title:clip.title};
+   const info={clipId:clip.id,clip,watchUrl:page,expiresAt:clip.expiresAt||0,fullClip:true};
+   if(clip.mediaUrl)return {...info,key:'hl:'+item.id+':'+clip.id,source:{url:clip.mediaUrl,type:'video/mp4'},start:0,duration:Number(clip.duration)>0?Number(clip.duration):0,label:'ESPN highlight',title:clip.title};
    const r=await nfl.resolve(clip);
-   return {...info,expiresAt:r.expiresAt||0,key:'hl:'+item.id+':'+clip.id,source:{url:r.url,type:'application/vnd.apple.mpegurl'},start:0,duration:Math.min(45,Number(r.duration)||30),label:'NFL.com highlight',title:clip.title};
+   return {...info,expiresAt:r.expiresAt||0,key:'hl:'+item.id+':'+clip.id,source:{url:r.url,type:'application/vnd.apple.mpegurl'},start:0,duration:Number(r.duration)>0?Number(r.duration):Number(clip.duration)||0,label:'NFL.com highlight',title:clip.title};
   }catch{failed.set(clip.id,Date.now()+60000);}
  }
  if(S.mode==='live')throw new Error('No replay has been published yet.');
@@ -236,21 +242,35 @@ async function replaySource(item){
  return {key:'hl:'+item.id,source:{url:game.embed,type:'provider/ok',duration:game.recordingDuration},start:syncFor(game).media(w.from),duration:w.to-w.from,label:'Broadcast replay',title:item.score.text};
 }
 function startHighlight(id){
- const prepared=S.sources.get(id);if(prepared?.expiresAt&&prepared.expiresAt<=Date.now()+10000){S.sources.delete(id);const waiting=coverage.queue.find(q=>q.id===id);if(waiting)prepareReplay(waiting);return;}
+ const prepared=S.sources.get(id),waiting=coverage.queue.find(q=>q.id===id);
+ if(prepared&&(prepared.expiresAt&&prepared.expiresAt<=Date.now()+10000||waiting&&!validPreparedClip(waiting,prepared))){S.sources.delete(id);if(waiting)prepareReplay(waiting,prepared);return;}
  const item=coverage.take(id),src=S.sources.get(id);if(!item||!src)return;
  // Back-to-back replays: the finished one stays up until the next is playing.
  const previous=S.highlight,returnTo=previous?.returnTo??(S.program.kind==='game'?S.program.id:S.pending?.id||null);
- S.highlight={item,src,returnTo,since:performance.now(),playing:false,done:false,previousKey:previous?.src.key};S.pending=null;
+ const playStart=Math.max(src.start||0,src.resumeAt||0);
+ S.highlight={item,src,returnTo,playStart,since:performance.now(),playing:false,done:false,previousKey:previous?.src.key,previousView:previous?.playing?{item:previous.item,src:previous.src,playing:true,done:true}:previous?.previousView};S.pending=null;
  if(src.data){S.highlight.playing=true;S.highlight.until=performance.now()+src.duration*1000;pool.hide();S.program={kind:'highlight',id};render();return;}
- pool.open(src.key,src.source);pool.hold(src.key,src.start,{play:true,fixed:true});
+ // A repeated attempt must not inherit an ended or half-played video element.
+ pool.close(src.key);const slot=pool.open(src.key,src.source);slot.player.seek(playStart);pool.hold(src.key,playStart,{play:true,fixed:true});
+}
+function validPreparedClip(entry,src){
+ if(S.mode!=='live'||!src.clip)return true;
+ const clip=S.liveClips.find(c=>c.id===src.clipId)||(src.clip.association&&src.clip.association!=='provider-game'?{...src.clip,gameId:undefined}:src.clip),games=S.live.games.map(g=>({...g,scores:S.live.scores.get(g.id)||g.scores||[]}));
+ return liveClipCandidates(entry,[clip],games,{used:S.usedClips,failed:S.failedClips}).length===1;
 }
 function updateHighlight(now){
  const h=S.highlight;if(!h||h.done)return;
  if(!h.playing){
   // The replay player runs from its start while hidden; show it as soon as footage is moving inside the clip.
-  const p=pool.get(h.src.key)?.player,pos=p?p.currentTime-h.src.start:0;
-  const ready=h.src.data||p&&p.progressing&&p.target===null&&pos>=-4&&pos<=h.src.duration-Math.min(3,h.src.duration/2);
-  if(ready){if(!h.src.data)pool.show(h.src.key);else pool.hide();if(h.previousKey&&h.previousKey!==h.src.key)pool.close(h.previousKey);h.previousKey=null;h.playing=true;h.until=now+(h.src.duration-Math.max(0,pos))*1000;h.watched=0;h.lastMedia=p?.currentTime;h.checkedAt=now;h.progressAt=now;S.program={kind:'highlight',id:h.item.id};render();}
+  const p=pool.get(h.src.key)?.player,end=highlightEnd(h,p),remaining=end-h.playStart;
+  const ready=h.src.data||p&&p.progressing&&p.target===null&&p.currentTime>=h.playStart-4&&p.currentTime<=end-Math.min(1,remaining/2);
+  if(ready){
+   if(!validPreparedClip(h.item,h.src)){failHighlight('the score or clip changed while loading');return;}
+   // Native clips already buffered their opening. Rewind the hidden startup
+   // frames before revealing them, so even a two-second clip starts at its start.
+   if(p?.kind==='native'&&p.currentTime>h.playStart+.1)p.seek(h.playStart);
+   if(!h.src.data)pool.show(h.src.key);else pool.hide();if(h.previousKey&&h.previousKey!==h.src.key)pool.close(h.previousKey);h.previousKey=null;h.playing=true;h.until=now+(end-Math.max(h.playStart,p?.currentTime||0))*1000;h.watched=watchedHighlight(h);h.lastMedia=p?.currentTime;h.checkedAt=now;h.progressAt=now;S.program={kind:'highlight',id:h.item.id};render();
+  }
   else if(now-h.since>15000)failHighlight('the replay did not start');
   return;
  }
@@ -260,25 +280,37 @@ function updateHighlight(now){
  if(p&&p.currentTime>=end-.25)finishHighlight();
  else if(now-h.progressAt>15000)failHighlight('the replay stopped responding');
 }
-function highlightEnd(h,p){return Math.min(h.src.start+h.src.duration,Number.isFinite(p?.duration)?p.duration:Infinity);}
+function highlightEnd(h,p){
+ const actual=Number.isFinite(p?.duration)&&p.duration>0?p.duration:Infinity;
+ if(h.src.fullClip)return Number.isFinite(actual)?actual:h.endedAt||((h.src.duration>0)?h.src.start+h.src.duration:Infinity);
+ return Math.min(h.src.start+h.src.duration,actual);
+}
+function watchedHighlight(h){return (h.src.ranges||[]).reduce((sum,[a,b])=>sum+b-a,0);}
 // Count advancing footage, not buffering, advertisements, or a seek to the end.
 function trackHighlight(h,p,now){
  const elapsed=Math.max(0,(now-(h.checkedAt??now))/1000),delta=p?p.currentTime-h.lastMedia:0;
  if(pool.visible===h.src.key&&!p?.inAd&&p?.target===null&&delta>0&&delta<=Math.max(2,elapsed*1.5)){
-  h.watched=(h.watched||0)+Math.min(delta,elapsed+1);h.progressAt=now;
+  const from=Math.max(h.src.start,p.currentTime-Math.min(delta,elapsed+1)),to=Math.min(highlightEnd(h,p),p.currentTime);
+  if(to>from){const ranges=[...(h.src.ranges||[]),[from,to]].sort((a,b)=>a[0]-b[0]),merged=[];for(const range of ranges){const last=merged.at(-1);if(last&&range[0]<=last[1])last[1]=Math.max(last[1],range[1]);else merged.push([...range]);}h.src.ranges=merged;}
+  h.watched=watchedHighlight(h);h.progressAt=now;
  }
  h.lastMedia=p?.currentTime;h.checkedAt=now;
 }
 const item=h=>coverage.log.find(x=>x.id===h.item.id)||h.item;
 // The highlight stays on screen until the game we return to is ready.
-function finishHighlight(){
+function finishHighlight({ended=false}={}){
  const h=S.highlight;if(!h||h.done)return;
  if(!h.playing){failHighlight('the replay did not start');return;}
- const p=pool.get(h.src.key)?.player;if(!h.src.data)trackHighlight(h,p,performance.now());
- const watched=h.src.data?(performance.now()-(h.until-h.src.duration*1000))/(h.src.duration*1000):(h.watched||0)/Math.max(1,highlightEnd(h,p)-h.src.start);
- if(watched<.5&&!h.requeued){h.requeued=true;item(h).status='queued';coverage.requeue(h.item);}else item(h).status='replayed';
+ const p=pool.get(h.src.key)?.player;if(ended&&!Number.isFinite(highlightEnd(h,p)))h.endedAt=p?.currentTime;if(!h.src.data)trackHighlight(h,p,performance.now());
+ const watched=h.src.data?(performance.now()-(h.until-h.src.duration*1000))/(h.src.duration*1000):(h.watched||0)/Math.max(.001,highlightEnd(h,p)-h.src.start);
+ const reachedEnd=h.src.data?performance.now()>=h.until:p&&p.currentTime>=highlightEnd(h,p)-.25;
+ if(watched<.85||!reachedEnd){
+  if(!h.src.data&&(ended||reachedEnd)){h.src.incompleteEnds=(h.src.incompleteEnds||0)+1;if(h.src.incompleteEnds>=2){failHighlight('the clip ended without showing the full replay');return;}}
+  let resume=h.src.start||0;for(const [a,b] of h.src.ranges||[]){if(a>resume+1)break;resume=Math.max(resume,b);}h.src.resumeAt=Math.max(h.src.start||0,resume-2);
+  h.requeued=true;item(h).status='queued';coverage.requeue(h.item);
+ }else item(h).status='replayed';
  if(item(h).status==='replayed'&&h.src.clipId)S.usedClips.set(h.src.clipId,h.item.id);
- h.done=true;
+ h.done=true;p?.pause();
  if(!h.returnTo){closeHighlight();S.program={kind:'standby'};}
 }
 // A failed live clip tries another publication; archived clips fall back to the recording.
@@ -327,7 +359,7 @@ function setPlaying(playing,message){
   if(playing&&S.pausedAt!=null){const paused=performance.now()-S.pausedAt;for(const state of [S.highlight,S.pending,S.stall])if(state){for(const key of ['since','until','checkedAt','progressAt'])if(Number.isFinite(state[key]))state[key]+=paused;}S.pausedAt=null;}
   else if(!playing)S.pausedAt=performance.now();
  }
- S.playing=playing;pool.setRunning(playing);clock.set(false,performance.now());
+ S.playing=playing;pool.setRunning(playing,{resumeVisible:!heldHighlight(pool.visible)});clock.set(false,performance.now());
  // A loading highlight is hidden, so setRunning() does not resume it.
  if(playing&&S.highlight&&!S.highlight.playing&&!S.highlight.done&&!S.highlight.src.data)pool.get(S.highlight.src.key)?.player.play();
  if(playing&&!S.started){S.started=true;pool.setMuted(saved.muted);}
@@ -367,7 +399,7 @@ function render(){
  renderScreen();renderRail();renderTransport();renderSetup();renderStreams();
 }
 function renderScreen(){
- const p=S.program,h=S.highlight,game=p.kind==='game'?gameState(p.id):h?gameState(h.item.gameId):null;
+ const p=S.program,loading=S.highlight,h=loading?.playing?loading:loading?.previousView&&pool.visible===loading.previousKey?loading.previousView:null,game=p.kind==='game'?gameState(p.id):h?gameState(h.item.gameId):null;
  const data=p.kind==='game'&&picture(p.id)==='data'||h?.src.data&&h.playing;
  $('fieldView').hidden=!data||!game;
  $('layers').hidden=!!data;
@@ -376,9 +408,10 @@ function renderScreen(){
  let overlay=null;
  if(!S.started)overlay={eyebrow:S.mode==='replay'?`WEEK 7 REPLAY · ${day()?.label.toUpperCase()||''}`:'LIVE',title:'Your starters. One channel.',text:`Following ${saved.teamName}: ${starterCount(roster().length)}. The channel follows your starters’ teams, favors drives near the end zone, and replays missed scores when footage is available.`,button:S.mode==='replay'?'Watch replay':!hasLineup()?'Choose your players':'Start watching',action:S.mode==='live'&&!hasLineup()?'lineup':'start'};
  if(!S.started&&S.mode==='live'){overlay.text=!hasLineup()?'First choose your fantasy lineup. Then add your game streams below and press Start watching.':`Following ${saved.teamName} · ${starterCount(roster().length)}. Add your stream links below. Without a link, you’ll see a game tracker instead of video.`;}
+ else if(S.started&&loading&&!loading.playing&&!pool.visible&&p.kind!=='game')overlay={eyebrow:'REPLAY',title:'Getting your replay ready…',text:'Your games will continue if this clip cannot play.',spinner:true};
  else if(S.started&&(p.kind==='idle'||S.pending&&!pool.visible||p.kind==='game'&&!pool.visible&&picture(p.id)==='video'))overlay={eyebrow:'TUNING IN',title:S.pending?`Opening ${esc(gameState(S.pending.id)?.name||'the game')}…`:'Finding your players…',text:'The picture appears as soon as the game is playing.',spinner:true};
- else if(p.kind==='standby'&&!h&&S.games.some(g=>g.state==='in'&&hasRoster(g,roster())))overlay={eyebrow:'VIDEO UNAVAILABLE',title:'Your game video is unavailable.',text:S.mode==='live'?'Try another stream link below, or retry your current links.':'Retry the video, or choose the game tracker in Settings.',button:'Retry video',action:'retry'};
- else if(p.kind==='standby'&&!h){const next=nextKickoff();overlay={eyebrow:'STANDBY',title:'None of your starters are playing right now.',text:next?`Next up: ${next.name} at ${timeLabel(next.start)} ET.`:S.mode==='live'?(S.live.error?'Game updates are unavailable. We will keep trying.':S.games.length?'Your games will appear here when they start. You can add their streams below now.':'Getting the latest NFL schedule…'):'Your starters are done for this slate.',button:S.mode==='replay'&&next?'Skip to kickoff':null,action:'kickoff'};}
+ else if(p.kind==='standby'&&!loading&&S.games.some(g=>g.state==='in'&&hasRoster(g,roster())))overlay={eyebrow:'VIDEO UNAVAILABLE',title:'Your game video is unavailable.',text:S.mode==='live'?'Try another stream link below, or retry your current links.':'Retry the video, or choose the game tracker in Settings.',button:'Retry video',action:'retry'};
+ else if(p.kind==='standby'&&!loading){const next=nextKickoff();overlay={eyebrow:'STANDBY',title:'None of your starters are playing right now.',text:next?`Next up: ${next.name} at ${timeLabel(next.start)} ET.`:S.mode==='live'?(S.live.error?'Game updates are unavailable. We will keep trying.':S.games.length?'Your games will appear here when they start. You can add their streams below now.':'Getting the latest NFL schedule…'):'Your starters are done for this slate.',button:S.mode==='replay'&&next?'Skip to kickoff':null,action:'kickoff'};}
  else if(p.kind==='game'&&S.ads.has(p.id))overlay={eyebrow:'COMMERCIAL',title:'Skipping the break.',text:'Your game resumes as soon as the provider’s ad ends. Another of your games takes over if one is on.',spinner:true,dim:true};
  const o=$('overlay');o.hidden=!overlay;o.classList.toggle('dim',!!overlay?.dim);
  const wantsSound=!overlay&&!saved.muted&&!!pool.current?.audioLocked&&S.playing;
@@ -398,7 +431,7 @@ function renderScreen(){
  if(h?.playing){
   const d=describeScore(h.item.score,game);
   $('lowerKicker').textContent=`${h.src.label} · ${d.label}`;$('lowerKicker').className='lower-kicker replay';
-  $('lowerMain').textContent=d.text;$('lowerMeta').textContent=`You were on another game · ${d.line}`;return;
+  $('lowerMain').textContent=d.text;$('lowerMeta').textContent=h.done?(loading?.previousKey?'Next replay is loading…':'Returning to your games…'):`Score replay · ${d.line}`;return;
  }
  const entry=S.decision?.entry?.game?.id===game.id?S.decision.entry:rank([game],roster(),{includeDefense:saved.includeDefense})[0];
  const players=entry?.players||[];
@@ -448,7 +481,7 @@ function renderRail(){
  $('rosterNote').textContent=S.mode==='live'&&!hasLineup()?'Choose your lineup to see your starters.':saved.teamName;
  // scores
  put('scores',coverage.log.map(x=>{
-  const st=x.status==='replayed'?['Replayed','go']:x.status==='waiting'?['Waiting for replay','amber']:x.status==='queued'||coverage.queue.some(q=>q.id===x.id)?[S.highlight?.item.id===x.id?'Playing':'Replay up next','amber']:x.unavailable||x.status==='missed'?['No footage yet','muted']:x.seen?['Seen live','live']:x.credits.every(c=>c.role==='pat')?['Extra point','muted']:['Replay off','muted'];
+  const st=x.status==='replayed'?['Replayed','go']:x.status==='waiting'?['Waiting for replay','amber']:x.status==='queued'||coverage.queue.some(q=>q.id===x.id)?[S.highlight?.item.id===x.id?(S.highlight.playing?'Playing':'Loading replay'):'Replay up next','amber']:x.unavailable||x.status==='missed'?['No footage yet','muted']:x.seen?['Seen live','live']:x.credits.every(c=>c.role==='pat')?['Extra point','muted']:['Replay off','muted'];
   const page=highlightPage(x.watchUrl),gamePage=!page&&S.mode==='live'&&['waiting','missed'].includes(x.status)&&/^\d+$/.test(x.gameId)?'https://www.espn.com/nfl/game/_/gameId/'+x.gameId:null;
   const destination=page||gamePage,publisher=page&&new URL(page).hostname.endsWith('nfl.com')?'NFL.com':'ESPN',label=page?'Watch on '+publisher:'Open game on ESPN';
   const link=destination?`<a class="score-link" href="${esc(destination)}" target="_blank" rel="noopener noreferrer" aria-label="${label} (opens a new tab)">${label} ↗</a>`:'';

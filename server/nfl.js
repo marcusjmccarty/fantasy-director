@@ -73,7 +73,7 @@ export function parseNFLCatalog(page,teamMap={},pageURL=''){
  for(const script of page.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/gi)){
   if(!/\bid=["']video-config-/.test(script[1]))continue;
   let data;try{data=JSON.parse(script[2]);}catch{continue;}
-  for(const item of Array.isArray(data.playlist)?data.playlist:[]){
+  for(const item of Array.isArray(data?.playlist)?data.playlist:[]){
    if(!item||!/^[a-f\d-]{36}$/i.test(item.id||'')||!/^\d+$/.test(item.mcpID||'')||!/^[-a-z\d]+$/i.test(item.slug||''))continue;
    const tags=Array.isArray(item.tags)?item.tags.filter(t=>t&&typeof t==='object'):[],title=nflText(item.title||'NFL highlight').slice(0,250),url='https://www.nfl.com/videos/'+item.slug;
    const matches=metadata.filter(v=>nflPageURL(v.url||v['@id'])===url||!nflPageURL(v.url||v['@id'])&&nflText(v.name)===title),meta=matches.length===1?matches[0]:!matches.length&&url===pageURL&&metadata.length===1&&!nflPageURL(metadata[0].url||metadata[0]['@id'])?metadata[0]:null;

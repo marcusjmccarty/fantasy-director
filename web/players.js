@@ -64,7 +64,7 @@ export class PlayerPool{
  setMuted(value){this.muted=!!value;const slot=this.slots.get(this.visible);if(slot)slot.player.muted=this.muted;}
  // The viewer asked for sound on the visible player (inside their gesture): try the unmute again.
  retryAudio(){const p=this.current;if(!p||this.muted)return false;p.audioLocked=false;p.muted=false;return true;}
- setRunning(value){this.running=!!value;if(!value)for(const s of this.slots.values())s.player.pause();else if(this.visible)this.slots.get(this.visible)?.player.play();}
+ setRunning(value,{resumeVisible=true}={}){this.running=!!value;if(!value)for(const s of this.slots.values())s.player.pause();else if(this.visible&&resumeVisible)this.slots.get(this.visible)?.player.play();}
  // Release players nobody wants; never the visible one. Providers keep
  // playing muted meanwhile, since a paused provider restarts from its own
  // remembered position.

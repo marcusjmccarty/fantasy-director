@@ -1,5 +1,10 @@
 # Live highlight integration — October 31, 2026
 
+Follow-up: [Highlight playback audit](highlight-playback-audit.md) corrects
+transition, interruption, completion and stale-match defects missed in this
+pass. Its 435-test results supersede the test count below; provider and real
+browser verification limits still apply.
+
 Baseline: `f85ac2d59878a287d8ee6b565ede0744a1590ecd`.
 This follow-up addresses the NFL live-catalog gap found in the
 [full logic audit](full-logic-audit.md). It adds conditional matching and

@@ -34,6 +34,10 @@ test('two similar scores or two possible matchups are ambiguous rather than two 
  const repeated={...score,id:'A:2',at:score.at+300};assert.equal(match(clip,[{...game,scores:[score,repeated]}]).length,0);
  assert.equal(match(clip,[game,{...game,id:'B'}]).length,0);
 });
+test('a corrected score cannot borrow the unique clip match belonging to another score',()=>{
+ const corrected={...score,text:'Jonathan Taylor 9 Yd Rush'},other={...score,id:'A:other'};
+ assert.equal(match(clip,[{...game,scores:[corrected,other]}]).length,0);
+});
 test('game-specific ESPN clips use descriptions while preserving expiry and device restrictions',()=>{
  const c={...clip,kind:'clip',gameId:'A',publishedAt:0,mediaUrl:'https://espnmedia-cdn.akamaized.net/a.mp4'};assert.equal(match(c).length,1);
  for(const patch of [{gameId:'B'},{expiresAt:now-1},{embargoAt:now+1},{desktopAllowed:false},{inlinePlayable:false}])assert.equal(match({...c,...patch}).length,0);

@@ -31,6 +31,11 @@ class Element{
  querySelector(selector){return this.querySelectorAll(selector)[0]||new Element();}
  append(e){this.children.push(e);}replaceChildren(){this.children=[];}setAttribute(n,v){this[n]=v;}removeAttribute(n){delete this[n];}addEventListener(){}focus(){this.focused=true;}showModal(){this.open=true;}close(){this.open=false;}remove(){}
 }
+class Video extends Element{
+ constructor(){super();this.events=new Map();this.paused=true;this.currentTime=0;this.duration=NaN;this.readyState=4;this.seeking=false;this.calls=[];}
+ addEventListener(name,callback){this.events.set(name,callback);}emit(name){this.events.get(name)?.();}
+ play(){this.calls.push('play');this.paused=false;return Promise.resolve();}pause(){this.calls.push('pause');this.paused=true;}load(){}
+}
 class Pool{
  constructor(host){this.host=host;this.slots=new Map();this.visible=null;this.current=null;this.closed=[];}
  destroy(){this.slots.clear();this.visible=null;this.current=null;this.destroyed=true;}close(id){this.closed.push(id);this.slots.delete(id);if(this.visible===id){this.visible=null;this.current=null;}}
@@ -45,14 +50,16 @@ class Media{
  play(){this.wantPlay=true;}pause(){this.wantPlay=false;}seek(at){this.currentTime=at;}near(at){return this.progressing&&Math.abs(this.currentTime-at)<3;}
  destroy(){this.wantPlay=false;this.destroyed=true;}
 }
-function app(fetcher=async()=>Response.json({events:[]}),{media=false,stored=null,storageBlocked=false}={}){
+function app(fetcher=async()=>Response.json({events:[]}),{media=false,native=false,stored=null,storageBlocked=false}={}){
  const elements=new Map([...html.matchAll(/id="([^"]+)"/g)].map(m=>[m[1],new Element()]));
- const document={getElementById(id){assert.ok(elements.has(id),`Missing UI element: ${id}`);return elements.get(id);},querySelectorAll(){return [];},querySelector(){return new Element();},createElement(){return new Element();},addEventListener(){},body:new Element()};
+ const document={getElementById(id){assert.ok(elements.has(id),`Missing UI element: ${id}`);return elements.get(id);},querySelectorAll(){return [];},querySelector(){return new Element();},createElement(tag){return tag==='video'?new Video():new Element();},addEventListener(){},body:new Element()};
  const time={now:1000};
- class MediaPool extends PlayerPool{constructor(host,options){super(host,{...options,now:()=>time.now,create:source=>new Media(source)});}}
+ class MediaPool extends PlayerPool{constructor(host,options){super(host,{...options,now:()=>time.now,create:source=>native?new ctx.Native(source):new Media(source)});}}
  const storage=new Map(stored===null?[]:[['fantasy-stream-v3',JSON.stringify(stored)]]);
  const ctx={...archive,...sync,...director,...coverage,...replays,...live,...scoring,...roster,...highlights,...preferences,...liveHighlights,PlayerPool:media?MediaPool:Pool,NFLSourceCatalog:class{},document,window:{addEventListener(){}},localStorage:{getItem:key=>storage.get(key)||null,setItem(key,value){if(storageBlocked)throw new Error('Storage unavailable');storage.set(key,value);}},performance:{now:()=>time.now},setTimeout:()=>0,clearTimeout(){},setInterval:()=>0,fetch:fetcher,AbortSignal,Response,URL,Date,console};
- vm.createContext(ctx);vm.runInContext(script+'\n globalThis.a={S,pool,director,coverage,clock,step,advanceClock,excluded,cutTo,warm,startHighlight,updateHighlight,finishHighlight,syncFor,nudge,nfl,setMode,setPlaying,setDay,seekTo,replaySource,useRoster,importLeague,pollLive,pollLiveClips,prepareReplay,retryMissedReplays,failHighlight,render,init,roster,get saved(){return saved;}};',ctx);
+ vm.createContext(ctx);
+ if(native){ctx.attachMediaSource=async()=>null;const code=readFileSync(new URL('../web/native-player.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace('export class NativePlayer','class NativePlayer');vm.runInContext(code+'\nglobalThis.Native=NativePlayer;',ctx);}
+ vm.runInContext(script+'\n globalThis.a={S,pool,director,coverage,clock,step,advanceClock,excluded,cutTo,warm,startHighlight,updateHighlight,finishHighlight,syncFor,nudge,nfl,setMode,setPlaying,setDay,seekTo,replaySource,useRoster,importLeague,pollLive,pollLiveClips,prepareReplay,retryMissedReplays,failHighlight,render,init,roster,get saved(){return saved;}};',ctx);
  return {...ctx.a,time,storage, get saved(){return ctx.a.saved;},el:id=>elements.get(id)};
 }
 const player={name:'Jonathan Taylor',team:'IND',position:'RB'};
@@ -348,6 +355,95 @@ function playingHighlight(){
  a.coverage.log.push(entry);a.coverage.queue.push(entry);a.S.sources.set(entry.id,{key:'hl:test',source:{url:'https://example.com/clip.mp4'},start:0,duration:10,label:'Official highlight'});a.startHighlight(entry.id);a.updateHighlight(1000);
  return {a,entry,p:a.pool.current};
 }
+test('watchability: a half-watched interruption stays queued and resumes near the interruption',()=>{
+ const {a,entry,p}=playingHighlight();for(let second=1;second<=6;second++){a.time.now=1000+second*1000;p.currentTime=second;a.updateHighlight(a.time.now);}
+ a.finishHighlight();assert.equal(entry.status,'queued');assert.equal(a.coverage.queue[0].id,entry.id);
+ a.startHighlight(entry.id);const next=a.pool.get(a.S.highlight.src.key).player;assert.ok(next.currentTime>=4&&next.currentTime<=6,'resume with context, instead of repeating the whole opening');
+ a.updateHighlight(a.time.now);for(let pos=next.currentTime+1;pos<=10;pos++){a.time.now+=1000;next.currentTime=pos;a.updateHighlight(a.time.now);}assert.equal(entry.status,'replayed');
+});
+test('watchability: replaying after a jump to the end cannot reuse an ended player at its end',()=>{
+ const {a,entry,p}=playingHighlight();a.S.highlight.returnTo='A';p.currentTime=10;a.time.now=1250;a.updateHighlight(1250);assert.equal(entry.status,'queued');a.startHighlight(entry.id);
+ assert.ok(a.pool.get(a.S.highlight.src.key).player.currentTime<1);a.updateHighlight(1250);assert.equal(a.S.highlight.playing,true);
+});
+test('watchability: back-to-back highlights keep the incoming player inside a full pool',()=>{
+ const {a}=playingHighlight();a.useRoster([player,{name:'CeeDee Lamb',team:'DAL',position:'WR'}],{teamName:'Two games'});
+ // Install the transition after the intentional lineup reset.
+ const b={...game,id:'B',teams:[{abbr:'DAL'},{abbr:'NYG'}]};a.S.games=[game,b];a.saved.streams={'IND-MIN':'https://example.test/a.mp4','DAL-NYG':'https://example.test/b.mp4'};a.S.started=true;a.S.playing=true;
+ a.pool.open('hl:old',{url:'https://example.test/old.mp4'});a.pool.show('hl:old');a.pool.open('A',{url:a.saved.streams['IND-MIN']});a.pool.open('B',{url:a.saved.streams['DAL-NYG']});a.S.program={kind:'highlight',id:'old'};
+ a.S.highlight={item:{id:'old'},src:{key:'hl:old'},returnTo:'A',playing:true,done:true};
+ const entry={id:'next',gameId:'A',score:{text:'Next score'}};a.coverage.queue.push(entry);a.S.sources.set('next',{key:'hl:next',source:{url:'https://example.test/next.mp4'},start:0,duration:10});a.startHighlight('next');a.warm(new Set());
+ assert.ok(a.pool.get('hl:next'),'warming games must not evict the incoming clip');assert.equal(a.pool.visible,'hl:old');a.updateHighlight(2000);assert.equal(a.pool.visible,'hl:next');assert.ok(a.pool.get('A'),'return game stays warm');assert.equal(a.pool.get('hl:old'),null);
+});
+test('watchability: completed highlights remain paused while a return stream is loading',()=>{
+ const {a,p}=playingHighlight();a.S.highlight.returnTo='A';for(let second=1;second<=10;second++){a.time.now=1000+second*1000;p.currentTime=second;a.updateHighlight(a.time.now);}
+ assert.equal(a.S.highlight.done,true);assert.equal(p.wantPlay,false);a.warm(new Set());assert.equal(p.wantPlay,false);a.setPlaying(false);a.setPlaying(true);assert.equal(p.wantPlay,false);
+});
+test('watchability: an unfinished clip keeps moving until the urgent return stream is actually ready',()=>{
+ const {a,entry,p}=playingHighlight();a.saved.streams={'IND-MIN':'https://example.test/slow-return.mp4'};const back=a.pool.open('A',{url:a.saved.streams['IND-MIN']}).player;back.moving=false;a.S.highlight.returnTo='A';a.director.decide=()=>({kind:'game',id:'A'});
+ p.currentTime=1;a.time.now=2000;a.step(2000);assert.equal(a.S.highlight.done,false);assert.equal(p.wantPlay,true);assert.equal(a.pool.current,p);assert.equal(a.S.pending.id,'A');
+ back.moving=true;p.currentTime=2;a.time.now=3000;a.step(3000);assert.equal(a.pool.current,back);assert.equal(p.destroyed,true);assert.equal(entry.status,'queued');
+});
+test('watchability: a newly urgent game prevents a loading highlight from flashing on screen',()=>{
+ const a=app(undefined,{media:true});ready(a);a.setPlaying(true);a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.S.program={kind:'game',id:'A'};a.pool.open('A',{url:a.saved.streams['IND-MIN']});a.pool.show('A');
+ const entry={id:'clip',gameId:'A',score:{text:'Score'}};a.coverage.queue.push(entry);a.S.sources.set(entry.id,{key:'hl:clip',source:{url:'https://example.test/clip.mp4'},start:0,duration:10});a.startHighlight(entry.id);
+ const shown=[],show=a.pool.show.bind(a.pool);a.pool.show=id=>{shown.push(id);return show(id);};a.director.decide=()=>({kind:'game',id:'A'});a.step(2000);
+ assert.equal(shown.includes('hl:clip'),false);assert.equal(a.pool.visible,'A');assert.equal(a.S.highlight,null);assert.equal(a.coverage.queue[0].id,entry.id);
+});
+test('watchability: a native clip uses its actual duration instead of ending at a guessed thirty seconds',async()=>{
+ const a=app(undefined,{media:true}),{item,clip}=liveReplay(a);a.S.liveClips=[clip];a.nfl.resolve=async()=>({url:'https://dcs-vod.mp.lura.live/vod/full.m3u8'});await a.prepareReplay(item);a.startHighlight(item.id);
+ const p=a.pool.get(a.S.highlight.src.key).player;p.duration=60;a.updateHighlight(1000);for(let second=1;second<=31;second++){a.time.now=1000+second*1000;p.currentTime=second;a.updateHighlight(a.time.now);}
+ assert.equal(a.S.highlight?.done,false);assert.notEqual(item.status,'replayed');for(let second=32;second<=60;second++){a.time.now=1000+second*1000;p.currentTime=second;a.updateHighlight(a.time.now);}assert.equal(item.status,'replayed');
+});
+test('watchability: a real native player reveals the opening and returns to the game after ended',async()=>{
+ const a=app(undefined,{media:true,native:true}),{item,clip}=liveReplay(a);a.saved.streams={'IND-MIN':'https://example.test/live.mp4'};a.setPlaying(true);
+ const livePlayer=a.pool.open('A',{url:a.saved.streams['IND-MIN']}).player;await livePlayer.ready;livePlayer.play();livePlayer.element.currentTime=1;livePlayer.element.emit('timeupdate');a.cutTo('A',1000);assert.equal(a.pool.visible,'A');
+ a.S.liveClips=[clip];a.nfl.resolve=async()=>({url:'https://dcs-vod.mp.lura.live/vod/tiny.m3u8',duration:2});await a.prepareReplay(item);a.startHighlight(item.id);const p=a.pool.get(a.S.highlight.src.key).player;await p.ready;p.element.duration=2;
+ a.time.now=1500;p.element.currentTime=.5;p.element.emit('timeupdate');a.updateHighlight(1500);assert.equal(a.pool.current,p);assert.equal(p.currentTime,0,'the hidden half-second must not be skipped');
+ for(let i=1;i<=8;i++){a.time.now+=250;p.element.currentTime=i/4;p.element.emit('timeupdate');if(i<8)a.updateHighlight(a.time.now);}
+ p.element.emit('ended');assert.equal(item.status,'replayed');assert.equal(p.wantPlay,false);const playCalls=p.element.calls.filter(c=>c==='play').length;a.setPlaying(false);a.setPlaying(true);assert.equal(p.element.calls.filter(c=>c==='play').length,playCalls,'resuming the channel must not restart an ended native clip');livePlayer.element.currentTime=4;livePlayer.element.emit('timeupdate');a.cutTo('A',a.time.now);assert.equal(a.pool.current,livePlayer);assert.equal(p.destroyed,true);assert.equal(livePlayer.wantPlay,true);
+});
+test('watchability: an unknown-duration clip waits for ended instead of an invented cutoff',async()=>{
+ const a=app(undefined,{media:true}),{item,clip}=liveReplay(a);a.S.liveClips=[{...clip,duration:0}];a.nfl.resolve=async()=>({url:'https://dcs-vod.mp.lura.live/vod/unknown.m3u8'});await a.prepareReplay(item);a.startHighlight(item.id);a.updateHighlight(1000);const p=a.pool.current;
+ for(let second=1;second<=47;second++){a.time.now=1000+second*1000;p.currentTime=second;a.updateHighlight(a.time.now);}assert.equal(a.S.highlight.done,false);p.emit('ended');assert.equal(item.status,'replayed');
+});
+test('watchability: new ambiguity invalidates a prepared clip and its old publisher link',async()=>{
+ const a=app(undefined,{media:true}),{item,clip}=liveReplay(a);a.S.liveClips=[clip];a.nfl.resolve=async()=>({url:'https://dcs-vod.mp.lura.live/vod/clip.m3u8',duration:12});await a.prepareReplay(item);assert.equal(item.watchUrl,clip.url);
+ a.S.live.scores.set('A',[item.score,{...item.score,id:'A:another',at:item.at+10}]);a.startHighlight(item.id);await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(a.S.highlight,null);assert.equal(a.pool.slots.size,0);assert.equal(item.watchUrl,null);assert.equal(item.status,'waiting');
+});
+test('watchability: refreshed links retain progress only when they identify the same clip',async()=>{
+ const a=app(),{item,clip}=liveReplay(a);a.S.liveClips=[clip];a.nfl.resolve=async()=>({url:'https://dcs-vod.mp.lura.live/vod/clip.m3u8',duration:12,expiresAt:Date.now()+240000});await a.prepareReplay(item);
+ const old=a.S.sources.get(item.id);old.ranges=[[0,6]];old.resumeAt=4;old.expiresAt=Date.now()-1;a.startHighlight(item.id);await new Promise(resolve=>setImmediate(resolve));assert.equal(a.S.sources.get(item.id).resumeAt,4);assert.equal(a.S.sources.get(item.id).ranges[0][1],6);
+ a.S.sources.get(item.id).expiresAt=Date.now()-1;a.S.liveClips=[{...clip,id:'replacement'}];a.S.failedClips.set(clip.id,Date.now()+60000);a.startHighlight(item.id);await new Promise(resolve=>setImmediate(resolve));assert.equal(a.S.sources.get(item.id).clipId,'replacement');assert.equal(a.S.sources.get(item.id).resumeAt,undefined);
+});
+test('watchability: repeat interruptions do not count overlapping footage twice',()=>{
+ const {a,entry,p}=playingHighlight();for(let second=1;second<=4;second++){a.time.now+=1000;p.currentTime=second;a.updateHighlight(a.time.now);}a.finishHighlight();a.startHighlight(entry.id);a.updateHighlight(a.time.now);const next=a.pool.current;
+ for(let second=3;second<=4;second++){a.time.now+=1000;next.currentTime=second;a.updateHighlight(a.time.now);}assert.equal(a.S.highlight.watched,4);a.finishHighlight();assert.equal(entry.status,'queued');
+});
+test('watchability: repeated incomplete endings retire the clip instead of replaying forever',async()=>{
+ const a=app(undefined,{media:true}),{item,clip}=liveReplay(a);a.S.liveClips=[clip];a.nfl.resolve=async()=>({url:'https://dcs-vod.mp.lura.live/vod/broken.m3u8',duration:12});await a.prepareReplay(item);
+ for(let attempt=0;attempt<2;attempt++){a.startHighlight(item.id);a.updateHighlight(a.time.now);const p=a.pool.current;a.time.now+=250;p.currentTime=12;p.emit('ended');}
+ assert.equal(a.S.highlight,null);assert.equal(a.coverage.queue.length,0);assert.equal(item.status,'waiting');assert.ok(a.S.failedClips.get(clip.id)>Date.now());assert.equal(a.S.sources.get(item.id).status,'none');
+});
+test('watchability: back-to-back loading keeps the outgoing score label until the new clip appears',()=>{
+ const {a,entry}=playingHighlight();a.S.highlight.returnTo='A';a.S.highlight.done=true;entry.status='replayed';const previousText=entry.score.text;
+ const next={...entry,id:'next-label',score:{...entry.score,text:'Jonathan Taylor 9 Yd Rush'},status:'queued'};a.coverage.log.push(next);a.coverage.queue.push(next);a.S.sources.set(next.id,{key:'hl:next-label',source:{url:'https://example.test/next.mp4'},start:0,duration:10,label:'Official highlight'});
+ a.startHighlight(next.id);a.render();assert.equal(a.el('bugTag').textContent,'REPLAY');assert.equal(a.el('lowerMain').textContent,previousText);assert.match(a.el('scores').html,/Loading replay/);
+ a.updateHighlight(1000);assert.equal(a.el('lowerMain').textContent,next.score.text);
+});
+test('watchability: the real director completes a replay queue across urgent action and consecutive clips',()=>{
+ const a=app(undefined,{media:true});ready(a);a.saved.delay=0;a.S.coverageStart=990;a.saved.streams={'IND-MIN':'https://example.test/live.mp4'};a.setPlaying(true);
+ const entries=Array.from({length:3},(_,i)=>({id:'sequence-'+i,gameId:'A',gameName:game.name,score:{kind:'TD',text:'Jonathan Taylor '+(i+1)+' Yd Rush',players:[]},credits:[{player,role:'scorer'}],at:999,queuedAt:999,status:'queued'}));
+ for(const entry of entries){a.coverage.log.push(entry);a.coverage.queue.push(entry);a.S.sources.set(entry.id,{status:'ready',key:'hl:'+entry.id,source:{url:'https://example.test/'+entry.id+'.mp4'},start:0,duration:8,label:'Official highlight'});}
+ let returned=false,resumed=false;
+ for(let frame=0;frame<180;frame++){
+  a.time.now=1000+frame*250;a.S.at=1000+frame/4;const urgent=frame>=20&&frame<36,g={...game,phase:urgent?'play':'break',yardsToGoal:urgent?5:40};a.S.live.feed.push([g],a.S.at);
+  for(const {player:p} of a.pool.slots.values())if(p.wantPlay)p.currentTime+=.25;
+  a.step(a.time.now);if(urgent&&a.pool.visible==='A')returned=true;if(frame>=36&&a.S.highlight?.item.id===entries[0].id&&a.S.highlight.playStart>0)resumed=true;
+  if(a.S.highlight&&!a.S.highlight.src.data)assert.ok(a.pool.get(a.S.highlight.src.key),'active highlight stays in its player slot');
+ }
+ assert.equal(returned,true);assert.equal(resumed,true);assert.ok(entries.every(e=>e.status==='replayed'));assert.equal(a.coverage.queue.length,0);assert.equal(a.pool.visible,'A');
+});
 test('logic: buffering footage cannot be marked replayed by elapsed wall time',()=>{
  const {a,entry,p}=playingHighlight();p.moving=false;a.time.now=12000;a.updateHighlight(12000);
  assert.notEqual(entry.status,'replayed');assert.equal(a.S.highlight?.done,false);
