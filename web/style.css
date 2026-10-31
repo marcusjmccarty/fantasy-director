@@ -260,3 +260,8 @@ dialog hr{width:100%;border:0;border-top:1px solid var(--line-2);margin:12px 0 0
  .setup-heading{align-items:flex-start}.stream-actions button{flex:1}
 }
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+.scores li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px 8px;font-size:16px}
+.scores .tag{grid-column:2;justify-self:start;max-width:100%;white-space:normal}
+.s-text small{font-size:14px}
+.score-link{display:inline-flex;align-items:center;min-height:44px;max-width:100%;padding:4px 10px;margin-top:6px;border:1px solid var(--line-2);border-radius:8px;color:var(--go);font-size:16px;font-weight:700;text-decoration:underline;text-underline-offset:3px}
+.score-link:focus-visible{outline:3px solid var(--go);outline-offset:3px}

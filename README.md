@@ -37,7 +37,7 @@ A live stream runs 20–90 s behind the real game, and ESPN runs its own way beh
 
 ## Missed scores (`web/coverage.js`, `web/replays.js`)
 
-Coverage records intervals confirmed by controllable players as progressing on screen. Live trackers and generic page embeds cannot confirm watched video, so they do not suppress missed-score replays. Rewinding preserves the union of watched intervals. This is a playback estimate, not video recognition. Nine seconds after any scoring play by one of your starters (scorer, passer, kicker, D/ST, two-point), it checks whether the snap was on screen. If not, the score joins the replay queue. At the next quiet moment (nothing critical anywhere) the channel plays the best footage it has: a matching game-scoped clip, or in archive mode the moment cut from the game’s own recording. Live replays currently rely on game-specific ESPN clips: the NFL.com live catalog has no reliable game association, so its unscoped entries cannot match. Video replay completion follows media progress; buffering does not count as watched footage. A critical snap elsewhere preempts the replay and re-queues it. Extra points alone are never replayed.
+Coverage records intervals confirmed by controllable players as progressing on screen. Live trackers and generic page embeds cannot confirm watched video, so they do not suppress missed-score replays. Rewinding preserves the union of watched intervals. This is a playback estimate, not video recognition. Nine seconds after any scoring play by one of your starters (scorer, passer, kicker, D/ST, two-point), it checks whether the snap was on screen. If not, the score joins the replay queue. At the next quiet moment (nothing critical anywhere) the channel plays the best footage it has: a matching game-scoped clip, or in archive mode the moment cut from the game’s own recording. Live replays prefer game-specific ESPN clips and can use NFL clips when publication time or explicit season/week metadata, team evidence and score details establish a unique match. Unmatched clips are never assigned by player name alone. Missing footage is retried every thirty seconds for up to thirty minutes after the score; failed clips can fall through to another source. Scores offer a publisher-page link when a clip matches, or an ESPN game-page link when none does. Video replay completion follows media progress; buffering does not count as watched footage. A critical snap elsewhere preempts the replay and re-queues it. Extra points alone are never replayed.
 
 ## Players (`web/players.js`, `web/provider-player.js`, `web/native-player.js`)
 
@@ -65,14 +65,14 @@ Calibrating a recording is automatic: `node scripts/scorebug-ocr/jobs.mjs` resol
 
 - `POST /api/league` – ESPN fantasy roster import (starters only; public visitors supply their own cookies for a private league).
 - `GET /api/session` – no authenticated account or saved league on the public Worker; an explicitly enabled local preview may return its configured league.
-- `GET /api/nfl-source?id=` – resolves an official NFL.com clip to its short-lived HLS URL through NFL's normal anonymous playback flow; tokens stay in memory.
-- `GET /api/nfl-highlights` – the current NFL.com highlight playlist, refreshed every five minutes in live mode.
+- `GET /api/nfl-source?id=&slug=` – resolves an official NFL.com clip to its short-lived HLS URL through NFL's normal anonymous playback flow; tokens stay in memory.
+- `GET /api/nfl-highlights` – the current NFL.com highlight playlist with bounded scoring-page metadata enrichment; polled once a minute during active games and every five minutes otherwise.
 - `GET /api/replay-source?id=` – the original provider embed for a catalog game.
 - `POST /api/playback-health` – bounded diagnostics, enabled only in the explicit local preview.
 
 ## Tests
 
-`npm test` runs 391 tests covering the director, coverage, alignment, scoring parser, archive sampling and play windows, replay matching, live normalization and the delayed live feed, the provider handshake, page embeds and the player pool, a full-Sunday rehearsal, and the server endpoints. They are deterministic simulations; real playback still needs a browser with the page in view (the provider's player stops reporting while the page is hidden).
+`npm test` runs 419 tests covering the director, coverage, alignment, scoring parser, archive sampling and play windows, replay matching, live normalization and the delayed live feed, the provider handshake, page embeds and the player pool, a full-Sunday rehearsal, and the server endpoints. They are deterministic simulations; real playback still needs a browser with the page in view (the provider's player stops reporting while the page is hidden).
 
 ## Reliability checks and live limits
 
@@ -83,7 +83,8 @@ lineup change. Director tests also cover excluded streams during a celebration
 hold and standby. Import requests accept the supported ESPN cookie lengths and
 reject malformed JSON without a server error.
 
-[The full logic audit](docs/full-logic-audit.md) records the current decision order, additional reproduced defects, fixes, open findings, and verification limits.
+[The live-highlight integration follow-up](docs/live-highlight-integration.md) records the new matching, retry and publisher-page fallbacks, including the provider metadata and real-browser checks still needed.
+[The full logic audit](docs/full-logic-audit.md) records the decision order and preceding reproduced defects, fixes, and verification limits.
 [The earlier family-readiness audit](docs/family-readiness-audit.md) records the preceding fixes and deployed-baseline browser evidence.
 [The earlier logic audit](docs/logic-audit.md) records the original failures, corrections
 to the first review, and reproducible comparisons with the pre-review commit.

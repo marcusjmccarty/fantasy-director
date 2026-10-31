@@ -1,5 +1,10 @@
 # Full logic audit — October 31, 2026
 
+Follow-up: [Live highlight integration](live-highlight-integration.md) adds
+conditional NFL game matching, alternate sources, late-publication retries and
+publisher-page fallbacks. The open finding below records this audit's baseline;
+the follow-up documents the new behavior and remaining verification limits.
+
 Audit baseline: `829cea62b704f1a57a3782fd6673568f64a6214f`.
 Scope: all browser logic modules, Worker endpoints, build/deploy path, and their
 tests. This is a further source and state-machine audit, not a repetition of

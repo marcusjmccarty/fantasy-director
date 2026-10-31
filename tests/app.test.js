@@ -14,6 +14,7 @@ import * as scoring from '../web/scoring.js';
 import * as roster from '../web/roster.js';
 import * as highlights from '../web/highlights.js';
 import * as preferences from '../web/preferences.js';
+import * as liveHighlights from '../web/live-highlights.js';
 import {PlayerPool} from '../web/players.js';
 const html=readFileSync(new URL('../web/index.html',import.meta.url),'utf8');
 // Point at a historical app.js to reproduce the audit cases against that revision.
@@ -50,14 +51,76 @@ function app(fetcher=async()=>Response.json({events:[]}),{media=false,stored=nul
  const time={now:1000};
  class MediaPool extends PlayerPool{constructor(host,options){super(host,{...options,now:()=>time.now,create:source=>new Media(source)});}}
  const storage=new Map(stored===null?[]:[['fantasy-stream-v3',JSON.stringify(stored)]]);
- const ctx={...archive,...sync,...director,...coverage,...replays,...live,...scoring,...roster,...highlights,...preferences,PlayerPool:media?MediaPool:Pool,NFLSourceCatalog:class{},document,window:{addEventListener(){}},localStorage:{getItem:key=>storage.get(key)||null,setItem(key,value){if(storageBlocked)throw new Error('Storage unavailable');storage.set(key,value);}},performance:{now:()=>time.now},setTimeout:()=>0,clearTimeout(){},setInterval:()=>0,fetch:fetcher,AbortSignal,Response,URL,Date,console};
- vm.createContext(ctx);vm.runInContext(script+'\n globalThis.a={S,pool,director,coverage,clock,step,advanceClock,excluded,cutTo,warm,startHighlight,updateHighlight,finishHighlight,syncFor,nudge,nfl,setMode,setPlaying,setDay,seekTo,replaySource,useRoster,importLeague,pollLive,pollLiveClips,prepareReplay,render,init,roster,get saved(){return saved;}};',ctx);
+ const ctx={...archive,...sync,...director,...coverage,...replays,...live,...scoring,...roster,...highlights,...preferences,...liveHighlights,PlayerPool:media?MediaPool:Pool,NFLSourceCatalog:class{},document,window:{addEventListener(){}},localStorage:{getItem:key=>storage.get(key)||null,setItem(key,value){if(storageBlocked)throw new Error('Storage unavailable');storage.set(key,value);}},performance:{now:()=>time.now},setTimeout:()=>0,clearTimeout(){},setInterval:()=>0,fetch:fetcher,AbortSignal,Response,URL,Date,console};
+ vm.createContext(ctx);vm.runInContext(script+'\n globalThis.a={S,pool,director,coverage,clock,step,advanceClock,excluded,cutTo,warm,startHighlight,updateHighlight,finishHighlight,syncFor,nudge,nfl,setMode,setPlaying,setDay,seekTo,replaySource,useRoster,importLeague,pollLive,pollLiveClips,prepareReplay,retryMissedReplays,failHighlight,render,init,roster,get saved(){return saved;}};',ctx);
  return {...ctx.a,time,storage, get saved(){return ctx.a.saved;},el:id=>elements.get(id)};
 }
 const player={name:'Jonathan Taylor',team:'IND',position:'RB'};
 const game={id:'A',name:'IND @ MIN',kind:'live',teams:[{id:'11',abbr:'IND'},{id:'16',abbr:'MIN'}],state:'in',phase:'live',possession:0,down:1,distance:10,yardsToGoal:40,nextSnapIn:null,date:'2026-11-01T18:00:00Z',scores:[],score:[0,0]};
 function ready(a){a.S.mode='live';a.useRoster([player],{teamName:'My lineup'});a.S.at=1000;a.S.games=[game];a.S.live.games=[game];a.S.live.feed.push([game],970);}
 const deferred=()=>{let resolve;return {promise:new Promise(r=>resolve=r),get resolve(){return resolve;}};};
+function liveReplay(a){
+ ready(a);a.S.at=Date.now()/1000;
+ const score={id:'A:td',at:a.S.at-60,kind:'TD',text:'Jonathan Taylor 4 Yd Rush',players:[{name:'Jonathan Taylor',role:'scorer'}]},g={...game,date:new Date(Date.now()-3600000).toISOString(),season:2026,week:8,scores:[score]};
+ a.S.games=[g];a.S.live.games=[g];a.S.live.scores.set(g.id,[score]);
+ const item={id:score.id,gameId:g.id,gameName:g.name,score,at:score.at,credits:[{player,role:'scorer'}],seen:false,queuedAt:a.S.at};a.coverage.log.push(item);a.coverage.queue.push(item);
+ const clip={id:'nfl-1',kind:'nfl',title:'Taylor scores',description:'Jonathan Taylor scores a 4-yard touchdown.',teams:['IND'],publishedAt:Date.now()-30000,url:'https://www.nfl.com/videos/taylor-touchdown',duration:12};
+ return {item,clip};
+}
+test('integration: a published unscoped NFL clip prepares for its corroborated live game',async()=>{
+ const a=app(),{item,clip}=liveReplay(a);a.S.liveClips=[clip];let resolved;
+ a.nfl.resolve=async c=>{resolved=c;return {url:'https://dcs-vod.mp.lura.live/vod/master.m3u8',duration:12,expiresAt:Date.now()+240000};};
+ await a.prepareReplay(item);assert.equal(resolved.gameId,'A');assert.equal(resolved.association,'time-team-score');assert.equal(a.S.sources.get(item.id).status,'ready');assert.equal(item.watchUrl,clip.url);
+});
+test('integration: one failed resolver does not hide another matching source',async()=>{
+ const a=app(),{item,clip}=liveReplay(a);a.S.liveClips=[clip,{...clip,id:'nfl-2'}];const calls=[];
+ a.nfl.resolve=async c=>{calls.push(c.id);if(c.id==='nfl-1')throw new Error('Unavailable');return {url:'https://dcs-vod.mp.lura.live/vod/second.m3u8',duration:12};};
+ await a.prepareReplay(item);assert.deepEqual(calls,['nfl-1','nfl-2']);assert.equal(a.S.sources.get(item.id).clipId,'nfl-2');assert.ok(a.S.failedClips.get('nfl-1')>Date.now());
+});
+test('integration: a failed playing clip tries a different player without interrupting the game',async()=>{
+ const a=app(undefined,{media:true}),{item,clip}=liveReplay(a);a.S.liveClips=[clip,{...clip,id:'nfl-2'}];a.nfl.resolve=async()=>({url:'https://dcs-vod.mp.lura.live/vod/master.m3u8',duration:12});
+ a.pool.open('A',{url:'https://example.test/live.mp4'});a.pool.show('A');a.S.program={kind:'game',id:'A'};const gamePlayer=a.pool.current;
+ await a.prepareReplay(item);a.startHighlight(item.id);a.failHighlight('player failed');assert.equal(item.status,'waiting');assert.equal(a.pool.current,gamePlayer);assert.equal(gamePlayer.destroyed,undefined);
+ a.retryMissedReplays();await a.prepareReplay(item);assert.equal(a.S.sources.get(item.id).clipId,'nfl-2');assert.equal(a.coverage.queue.length,1);
+});
+test('integration: late publication retries on its own deadline and stops after thirty minutes',async()=>{
+ const a=app(),{item,clip}=liveReplay(a);await a.prepareReplay(item);assert.equal(item.status,'waiting');assert.equal(item.unavailable,false);assert.equal(a.coverage.queue.length,0);
+ a.retryMissedReplays();assert.equal(a.coverage.queue.length,0,'no retry on each animation frame');
+ a.S.sources.get(item.id).retryAt=0;a.saved.highlights=false;a.retryMissedReplays();assert.equal(a.coverage.queue.length,0);a.saved.highlights=true;
+ a.S.liveClips=[clip];a.nfl.resolve=async()=>({url:'https://dcs-vod.mp.lura.live/vod/master.m3u8',duration:12});a.retryMissedReplays();await a.prepareReplay(item);assert.equal(a.S.sources.get(item.id).status,'ready');
+ a.coverage.queue.length=0;a.S.sources.set(item.id,{status:'none',retryAt:0});a.S.at=item.at+1801;a.retryMissedReplays();assert.equal(item.status,'missed');assert.equal(item.unavailable,true);assert.equal(a.coverage.queue.length,0);
+});
+test('integration: an expired prepared source is renewed before a player is opened',async()=>{
+ const a=app(),{item,clip}=liveReplay(a);a.S.liveClips=[clip];const pending=deferred();a.nfl.resolve=()=>pending.promise;
+ a.S.sources.set(item.id,{status:'ready',key:'old',expiresAt:Date.now()-1});a.startHighlight(item.id);assert.equal(a.S.highlight,null);assert.equal(a.coverage.queue.length,1);assert.equal(a.S.sources.get(item.id).status,'pending');
+ pending.resolve({url:'https://dcs-vod.mp.lura.live/vod/new.m3u8',expiresAt:Date.now()+240000});await new Promise(resolve=>setImmediate(resolve));assert.equal(a.S.sources.get(item.id).status,'ready');assert.notEqual(a.S.sources.get(item.id).key,'old');
+});
+test('integration: a publisher page remains available when inline playback is unavailable',async()=>{
+ const a=app(),{item,clip}=liveReplay(a);a.S.liveClips=[{...clip,kind:'clip',gameId:'A',inlinePlayable:false,url:'https://www.espn.com/video/clip/_/id/123'}];
+ await a.prepareReplay(item);a.render();assert.equal(item.status,'waiting');assert.match(a.el('scores').html,/Watch on ESPN/);assert.match(a.el('scores').html,/rel="noopener noreferrer"/);assert.match(a.el('scores').html,/opens a new tab/);
+});
+test('integration: an unmatched score offers the game page without claiming a matched highlight',async()=>{
+ const a=app(),{item}=liveReplay(a);item.gameId='401234567';await a.prepareReplay(item);a.render();
+ assert.match(a.el('scores').html,/Open game on ESPN/);assert.match(a.el('scores').html,/https:\/\/www.espn.com\/nfl\/game\/_\/gameId\/401234567/);assert.doesNotMatch(a.el('scores').html,/Watch on/);
+});
+test('integration: a two-second scoring clip can become visible and complete from media progress',async()=>{
+ const a=app(undefined,{media:true}),{item,clip}=liveReplay(a);a.S.liveClips=[clip];a.nfl.resolve=async()=>({url:'https://dcs-vod.mp.lura.live/vod/short.m3u8',duration:2});
+ await a.prepareReplay(item);a.startHighlight(item.id);a.updateHighlight(1000);assert.equal(a.S.highlight.playing,true);const p=a.pool.current;p.currentTime=2;a.time.now=3000;a.updateHighlight(3000);assert.equal(item.status,'replayed');assert.equal(a.S.usedClips.get(clip.id),item.id);
+});
+test('integration: ESPN polling retains descriptions and can prepare their game-specific clip',async()=>{
+ const now=Date.now(),text='Jonathan Taylor 4 Yd Rush',event={id:'401',date:new Date(now-3600000).toISOString(),competitions:[{status:{type:{state:'in'}},competitors:[{homeAway:'away',team:{id:'11',abbreviation:'IND',displayName:'Indianapolis Colts'}},{homeAway:'home',team:{id:'16',abbreviation:'MIN',displayName:'Minnesota Vikings'}}]}]};
+ const summary={drives:{previous:[{plays:[{id:'1',wallclock:new Date(now-60000).toISOString(),start:{team:{id:'11'}}}]}]},scoringPlays:[{id:'1',team:{id:'11'},text,scoringType:{name:'touchdown'}}],videos:[{id:'123',headline:'A big moment',description:'Jonathan Taylor scores a 4-yard touchdown.',duration:12,links:{source:{href:'https://espnmedia-cdn.akamaized.net/clip.mp4'}},timeRestrictions:{expirationDate:new Date(now+3600000).toISOString()}}]};
+ const a=app(async u=>Response.json(String(u).includes('scoreboard')?{events:[event],season:{year:2026},week:{number:8}}:summary));ready(a);a.S.at=now/1000;await a.pollLive(0);
+ assert.equal(a.S.live.games[0].season,2026);assert.equal(a.S.live.games[0].week,8);assert.equal(a.S.liveClips[0].description,summary.videos[0].description);assert.equal(a.S.liveClips[0].expiresAt,now+3600000);
+ const score=a.S.live.scores.get('401')[0],source=await a.replaySource({id:score.id,gameId:'401',at:score.at,score});assert.equal(source.clipId,'clip:123');assert.equal(source.label,'ESPN highlight');
+});
+test('integration: an obsolete NFL catalog cannot populate another viewing mode',async()=>{
+ const pending=deferred(),a=app(()=>pending.promise);ready(a);const request=a.pollLiveClips(0);a.S.live.generation++;a.S.mode='replay';pending.resolve(Response.json({clips:[{id:'stale'}]}));await request;assert.equal(a.S.liveClips.length,0);
+});
+test('integration: switching highlights off clears waiting labels and pending retries',async()=>{
+ const a=app(),{item}=liveReplay(a);await a.prepareReplay(item);a.el('optHighlights').checked=false;a.el('optHighlights').onchange();
+ assert.equal(item.status,'skipped');assert.equal(a.S.sources.size,0);assert.equal(a.coverage.queue.length,0);a.render();assert.doesNotMatch(a.el('scores').html,/Waiting for replay/);
+});
 test('family: a partially entered private-league connection is validated instead of silently discarded',async()=>{
  let payload;const a=app(async(url,options)=>{payload=JSON.parse(options.body);return Response.json({error:'Paste both SWID and espn_s2, or leave both blank for a public league.'},{status:400});});
  a.el('leagueId').value='123';a.el('espnSwid').value='{12345678-1234-1234-1234-123456789012}';await a.importLeague();

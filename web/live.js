@@ -32,7 +32,7 @@ export function liveGames(raw,nowSeconds=Date.now()/1000){
   return {id:String(e.id),name:e.shortName||e.name||'NFL game',kind:'live',teams,state,phase,breakKind,score:teams.map(t=>t.score),
    possession,down,distance:Number(s.distance||0),yardsToGoal:ytg,special:down<=0||/kickoff|punt/i.test(lastType)&&down<=0,
    period:Number(status.period||0),clock:status.displayClock||'',detail:type.shortDetail||'',downDistance:s.shortDownDistanceText||'',
-   lastPlay:last.text||'',lastPlayId,playType:lastType,nextSnapIn:null,date:e.date,scores:[],fetchedAt:nowSeconds};
+   lastPlay:last.text||'',lastPlayId,playType:lastType,nextSnapIn:null,date:e.date,season:Number(raw.season?.year||e.season?.year)||null,week:Number(raw.week?.number||e.week?.number)||null,scores:[],fetchedAt:nowSeconds};
  }).filter(g=>g.teams.length===2);
 }
 // A live feed seen through the stream's delay. The director acts on the
