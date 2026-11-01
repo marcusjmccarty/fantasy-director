@@ -42,6 +42,7 @@ function persist(){try{localStorage.setItem(STORE,JSON.stringify(S.mode==='repla
 const S={scope:'game',center:null,range:null,mode:'live',archive:null,clips:[],liveClips:[],day:0,games:[],at:Date.now()/1000,lastAt:null,
  program:{kind:'idle'},pending:null,pinned:null,selection:null,highlight:null,decision:null,playing:false,started:false,
  fullscreenWanted:false,fullscreenRequest:0,
+ streamChoices:new Map(),streamRotations:new Map(),
  cooldown:new Map(),ads:new Set(),breaks:new Map(),detectedBreaks:new Map(),sources:new Map(),syncs:new Map(),usedClips:new Map(),failedClips:new Map(),seekHold:false,cuts:0,
  lastStep:0,lastWarm:0,lastRender:0,live:{games:[],feed:new LiveFeed(),scores:new Map(),summaryPending:new Map(),fetched:0,error:'',generation:0},toastTimer:null,unmuteHint:false};
 const clock=new Clock(),director=new Director(),coverage=new Coverage(),nfl=new NFLSourceCatalog(),breakControl=new BreakControl();
@@ -53,20 +54,21 @@ const pool=new PlayerPool($('layers'),{capacity:3,
   render();
  },
  onClose:key=>S.ads.delete(key),
- onReconnect:key=>{
-  if(key!==pool.visible||!S.playing)return;
+ onReconnect:(key,detail)=>{
+  if(!S.playing)return;
   const stage=document.querySelector('.stage'),active=document.fullscreenElement||document.webkitFullscreenElement;
-  if(active&&active!==stage){
+  if(key===pool.visible&&active&&active!==stage){
    // Install the in-window fallback before navigation. Older browsers may
    // still allow a nested player to own native fullscreen and drop it here.
    S.fullscreenWanted=true;stage.classList.add('theater');
   }
+  if(detail?.failover)rotateStream(key);
  },
  onEnded:key=>{
   if(S.highlight?.src.key===key)finishHighlight({ended:true});
   else if(S.program.kind==='game'&&S.program.id===key){S.pinned=null;S.selection=null;S.cooldown.set(key,performance.now()+COOLDOWN);director.reset();}
  },
- onError:(key,error)=>{if(S.highlight?.src.key===key){failHighlight(error.message);return;}cool(key,error.message);},
+ onError:(key,error)=>{if(S.highlight?.src.key===key){failHighlight(error.message);return;}if(S.mode==='live'&&pool.get(key)?.player.live)return;cool(key,error.message);},
  onAudioLocked:key=>{if(key===pool.visible){if(S.audioAsked>=1)toast('The provider only unmutes from a click inside its own player: hover the video and use its speaker button.','warn');render();}}
 });
 window.fantasyStream={S,get saved(){return saved;},pool,director,coverage,clock};
@@ -80,10 +82,22 @@ function syncFor(game){
  if(!sync){sync=new RecordingSync(game,{types:S.archive.types,anchors:mergeAnchors(game.anchors||[],saved.marks[game.id]||[])});S.syncs.set(game.id,sync);}
  return sync;
 }
+function streamURLs(game){const key=gameKey(game);return [...new Set([saved.streams[key],saved.streamBackups[key]].filter(Boolean))];}
 function sourceFor(id){
  if(S.mode==='replay'){const g=archiveGame(id);return g?.embed?{url:g.embed,type:'provider/ok',duration:g.recordingDuration}:null;}
- const g=gameState(id),url=g&&saved.streams[gameKey(g)];
- return url?{url,type:streamType(url),autoReconnect:saved.autoReconnect}:null;
+ const g=gameState(id),urls=g?streamURLs(g):[],choice=S.streamChoices.get(id),url=urls.includes(choice)?choice:urls[0];
+ return url?{url,type:streamType(url),live:true,autoReconnect:saved.autoReconnect}:null;
+}
+// A fallback changes the source for this game, never the director's choice of game.
+function rotateStream(id,manual=false){
+ if(S.mode!=='live'||!S.playing||!(pool.visible===id&&S.program.kind==='game'||S.pending?.id===id))return false;
+ const slot=pool.get(id),g=gameState(id);if(!slot||!g)return false;
+ const alternative=streamURLs(g).find(url=>url!==slot.url),now=performance.now();
+ if(!alternative||!manual&&now<(S.streamRotations.get(id)||0))return false;
+ S.streamRotations.set(id,now+60000);S.streamChoices.set(id,alternative);
+ const visible=pool.visible===id;pool.close(id);pool.open(id,sourceFor(id));pool.hold(id,null,{play:true});
+ if(visible)pool.show(id);if(S.pending?.id===id)S.pending.since=now;
+ S.stall=null;S.lastAt=null;toast(`Trying the other saved stream for ${g.name}.`);render();return true;
 }
 const picture=id=>S.mode==='replay'?(saved.dataOnly?'data':'video'):(sourceFor(id)?'video':'data');
 function target(id){if(S.mode!=='replay')return null;const g=archiveGame(id);return g?syncFor(g).media(S.at-g.start):0;}
@@ -213,6 +227,7 @@ function nudge(now){
  // Page load readiness cannot detect a frozen cross-origin video. Give embeds
  // their spaced load retries and the viewer's chosen reconnect fallback.
  if(player.kind==='embed'){S.stall=null;player.checkHealth?.({online:window.navigator?.onLine!==false,foreground:!document.hidden});return;}
+ if(S.mode==='live'&&player.live){S.stall=null;player.checkHealth({active:true,online:window.navigator?.onLine!==false,foreground:!document.hidden});return;}
  if(player.target===null&&player.progressing){S.stall=null;return;}
  S.stall??={since:now,step:0};const stalled=now-S.stall.since;
  if(S.stall.step===0&&stalled>3000){S.stall.step=1;player.kick?.();}
@@ -256,9 +271,10 @@ function cutTo(id,now){
  if(picture(id)==='data'){commit(id);return;}
  const source=sourceFor(id);if(!source){commit(id);return;}
  if(S.pending?.id!==id)S.pending={id,since:now};
- pool.open(id,source);pool.hold(id,target(id),{play:true});
+ const slot=pool.open(id,source);pool.hold(id,target(id),{play:true});
+ if(S.mode==='live'&&slot.player.live){slot.player.checkHealth({active:S.playing,online:window.navigator?.onLine!==false,foreground:!document.hidden});if(pool.get(id)!==slot)return;}
  if(pool.ready(id,target(id)))return commit(id);
- if(now-S.pending.since>LOAD_LIMIT){
+ if(now-S.pending.since>LOAD_LIMIT&&!(S.mode==='live'&&slot.player.live)){
   cool(id,'it did not start in time');
  }else if(!pool.visible&&now-S.pending.since>8000){
   // Autoplay may be waiting on a click inside the provider's player.
@@ -630,7 +646,12 @@ function renderTransport(){
  $('pinCurrent').hidden=!inGame||!current;
  $('pinCurrent').textContent=S.pinned?'Let the channel choose':'Stay on this game';$('pinCurrent').setAttribute('aria-pressed',String(!!S.pinned));
  $('skipBreak').hidden=!inGame||picture(currentGameId())!=='video';$('skipBreak').disabled=!S.playing;
- $('reloadStream').hidden=!inGame||pool.current?.kind!=='embed';$('reloadStream').disabled=!S.playing;
+ $('reloadStream').hidden=!inGame||S.mode!=='live'||typeof pool.current?.reload!=='function';$('reloadStream').disabled=!S.playing;
+ const sources=current?streamURLs(current):[],alternate=sources.find(url=>url!==pool.get(current?.id)?.url);
+ $('nextStream').hidden=!inGame||S.mode!=='live'||!alternate;$('nextStream').disabled=!S.playing;
+ $('nextStream').textContent=alternate===sources[0]?'Try primary':'Try backup';
+ const health=S.playing&&inGame&&pool.current?.reconnecting?pool.current.recoveryMessage:'';
+ $('streamHealth').hidden=!health;if($('streamHealth').textContent!==health)$('streamHealth').textContent=health;
  $('leaveHighlight').hidden=!S.highlight||S.highlight.done;$('leaveHighlight').disabled=!S.playing;
  $('undoBreak').hidden=!S.breaks.size;
 }
@@ -684,9 +705,10 @@ $('setupStreams').onclick=()=>{if(S.mode==='live'&&!hasLineup()){openLineup();re
 $('timingButton').onclick=()=>openSettings('sync');
 $('skipBreak').onclick=skipBreak;
 $('reloadStream').onclick=()=>{
- if(S.mode!=='live'||S.program.kind!=='game'||S.highlight||!S.playing||pool.current?.kind!=='embed')return;
+ if(S.mode!=='live'||S.program.kind!=='game'||S.highlight||!S.playing||typeof pool.current?.reload!=='function')return;
  if(pool.current.reload()){S.stall=null;S.lastAt=null;toast('Reloading this stream. If it stays blank, try another link in Game streams.');render();}
 };
+$('nextStream').onclick=()=>{if(!S.highlight)rotateStream(currentGameId(),true);};
 $('undoBreak').onclick=()=>{S.breaks.clear();director.reset();if(S.playing)step(performance.now());render();toast('The skipped game is available again.');};
 $('pinCurrent').onclick=()=>{if(S.pinned){S.pinned=null;S.selection=null;director.reset();render();}else selectGame(currentGameId());};
 $('leaveHighlight').onclick=()=>{if(!S.highlight)return;skipHighlight();S.pending=null;director.reset();if(S.playing)step(performance.now());render();};
@@ -783,6 +805,7 @@ async function setMode(mode){
  if(S.mode==='replay'){S.replayAt=S.at;S.replayLineup=lineupSnapshot();}
  else S.liveLineup=lineupSnapshot();
  setPlaying(false);pool.destroy();S.mode=mode;S.program={kind:'idle'};S.pending=null;S.pinned=null;S.selection=null;S.highlight=null;S.started=false;
+ S.streamChoices.clear();S.streamRotations.clear();
  if(mode==='live'&&S.liveLineup){saved={...saved,...S.liveLineup};S.liveLineup=null;}
  else if(mode==='replay'&&S.replayLineup)saved={...saved,...S.replayLineup};
  S.resumeOnShow=false;S.pausedAt=null;S.unmuteHint=false;S.audioAsked=0;S.driftSince=null;S.usedClips=new Map();S.failedClips=new Map();franchiseOptions();
@@ -917,7 +940,7 @@ $('lineupForm').onsubmit=e=>{e.preventDefault();$('saveRoster').click();};
 function renderSetup(){
  $('storageNotice').hidden=!S.storageError;
  $('setupSteps').hidden=S.started;
- const ready=S.mode==='replay'||hasLineup(),mine=S.live.games.filter(g=>hasRoster(g,roster())),linked=mine.filter(g=>saved.streams[gameKey(g)]).length,videoReady=S.mode==='replay'||linked>0;
+ const ready=S.mode==='replay'||hasLineup(),mine=S.live.games.filter(g=>hasRoster(g,roster())),linked=mine.filter(g=>streamURLs(g).length).length,videoReady=S.mode==='replay'||linked>0;
  $('lineupSummary').textContent=ready?`${saved.teamName} · ${starterCount(roster().length)}`:'Choose your starting players';
  $('lineupStepNumber').textContent=ready?'✓':'1';$('streamStepNumber').textContent=videoReady?'✓':'2';
  $('setupLineup').classList.toggle('complete',ready);$('setupLineup').classList.toggle('current',!ready);
@@ -933,11 +956,11 @@ function renderSetup(){
 function renderStreams(){
  const games=S.mode==='live'?S.live.games.filter(g=>hasRoster(g,roster())):[],others=S.mode==='live'?S.live.games.filter(g=>!hasRoster(g,roster())):[];
  const signature=JSON.stringify([S.mode,hasLineup(),games.map(g=>[g.id,gameKey(g)]),others.map(g=>[g.id,gameKey(g)])]);if(signature===S.streamSignature)return;S.streamSignature=signature;
- const drafts=S.streamDrafts??=new Map();for(const i of streamFields())drafts.set(i.dataset.key,i.value);
+ const drafts=S.streamDrafts??=new Map();for(const i of streamFields())drafts.set(i.dataset.key+(i.dataset.backup==='true'?':backup':''),i.value);
  $('streamsModeNote').textContent=S.mode==='replay'?'Replay videos are included. Choose Live games at the top to add your own live streams.':!hasLineup()?'Choose your lineup first. Your games will appear here.':!games.length?'Waiting for your games. You can refresh the schedule below.':'Your lineup’s games are listed below. You can save links before kickoff.';
- $('streamsHelp').textContent=S.mode==='replay'?'Your replay is ready. No stream links needed.':'Add a video link for each game, then save your links.';
+ $('streamsHelp').textContent=S.mode==='replay'?'Your replay is ready. No stream links needed.':'Add the game or channel page video link for each game. An optional backup link lets the channel try another source for the same game.';
  $('streamBadge').textContent=S.mode==='replay'?'Included':'Your video links';
- const inputs=list=>S.mode==='live'&&hasLineup()?list.map(g=>`<label class="stream"><span>${esc(g.name)}<small>${esc(new Date(g.date).toLocaleString([],{weekday:'short',hour:'numeric',minute:'2-digit'}))}</small></span><input type="url" data-key="${esc(gameKey(g))}" value="${esc(drafts.get(gameKey(g))??saved.streams[gameKey(g)]??'')}" placeholder="Paste the https:// video link here" aria-label="Stream for ${esc(g.name)}"></label>`).join(''):'';
+ const inputs=list=>S.mode==='live'&&hasLineup()?list.map(g=>`<div class="stream-row"><label class="stream"><span>${esc(g.name)}<small>${esc(new Date(g.date).toLocaleString([],{weekday:'short',hour:'numeric',minute:'2-digit'}))}</small></span><input type="url" data-key="${esc(gameKey(g))}" value="${esc(drafts.get(gameKey(g))??saved.streams[gameKey(g)]??'')}" placeholder="Paste the https:// video link here" aria-label="Stream for ${esc(g.name)}"></label><details class="stream-backup" ${saved.streamBackups[gameKey(g)]?'open':''}><summary>Backup for this game <span class="muted">(optional)</span></summary><label>Another link to ${esc(g.name)}<input type="url" data-key="${esc(gameKey(g))}" data-backup="true" value="${esc(drafts.get(gameKey(g)+':backup')??saved.streamBackups[gameKey(g)]??'')}" placeholder="https://…" aria-label="Backup stream for ${esc(g.name)}"></label></details></div>`).join(''):'';
  $('streamInputs').innerHTML=inputs(games);$('backupInputs').innerHTML=inputs(others);$('backupStreams').hidden=S.mode!=='live'||!hasLineup()||!others.length;
  $('saveStreams').hidden=S.mode!=='live'||!hasLineup()||!games.length;$('refreshStreams').hidden=S.mode!=='live';
 }
@@ -980,15 +1003,19 @@ for(const id of ['optDefense','optHighlights','optData'])$(id).onchange=()=>{
 $('optDelay').onchange=e=>{saved.delay=Math.max(0,Math.min(600,Number(e.target.value)||0));resetBreaks();persist();};
 $('optReconnect').onchange=e=>{saved.autoReconnect=e.target.checked;for(const slot of pool.slots.values())slot.player.setAutoReconnect?.(saved.autoReconnect);persist();render();};
 $('saveStreams').onclick=()=>{
- const streams={...saved.streams};
+ const streams={...saved.streams},backups={...saved.streamBackups};let homepage=false;
  for(const input of streamFields()){
-  try{streams[input.dataset.key]=safeVideo(input.value.trim());input.removeAttribute('aria-invalid');}
+  try{const url=safeVideo(input.value.trim());(input.dataset.backup==='true'?backups:streams)[input.dataset.key]=url;input.removeAttribute('aria-invalid');if(url){const u=new URL(url);if(u.pathname==='/'&&!u.search&&!u.hash)homepage=true;}}
   catch(error){input.setAttribute('aria-invalid','true');$('streamsDetails').open=true;$('backupStreams').open=true;$('streamsError').textContent=error.message;input.focus();return;}
  }
- const changed=S.games.filter(g=>saved.streams[gameKey(g)]!==streams[gameKey(g)]).map(g=>g.id);
- saved.streams=streams;persist();
- for(const id of changed){pool.close(id);S.cooldown.delete(id);S.ads.delete(id);if(S.pending?.id===id)S.pending=null;if(S.program.kind==='game'&&S.program.id===id){S.program={kind:'standby'};S.lastAt=null;}}
- director.reset();$('streamsError').textContent='';$('streamsStatus').textContent=S.playing?'Stream links saved. The channel will use your new links.':'Stream links saved. Press Play when you’re ready.';render();
+ const changed=S.games.filter(g=>saved.streams[gameKey(g)]!==streams[gameKey(g)]||saved.streamBackups[gameKey(g)]!==backups[gameKey(g)]).map(g=>g.id);
+ saved.streams=streams;saved.streamBackups=backups;persist();
+ for(const id of changed){
+  S.streamRotations.delete(id);S.cooldown.delete(id);const slot=pool.get(id);
+  if(slot&&streamURLs(gameState(id)).includes(slot.url)){S.streamChoices.set(id,slot.url);continue;}
+  S.streamChoices.delete(id);pool.close(id);S.ads.delete(id);if(S.pending?.id===id)S.pending=null;if(S.program.kind==='game'&&S.program.id===id){S.program={kind:'standby'};S.lastAt=null;}
+ }
+ director.reset();$('streamsError').textContent='';$('streamsStatus').textContent=homepage?'Links saved. A homepage may return to its menu on reconnect. Save the game or channel page URL to return to the same stream.':S.playing?'Stream links saved. The channel will use your new links.':'Stream links saved. Press Play when you’re ready.';render();
 };
 function syncStatus(){const g=archiveGame($('syncGame').value);if(!g)return;const sync=syncFor(g);$('syncStatus').textContent=`${g.name}: ${g.anchors?.length||0} built-in scorebug anchors, ${saved.marks[g.id]?.length||0} of yours.${pool.visible===g.id?` Video is at ${Math.floor(pool.current.currentTime/60)}:${String(Math.floor(pool.current.currentTime%60)).padStart(2,'0')}.`:' Open this game on screen to mark it.'}`;void sync;}
 $('syncGame').onchange=syncStatus;

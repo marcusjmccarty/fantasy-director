@@ -41,9 +41,9 @@ export class EmbedPlayer{
  // without telling us. Reload just that document; preserve the channel state.
  reload(){if(this.destroyed||!this.visible||!this.wantPlay)return false;this.resetRecovery();this.navigate('Reloading stream…');return true;}
  resetRecovery(){this.loadedAt=null;this.loadStartedAt=null;this.nextReconnectAt=null;this.loadRetries=0;this.suspendedAt=null;this.offline=false;this.recoveryMessage='';}
- navigate(message=''){
+ navigate(message='',detail={}){
   const now=this.now();this.loadedAt=null;this.loadStartedAt=now;this.lastReconnectAt=now;this.nextReconnectAt=this.autoReconnect?now+RECONNECT_EVERY:null;this.recoveryMessage=message;
-  if(message)this.emit('reconnect');
+  if(message)this.emit('reconnect',detail);
   if(!this.destroyed&&this.visible&&(!message||this.wantPlay))this.element.src=this.url;
  }
  setAutoReconnect(value){
@@ -67,7 +67,7 @@ export class EmbedPlayer{
   }
   if(this.loadedAt===null){
    if(now-this.loadStartedAt<LOAD_WINDOWS[Math.min(this.loadRetries,LOAD_WINDOWS.length-1)])return;
-   this.loadRetries++;this.navigate(`Still reconnecting · attempt ${this.loadRetries}. Pause to stop.`);return;
+   this.loadRetries++;this.navigate(`Still reconnecting · attempt ${this.loadRetries}. Pause to stop.`,{reason:'load',attempt:this.loadRetries,failover:this.loadRetries>=3});return;
   }
   if(this.autoReconnect&&this.nextReconnectAt!==null&&now>=this.nextReconnectAt){this.loadRetries=0;this.navigate('Refreshing stream connection…');}
  }

@@ -760,13 +760,14 @@ test('hold() never pauses the visible player for running ahead, and a null targe
  p.settle(100).reset();p.wantPlay=false;
  pool.hold('A',null);
  assert.deepEqual(p.calls,[['play']],'null target while running: play');
+ pool.hold('A',null);assert.deepEqual(p.calls,[['play']],'holding a live source cannot flood it with repeated play requests');
  p.reset();
  pool.hold('A',undefined,{play:false});
  assert.deepEqual(p.calls,[['pause']],'null target without play: pause');
  p.reset();
  pool.setRunning(false);p.reset();
  pool.hold('A',null);
- assert.deepEqual(p.calls,[['pause']],'null target while stopped: pause');
+ assert.deepEqual(p.calls,[],'an already paused source needs no repeated pause command');assert.equal(p.wantPlay,false);
 });
 
 // ---- PlayerPool: ready / show / hide / mute / running ----------------------

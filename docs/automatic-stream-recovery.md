@@ -1,5 +1,7 @@
 # Automatic embedded-stream recovery — November 1, 2026
 
+This records the embedded-stream release. The subsequent [site-independent recovery pass](site-independent-recovery.md) adds same-game backup sources and direct live-video recovery; its validation supersedes the totals below.
+
 Continuous-retry and fullscreen follow-up based on GitHub main `ffb7b8bc9388c9b0b86d75c771132c77023ce2d2`, retaining popup containment, the two-minute reconnect preference, and the previously audited director logic.
 
 The previous embed watchdog treated a completed iframe load as perpetual progress. A video could freeze inside NTV while Fantasy Stream continued to see the page as ready. The parent cannot inspect the cross-origin video. Public NTV watch/player modules were inspected; the existing integration has no verified playback-progress channel. This change does not invent one.

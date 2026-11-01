@@ -27,3 +27,8 @@ test('direct video links with fragments retain their native player type',()=>{
 test('automatic embed reconnect defaults on and preserves an explicit opt-out',()=>{
  assert.equal(normalizePreferences({}).autoReconnect,true);assert.equal(normalizePreferences({autoReconnect:'false'}).autoReconnect,true);assert.equal(normalizePreferences({autoReconnect:false}).autoReconnect,false);
 });
+test('backup links migrate independently, reject unsafe URLs and survive repeated preference normalization',()=>{
+ const saved=normalizePreferences({streams:{'IND-MIN':'https://streamcorner.st/stream/test'},streamBackups:{'IND-MIN':'https://another.example/watch','DAL-NYG':'javascript:bad','bad-key':'https://example.test/live'}});
+ assert.deepEqual(saved.streamBackups,{'IND-MIN':'https://another.example/watch'});assert.equal(saved.streams['IND-MIN'],'https://streamcorner.st/stream/test');assert.deepEqual(normalizePreferences(saved),saved);
+ assert.deepEqual(normalizePreferences({streamBackups:['https://example.test/live']}).streamBackups,{});
+});

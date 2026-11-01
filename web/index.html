@@ -42,9 +42,11 @@
    <button id="playButton" class="primary" aria-label="Play">Play</button>
    <span class="spacer"></span>
    <button id="reloadStream" hidden>Reload stream</button>
+   <button id="nextStream" hidden>Try backup</button>
    <button id="muteButton" aria-label="Turn sound on">Turn sound on</button>
    <button id="fullButton" aria-label="Full screen" title="Keep the channel full screen through stream reconnects">Full screen</button>
    </div>
+   <p id="streamHealth" class="stream-health" role="status" hidden></p>
    <div class="replay-controls" id="replayControls" hidden>
    <div class="replay-seek">   <button id="backButton" class="seek-button" aria-label="Back 30 seconds">−30 sec</button>
    <button id="forwardButton" class="seek-button" aria-label="Forward 30 seconds">+30 sec</button>
@@ -121,7 +123,7 @@
   <label class="check"><input type="checkbox" id="optDefense" checked> Follow my D/ST when no other starter is on the field</label>
   <label class="check"><input type="checkbox" id="optHighlights" checked> Replay scores I missed</label>
   <label class="check"><input type="checkbox" id="optData"> Use the game tracker instead of replay video (Try a replay only)</label>
-  <label class="check"><input type="checkbox" id="optReconnect" checked> Reconnect NTV and other embedded streams every 2 minutes</label><p class="muted">A fallback for freezes inside stream websites. This briefly reloads even a working stream. Pages that fail to load keep retrying until you press Pause. Use our Full screen button beside Pause to stay full screen through reconnects. Direct video links and replays are unaffected.</p>
+  <label class="check"><input type="checkbox" id="optReconnect" checked> Refresh embedded stream pages every 2 minutes</label><p class="muted">Works across stream sites, including Stream Corner and NTV. This fallback also interrupts healthy video; turn it off if your source needs another Play click after each refresh. Use a game or channel page URL so reconnects return to your stream. Pages that fail to load keep retrying and can try your saved backup. Direct live video recovers when playback stops, without scheduled refreshes. Pause stops retries. Use our Full screen button to keep the viewing area open.</p>
   <label for="optDelay">Live stream delay (seconds)</label><input id="optDelay" type="number" min="0" max="600" step="5" value="30"><p class="muted">Set it so the clock below the video matches the scorebug on your stream. The channel then follows the game as you see it: switching and score alerts timed to your picture. Timing is approximate and can vary between streams.</p>
   <div class="rules"><h3>How the channel decides</h3><ul>
    <li>Follows your starters’ teams using possession and field position. Individual player substitutions are not tracked.</li>

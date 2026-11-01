@@ -18,13 +18,13 @@ export class PlayerPool{
  get(key){return this.slots.get(key)||null;}
  open(key,source){
   let slot=this.slots.get(key);
-  if(slot&&slot.url===source.url&&!slot.player.error){this.touch(slot);return slot;}
+  if(slot&&slot.url===source.url&&(!slot.player.error||slot.player.live)){this.touch(slot);return slot;}
   if(slot)this.close(key);
   const player=this.create(source);
   slot={key,url:source.url,source,player,used:++this.sequence,usedAt:this.now(),openedAt:this.now(),seekAt:0};
   const current=()=>this.slots.get(key)===slot;
   player.on('ad',on=>{if(current())this.onAd(key,on);});player.on('ended',()=>{if(current())this.onEnded(key);});player.on('error',error=>{if(current())this.onError(key,error);});player.on?.('audiolocked',()=>{if(current())this.onAudioLocked(key);});
-  player.on?.('reconnect',()=>{if(current())this.onReconnect(key);});
+  player.on?.('reconnect',detail=>{if(current())this.onReconnect(key,detail);});
   player.element.classList.add('layer');player.element.setAttribute('aria-hidden','true');player.element.tabIndex=-1;
   this.host.append(player.element);this.slots.set(key,slot);this.trim();return slot;
  }
@@ -40,7 +40,7 @@ export class PlayerPool{
  // re-seeking a provider every poll never lets it deliver a frame.
  hold(key,target,{play=this.running,fixed=false}={}){
   const slot=this.slots.get(key);if(!slot)return;this.touch(slot);const p=slot.player;
-  if(target===null||target===undefined||p.kind==='embed'){if(play)p.play();else p.pause();return;}
+  if(target===null||target===undefined||p.kind==='embed'){if(play&&!p.wantPlay)p.play();else if(!play&&p.wantPlay)p.pause();return;}
   const lead=play&&!fixed?this.lead(key):0;
   const seek=()=>{slot.seekAt=this.now();p.seek(target+lead);if(play)p.play();};
   if(p.target!==null){
