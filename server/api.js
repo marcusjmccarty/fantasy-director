@@ -28,6 +28,25 @@ export function normalizedLeague(raw,ownerSwid=''){
  if(!Array.isArray(raw.teams)||!raw.teams.length)throw new Error('No teams returned');
  return {name:raw.settings?.name||'ESPN league',week:raw.scoringPeriodId||0,ownedTeamId:ownerSwid?String(raw.teams.find(t=>t.owners?.some(x=>String(x).toUpperCase()===ownerSwid.toUpperCase()))?.id||''):'',teams:raw.teams.map(t=>({id:String(t.id),name:t.name||[t.location,t.nickname].filter(Boolean).join(' ')||t.abbrev||`Team ${t.id}`,players:(t.roster?.entries||[]).filter(e=>![20,21].includes(Number(e.lineupSlotId))).map(e=>{const p=e.playerPoolEntry?.player||{};return{id:String(p.id||''),name:p.fullName||'',team:TEAM[p.proTeamId]||'',position:POS[p.defaultPositionId]||''};}).filter(p=>p.name&&p.team&&p.position)}))};
 }
+// ESPN applies this league's scoring rules (including bonuses) before returning
+// points. Sum actual starters, never projections, bench or season totals.
+export function fantasyScores(raw){
+ const week=Number(raw.scoringPeriodId)||0;
+ const points=value=>typeof value==='number'&&Number.isFinite(value)?value:null;
+ return {week,teams:(raw.teams||[]).map(t=>{
+  const entries=(t.roster?.entries||[]).filter(e=>![20,21].includes(Number(e.lineupSlotId)));
+  const players=entries.map(e=>{
+   const pool=e.playerPoolEntry||{},p=pool.player||{};
+   const actual=week>0?(p.stats||[]).find(s=>s.scoringPeriodId===week&&s.statSourceId===0&&s.statSplitTypeId===1):null;
+   // appliedStatTotal on the pool entry may span several weeks, even when
+   // scoringPeriodId is requested. Only the dated actual stat is authoritative.
+   const value=points(actual?.appliedTotal);
+   return {id:String(p.id||''),name:p.fullName||'Unknown player',team:TEAM[p.proTeamId]||'',position:POS[p.defaultPositionId]||'FLEX',points:value};
+  });
+  const complete=players.length>0&&players.every(p=>p.points!==null);
+  return {id:String(t.id),players,complete,points:complete?Math.round(players.reduce((sum,p)=>sum+p.points,0)*100)/100:null};
+ })};
+}
 export async function leagueAPI(request,env={},fetcher=fetch){
  if(request.method!=='POST')return json({error:'Use POST.'},405);
  const origin=request.headers.get('Origin');if(origin&&!sameSite(origin,request.url))return json({error:'Invalid request origin.'},403);
@@ -45,11 +64,11 @@ export async function leagueAPI(request,env={},fetcher=fetch){
  if(own)headers.Cookie=`SWID=${own.swid}; espn_s2=${own.s2}`;else if(useSaved)headers.Cookie=`SWID=${env.ESPN_SWID}; espn_s2=${env.ESPN_S2}`;
  const signedIn=!!(own||useSaved);
  // Workers throws synchronously for redirect:'error'. Manual also prevents cookie forwarding.
- try{const response=await fetcher(`https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/${year}/segments/0/leagues/${id}?view=mRoster&view=mTeam&view=mSettings${week===null?'':'&scoringPeriodId='+week}`,{headers,redirect:'manual',signal:AbortSignal.timeout(12000)});
+ try{const response=await fetcher(`https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/${year}/segments/0/leagues/${id}?view=mRoster&view=mTeam&view=mSettings&view=mLiveScoring${week===null?'':'&scoringPeriodId='+week}`,{headers,redirect:'manual',signal:AbortSignal.timeout(12000)});
  if(response.status>=300&&response.status<400)return json({error:'ESPN redirected the roster request. Your saved ESPN login may need refreshing.',code:'ESPN_REDIRECT'},502);
  if([401,403,404].includes(response.status))return json({error:response.status===404?'ESPN has no league with that ID for this season.':signedIn?'ESPN would not open this league with those cookies. Copy fresh SWID and espn_s2 values from a browser where you are signed in to ESPN.':'This league is private. Paste your ESPN SWID and espn_s2 cookies below the league ID to import it.',code:signedIn?'ESPN_DENIED':'LEAGUE_PRIVATE'},response.status===404?404:401);
  if(!response.ok)return json({error:'ESPN is temporarily unavailable. Please try again.'},502);
  const raw=await response.json();if(!raw.teams?.length)return json({error:signedIn?'ESPN did not return your roster. The cookies may have expired.':'ESPN did not return this league. Check the ID and league visibility.'},422);
- return json({...normalizedLeague(raw,own?own.swid:useSaved?env.ESPN_SWID:''),leagueId:id,season:year});
+ return json({...normalizedLeague(raw,own?own.swid:useSaved?env.ESPN_SWID:''),scoring:fantasyScores(raw),leagueId:id,season:year});
  }catch(error){const timeout=error?.name==='TimeoutError'||error?.name==='AbortError';return json({error:timeout?'ESPN took too long to respond. Try importing again.':'The roster service could not reach ESPN. Try importing again.',code:timeout?'ESPN_TIMEOUT':'ESPN_NETWORK'},timeout?504:502);}
 }

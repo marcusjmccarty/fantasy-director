@@ -13,6 +13,7 @@ import {normalizePreferences} from './preferences.js';
 import {liveClipCandidates,highlightPage,canRetryReplay,REPLAY_RETRY_MS,REPLAY_WAIT_SECONDS} from './live-highlights.js';
 import {protectedReplayPlay,protectedHighlight,broadcastReplayWindow} from './continuity.js';
 import {BreakControl} from './breaks.js';
+import {scoreCards,fantasyBoard,FantasyScoreFeed} from './scoreboard.js';
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -45,6 +46,7 @@ const S={scope:'game',center:null,range:null,mode:'live',archive:null,clips:[],l
  streamChoices:new Map(),streamRotations:new Map(),
  cooldown:new Map(),ads:new Set(),breaks:new Map(),detectedBreaks:new Map(),sources:new Map(),syncs:new Map(),usedClips:new Map(),failedClips:new Map(),seekHold:false,cuts:0,
  lastStep:0,lastWarm:0,lastRender:0,live:{games:[],feed:new LiveFeed(),scores:new Map(),summaryPending:new Map(),fetched:0,error:'',generation:0},toastTimer:null,unmuteHint:false};
+const fantasyFeed=new FantasyScoreFeed();
 const clock=new Clock(),director=new Director(),coverage=new Coverage(),nfl=new NFLSourceCatalog(),breakControl=new BreakControl();
 const pool=new PlayerPool($('layers'),{capacity:3,
  onAd:(key,on)=>{
@@ -524,7 +526,7 @@ function firstAction(d){for(let at=d.start;at<d.end;at+=30)if(rank(S.archive.sam
 const ROLE={offense:'',kicker:'K',defense:'D/ST'};
 function render(){
  if(!S.archive&&S.mode==='replay')return;
- renderScreen();renderRail();renderTransport();renderSetup();renderStreams();
+ renderScreen();renderRail();renderTransport();renderSetup();renderStreams();renderScoreboard();
 }
 function renderScreen(){
  const p=S.program,loading=S.highlight,h=loading?.playing?loading:loading?.previousView&&pool.visible===loading.previousKey?loading.previousView:null,game=p.kind==='game'?gameState(p.id):h?gameState(h.item.gameId):null;
@@ -602,7 +604,7 @@ function renderRail(){
   const cta=watching?'On screen':S.pending?.id===g.id?'Opening…':blocked.has(g.id)?tag[0]==='BREAK'?'On break':'Unavailable':g.state==='post'&&!selectable?'Final':selectable?(picture(g.id)==='data'?'Game tracker':'Watch'):'Not started';
   return `<li><button class="game ${watching?'watching':''}" data-game="${esc(g.id)}" aria-pressed="${S.pinned===g.id}" aria-label="${esc(g.name+'. '+action)}" ${selectable?'':'disabled'}><span class="g-status"><span class="tag ${tag[1]}">${tag[0]}</span><span class="g-when">${esc(g.detail||'')}</span></span><span class="g-matchup">${teams}</span>${ytg!==null?`<span class="g-drive"><span>${esc(off)} ball · ${esc(g.downDistance||'On offense')}</span><span>${ytg} yds to go</span></span><span class="g-bar" aria-hidden="true"><i style="width:${100-ytg}%"></i></span>`:''}<span class="g-footer"><span class="g-names">${names||'<span>Other game</span>'}</span><span class="g-cta">${cta}${selectable&&!watching?'<span aria-hidden="true"> ↗</span>':''}</span></span></button></li>`;
  }).join('');
- put('games',items||(S.mode==='live'&&!hasLineup()?'<li class="empty">Choose your lineup above. Your games will appear here.</li>':'<li class="empty">None of your starters play in this window.</li>'));
+ put('games',items||(S.mode==='live'&&!hasLineup()?'<li class="empty">Choose your lineup to see your games.</li>':'<li class="empty">None of your starters play in this window.</li>'));
  $('gamesNote').textContent=S.pinned?'Your choice':`${mine.filter(g=>g.state==='in').length} in play`;
  // roster
  put('roster',roster().map(p=>{
@@ -610,7 +612,7 @@ function renderRail(){
   const pts=coverage.log.filter(x=>x.credits.some(c=>c.player===p||c.player.name===p.name)).length;
  const status=!g?'No game':on?(p.position==='D/ST'?'Team defending':p.position==='K'?'Field-goal opportunity':'Team on offense'):g.state==='pre'?`Kickoff ${S.mode==='replay'?timeLabel(g.start):new Date(g.date).toLocaleString([],{weekday:'short',hour:'numeric',minute:'2-digit'})}`:g.state==='post'?'Final':g.phase==='break'?'Break':'Between possessions';
   return `<li class="${on?'on':''}"><span class="pos">${esc(p.position)}</span><span class="who"><b>${esc(p.name)}</b><small>${esc(alias(p.team))} · ${esc(status)}</small></span>${pts?`<span class="pts">${pts} score${pts===1?'':'s'}</span>`:''}</li>`;
- }).join('')||'<li class="empty">Choose your players above to build your lineup.</li>');
+ }).join('')||'<li class="empty">Choose your players to build your lineup.</li>');
  $('rosterNote').textContent=S.mode==='live'&&!hasLineup()?'Choose your lineup to see your starters.':saved.teamName;
  // scores
  put('scores',coverage.log.map(x=>{
@@ -624,7 +626,7 @@ function renderRail(){
  $('scoreCount').textContent=coverage.log.length?String(coverage.log.length):'';
 }
 const markup=new Map();
-function put(id,html){if(markup.get(id)===html)return;const focused=id==='games'?document.activeElement?.dataset?.game:null;markup.set(id,html);$(id).innerHTML=html;if(focused)for(const button of $(id).querySelectorAll('button'))if(button.dataset.game===focused)button.focus();}
+function put(id,html){if(markup.get(id)===html)return;const key=id==='games'?'game':id==='scoreboardGames'?'scoreLink':null,focused=key?document.activeElement?.dataset?.[key]:null;markup.set(id,html);$(id).innerHTML=html;if(focused)for(const item of $(id).querySelectorAll(key==='game'?'button':'a'))if(item.dataset[key]===focused)item.focus({preventScroll:true});}
 function currentGameId(){return S.program.kind==='game'?S.program.id:S.highlight?.returnTo||null;}
 function renderTransport(){
  const replay=S.mode==='replay';
@@ -700,8 +702,6 @@ $('ovButton').onclick=()=>{
 };
 $('playButton').onclick=()=>setPlaying(!S.playing);
 $('previewReplay').onclick=()=>setMode('replay');
-$('setupWatch').onclick=()=>{saved.muted=false;persist();setPlaying(true);if(S.started)$('playButton').focus();};
-$('setupStreams').onclick=()=>{if(S.mode==='live'&&!hasLineup()){openLineup();return;}openStreams();};
 $('timingButton').onclick=()=>openSettings('sync');
 $('skipBreak').onclick=skipBreak;
 $('reloadStream').onclick=()=>{
@@ -934,25 +934,36 @@ function openLineup(){
  if(S.mode==='replay')$('lineupStatus').textContent+=' Replay changes do not change your live lineup.';
  $('leagueImport').open=!!saved.leagueId;franchiseOptions();$('lineupDialog').showModal();
 }
-for(const id of ['lineupButton','editLineup','setupLineup','railLineup'])$(id).onclick=openLineup;
+$('lineupButton').onclick=openLineup;
 $('closeLineup').onclick=()=>$('lineupDialog').close();
 $('lineupForm').onsubmit=e=>{e.preventDefault();$('saveRoster').click();};
 function renderSetup(){
  $('storageNotice').hidden=!S.storageError;
- $('setupSteps').hidden=S.started;
- const ready=S.mode==='replay'||hasLineup(),mine=S.live.games.filter(g=>hasRoster(g,roster())),linked=mine.filter(g=>streamURLs(g).length).length,videoReady=S.mode==='replay'||linked>0;
- $('lineupSummary').textContent=ready?`${saved.teamName} · ${starterCount(roster().length)}`:'Choose your starting players';
- $('lineupStepNumber').textContent=ready?'✓':'1';$('streamStepNumber').textContent=videoReady?'✓':'2';
- $('setupLineup').classList.toggle('complete',ready);$('setupLineup').classList.toggle('current',!ready);
- $('editLineup').textContent=ready?'Edit lineup':'Choose your players';
- $('setupLineupSummary').textContent=ready?starterCount(roster().length)+' selected':'Choose your starting players';
- $('lineupPreview').textContent=ready?roster().slice(0,3).map(p=>p.name).join(' · ')+(roster().length>3?' + '+(roster().length-3)+' more':''):'Your players shape every game change.';
- $('setupStreams').classList.toggle('complete',videoReady);$('setupStreams').classList.toggle('current',ready&&!videoReady);$('setupWatch').classList.toggle('current',ready&&videoReady);
- $('setupStreamSummary').textContent=S.mode==='replay'?'Replay videos included':linked?`${linked} of ${mine.length} game links saved`:'Add your video links below';
- $('setupWatchSummary').textContent=S.mode==='replay'?'Try the channel with Week 7':ready&&!videoReady?'Add a stream, or use the game tracker':'We’ll follow the action for you';
- $('setupSummary').textContent=S.mode==='replay'?'Videos and a sample lineup are ready.':'Choose your players, add your links, then press Play.';
+ const ready=S.mode==='replay'||hasLineup(),mine=S.live.games.filter(g=>hasRoster(g,roster())),linked=mine.filter(g=>streamURLs(g).length).length;
  $('streamSummary').textContent=S.mode==='replay'?'Replay videos are already included':!ready?'Choose your lineup to see your games':`${linked} of ${mine.length} lineup games have saved links`;
 }
+function renderScoreboard(){
+ const live=S.mode==='live',games=live?S.live.games:S.games,players=live&&!hasLineup()?[]:roster();
+ const week=live?games.find(g=>g.week)?.week:S.archive?.data.week;
+ $('scoreboardMeta').textContent=`${live?'NFL':'Replay'}${week?' · Week '+week:''} · ${live?'ESPN':'Recorded game scores'}`;
+ $('allScores').setAttribute('aria-pressed',String(!S.scoresMine));$('myScores').setAttribute('aria-pressed',String(!!S.scoresMine));
+ put('scoreboardGames',live&&S.live.fetched&&!games.length&&!S.scoresMine?'<p class="sb-empty">No NFL games are listed by ESPN right now. The schedule refreshes automatically.</p>':scoreCards(games,players,{mine:!!S.scoresMine,watching:currentGameId()}));
+ const age=S.live.fetched?Date.now()-S.live.fetched:Infinity;
+ $('scoreboardUpdated').textContent=!live?'Following replay time':S.live.error||age>90000?(S.live.fetched?'Scores delayed · retrying':'Connecting to ESPN…'):'Updated '+new Date(S.live.fetched).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
+ $('scoreboardCaption').textContent=live?'Live scores may be ahead of your stream. Gamecast opens ESPN in a new tab.':'Scores follow your replay timeline, so future results stay hidden.';
+ const connected=live&&hasLineup()&&saved.leagueId&&saved.teamId;
+ const season=games.find(g=>g.season)?.season;
+ fantasyFeed.sync(connected?{leagueId:saved.leagueId,teamId:saved.teamId,...(week&&season?{week,season}:{}),swid:saved.espn.swid,s2:saved.espn.s2}:null);
+ const data=fantasyFeed.data,board=connected?fantasyBoard(data,saved.teamId,games):null;
+ $('fantasyTitle').textContent=live&&hasLineup()?saved.teamName:'Your starting lineup';
+ $('lineupButton').textContent=live&&!hasLineup()?'Choose players':'Edit lineup';
+ $('fantasyTotal').textContent=board?.points||'—';$('fantasyWeek').textContent=board?.week?'Week '+board.week:'This week';
+ $('fantasyTable').hidden=!board;$('fantasyScoringNote').hidden=!board;
+ put('fantasyPlayers',board?.rows||'');
+ $('fantasyStatus').textContent=!live?'Fantasy totals are available in Live games.':!connected?'Import your ESPN team to see points using your league’s scoring rules.':fantasyFeed.error?(fantasyFeed.updated?'Last update '+new Date(fantasyFeed.updated).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+'. ':'')+fantasyFeed.error:!board?'Getting your fantasy points from ESPN…':!board.complete?'Waiting for some player stats. Missing points are shown as —.':'Updated '+new Date(fantasyFeed.updated).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+' · Refreshes every 30 seconds';
+}
+$('allScores').onclick=()=>{S.scoresMine=false;renderScoreboard();};
+$('myScores').onclick=()=>{S.scoresMine=true;renderScoreboard();};
 function renderStreams(){
  const games=S.mode==='live'?S.live.games.filter(g=>hasRoster(g,roster())):[],others=S.mode==='live'?S.live.games.filter(g=>!hasRoster(g,roster())):[];
  const signature=JSON.stringify([S.mode,hasLineup(),games.map(g=>[g.id,gameKey(g)]),others.map(g=>[g.id,gameKey(g)])]);if(signature===S.streamSignature)return;S.streamSignature=signature;

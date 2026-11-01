@@ -77,3 +77,10 @@ test('non-object JSON and oversized imports return controlled errors',async()=>{
  for(const body of ['null','[]','"text"'])assert.equal((await leagueAPI(new Request('https://test.example/api/league',{method:'POST',body}))).status,400);
  assert.equal((await leagueAPI(new Request('https://test.example/api/league',{method:'POST',body:'x'.repeat(4097)}))).status,413);
 });
+test('league response includes current weekly fantasy scoring without changing imported starters',async()=>{
+ const data=structuredClone(raw);data.scoringPeriodId=8;
+ const pool=data.teams[0].roster.entries[0].playerPoolEntry;pool.appliedStatTotal=100;
+ pool.player.stats=[{scoringPeriodId:8,statSourceId:0,statSplitTypeId:1,appliedTotal:12.75}];
+ const response=await leagueAPI(req('123'),env,async url=>{assert.ok(new URL(url).searchParams.getAll('view').includes('mLiveScoring'));return Response.json(data);});
+ const result=await response.json();assert.equal(result.teams[0].players.length,1);assert.equal(result.scoring.teams[0].points,12.75);assert.equal(result.scoring.week,8);
+});
