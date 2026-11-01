@@ -4,8 +4,9 @@
 // hidden one would play its own sound over the picture. Hidden, it counts as
 // ready (there is nothing to warm); shown, it is ready once it has loaded.
 // A loaded page is NOT proof of moving video. Periodic reconnect is an explicit
-// fallback for that blind spot, separate from bounded page-loading recovery.
-const RECONNECT_EVERY=120000,LOAD_WINDOWS=[15000,20000,30000],NETWORK_RETRY_GAP=10000;
+// fallback for that blind spot, separate from page-loading recovery. Loading
+// retries back off, but never abandon a stream the viewer still wants playing.
+const RECONNECT_EVERY=120000,LOAD_WINDOWS=[15000,20000,30000,60000],NETWORK_RETRY_GAP=10000;
 export class EmbedPlayer{
  constructor(url,{now=()=>performance.now(),createFrame=()=>document.createElement('iframe'),autoReconnect=true}={}){
   this.kind='embed';this.url=url;this.now=now;this.listeners=new Map();this.inAd=false;this.error=null;this.wantPlay=false;this.target=null;
@@ -17,7 +18,9 @@ export class EmbedPlayer{
   // working, but never let an embedded page open tabs, navigate our window,
   // launch browser dialogs or download files, even after a viewer clicks it.
   f.setAttribute('sandbox','allow-scripts allow-same-origin allow-forms allow-presentation');
-  f.allow='autoplay; fullscreen; picture-in-picture; encrypted-media';f.referrerPolicy='no-referrer';
+  // Fullscreen belongs to our stable outer stage. Fullscreen owned by a video
+  // inside this frame ends when that document reconnects or is switched out.
+  f.allow="autoplay; fullscreen 'none'; picture-in-picture; encrypted-media";f.referrerPolicy='no-referrer';
   f.addEventListener('load',()=>{if(!this.destroyed&&this.visible&&f.src===this.url){this.loadedAt=this.now();this.loadRetries=0;}});
  }
  on(name,callback){if(!this.listeners.has(name))this.listeners.set(name,new Set());this.listeners.get(name).add(callback);}
@@ -39,7 +42,9 @@ export class EmbedPlayer{
  reload(){if(this.destroyed||!this.visible||!this.wantPlay)return false;this.resetRecovery();this.navigate('Reloading stream…');return true;}
  resetRecovery(){this.loadedAt=null;this.loadStartedAt=null;this.nextReconnectAt=null;this.loadRetries=0;this.suspendedAt=null;this.offline=false;this.recoveryMessage='';}
  navigate(message=''){
-  const now=this.now();this.loadedAt=null;this.loadStartedAt=now;this.lastReconnectAt=now;this.nextReconnectAt=this.autoReconnect?now+RECONNECT_EVERY:null;this.recoveryMessage=message;this.element.src=this.url;
+  const now=this.now();this.loadedAt=null;this.loadStartedAt=now;this.lastReconnectAt=now;this.nextReconnectAt=this.autoReconnect?now+RECONNECT_EVERY:null;this.recoveryMessage=message;
+  if(message)this.emit('reconnect');
+  if(!this.destroyed&&this.visible&&(!message||this.wantPlay))this.element.src=this.url;
  }
  setAutoReconnect(value){
   if(this.autoReconnect===!!value)return;
@@ -61,9 +66,8 @@ export class EmbedPlayer{
    this.offline=false;this.loadRetries=0;this.navigate('Connection restored · reconnecting stream…');return;
   }
   if(this.loadedAt===null){
-   if(now-this.loadStartedAt<LOAD_WINDOWS[this.loadRetries])return;
-   if(this.loadRetries<LOAD_WINDOWS.length-1){this.loadRetries++;this.navigate(`Reconnecting stream · attempt ${this.loadRetries} of 2…`);return;}
-   this.error={code:'EMBED_LOAD_TIMEOUT',message:'The stream page did not respond after two reconnect attempts.'};this.emit('error',this.error);return;
+   if(now-this.loadStartedAt<LOAD_WINDOWS[Math.min(this.loadRetries,LOAD_WINDOWS.length-1)])return;
+   this.loadRetries++;this.navigate(`Still reconnecting · attempt ${this.loadRetries}. Pause to stop.`);return;
   }
   if(this.autoReconnect&&this.nextReconnectAt!==null&&now>=this.nextReconnectAt){this.loadRetries=0;this.navigate('Refreshing stream connection…');}
  }

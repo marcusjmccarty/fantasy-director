@@ -11,8 +11,8 @@ const STUCK=15000;             // ms a seek may stay unanswered before it is sen
 const STALE=20000;             // ms an unwanted hidden player is kept before it is closed
 
 export class PlayerPool{
- constructor(host,{capacity=4,create=createPlayer,now=()=>performance.now(),onAd=()=>{},onClose=()=>{},onEnded=()=>{},onError=()=>{},onAudioLocked=()=>{}}={}){
-  Object.assign(this,{host,capacity,create,now,onAd,onClose,onEnded,onError,onAudioLocked});
+ constructor(host,{capacity=4,create=createPlayer,now=()=>performance.now(),onAd=()=>{},onClose=()=>{},onEnded=()=>{},onError=()=>{},onAudioLocked=()=>{},onReconnect=()=>{}}={}){
+  Object.assign(this,{host,capacity,create,now,onAd,onClose,onEnded,onError,onAudioLocked,onReconnect});
   this.slots=new Map();this.visible=null;this.muted=true;this.running=false;this.sequence=0;
  }
  get(key){return this.slots.get(key)||null;}
@@ -24,6 +24,7 @@ export class PlayerPool{
   slot={key,url:source.url,source,player,used:++this.sequence,usedAt:this.now(),openedAt:this.now(),seekAt:0};
   const current=()=>this.slots.get(key)===slot;
   player.on('ad',on=>{if(current())this.onAd(key,on);});player.on('ended',()=>{if(current())this.onEnded(key);});player.on('error',error=>{if(current())this.onError(key,error);});player.on?.('audiolocked',()=>{if(current())this.onAudioLocked(key);});
+  player.on?.('reconnect',()=>{if(current())this.onReconnect(key);});
   player.element.classList.add('layer');player.element.setAttribute('aria-hidden','true');player.element.tabIndex=-1;
   this.host.append(player.element);this.slots.set(key,slot);this.trim();return slot;
  }

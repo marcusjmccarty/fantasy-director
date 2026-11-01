@@ -20,7 +20,7 @@ test('embed safety: every stream navigation is sandboxed before loading, includi
   for(const required of ['allow-scripts','allow-same-origin','allow-forms','allow-presentation'])assert.ok(flags.has(required));
   for(const unsafe of ['allow-popups','allow-popups-to-escape-sandbox','allow-top-navigation','allow-top-navigation-by-user-activation','allow-top-navigation-to-custom-protocols','allow-modals','allow-downloads'])assert.equal(flags.has(unsafe),false,unsafe);
  }
- assert.match(h.frame.allow,/autoplay/);assert.match(h.frame.allow,/fullscreen/);p.destroy();
+ assert.match(h.frame.allow,/autoplay/);assert.match(h.frame.allow,/fullscreen 'none'/);p.destroy();
 });
 test('embed safety: reload restores the original stream after internal navigation and waits for a fresh load',()=>{
  const h=harness(),{p}=h;p.setVisible(true);p.play();h.load();h.tick(2000);assert.equal(p.progressing,true);
@@ -43,13 +43,17 @@ test('embed recovery: a loaded page is periodically reconnected even without a r
  for(let i=0;i<20;i++)p.checkHealth();assert.equal(h.navigations.length,2,'one navigation per recovery, not per application tick');
  h.load();h.tick(122000);assert.equal(p.progressing,true);assert.equal(p.reconnecting,false);p.destroy();
 });
-test('embed recovery: a page that never loads receives two spaced retries then one terminal error',()=>{
+test('embed recovery: a page that never loads keeps retrying with backoff until Pause',()=>{
  const h=harness(),{p}=h,errors=[];p.on('error',e=>errors.push(e));p.setVisible(true);p.play();
  for(const [at,count] of [[14999,1],[15000,2],[34999,2],[35000,3],[64999,3]]){h.tick(at);p.checkHealth();assert.equal(h.navigations.length,count);assert.equal(errors.length,0);}
- h.tick(65000);p.checkHealth();assert.equal(errors.length,1);assert.equal(errors[0].code,'EMBED_LOAD_TIMEOUT');assert.equal(p.progressing,false);
- h.tick(500000);p.checkHealth();assert.equal(errors.length,1);assert.equal(h.navigations.length,3);p.destroy();
+ h.tick(65000);p.checkHealth();assert.equal(h.navigations.length,4);assert.equal(p.progressing,false);
+ for(let i=1;i<=180;i++){
+  h.tick(65000+i*60000-1);p.checkHealth();assert.equal(h.navigations.length,3+i);
+  h.tick(65000+i*60000);p.checkHealth();assert.equal(h.navigations.length,4+i);assert.equal(errors.length,0);assert.equal(p.error,null);
+ }
+ p.pause();const paused=h.navigations.length;h.tick(15000000);p.checkHealth();assert.equal(h.navigations.length,paused);assert.equal(h.frame.src,'about:blank');p.destroy();
 });
-test('embed recovery: recovery from a loading retry cancels the failure deadline and repeated reloads remain bounded',()=>{
+test('embed recovery: a successful loading retry resets backoff and repeated reloads remain spaced',()=>{
  const h=harness(),{p}=h;p.setVisible(true);p.play();h.tick(15000);p.checkHealth();h.tick(16000);h.load();
  h.tick(65000);p.checkHealth();assert.equal(p.error,null);assert.equal(h.navigations.length,2);
  h.tick(135000);p.checkHealth();assert.equal(h.navigations.length,3);assert.equal(p.loadRetries,0);
@@ -75,8 +79,15 @@ test('embed recovery: a background tab suspends a loading deadline without burst
  h.tick(605000);p.checkHealth({foreground:false});assert.equal(h.navigations.length,1);p.checkHealth();assert.equal(h.navigations.length,1);
  h.tick(615000);p.checkHealth();assert.equal(h.navigations.length,2);p.destroy();
 });
-test('embed recovery: opting out stops periodic refresh but retains bounded page-load recovery',()=>{
+test('embed recovery: opting out stops periodic refresh but retains page-load recovery',()=>{
  const h=harness(),{p}=h;p.setAutoReconnect(false);p.setVisible(true);p.play();h.load();h.tick(500000);p.checkHealth();assert.equal(h.navigations.length,1);
  p.setAutoReconnect(true);p.checkHealth();assert.equal(h.navigations.length,1);h.tick(620000);p.checkHealth();assert.equal(h.navigations.length,2);
  p.setAutoReconnect(false);h.tick(635000);p.checkHealth();assert.equal(h.navigations.length,3,'load retries do not depend on the optional periodic refresh');p.destroy();
+});
+test('embed recovery: reconnect announces navigation first and respects synchronous Pause or destruction',()=>{
+ for(const stop of ['pause','destroy']){
+  const h=harness(),{p}=h;p.setVisible(true);p.play();h.load();const before=h.navigations.length;
+  p.on('reconnect',()=>{assert.equal(h.navigations.length,before,'prepare the parent before unloading the frame');p[stop]();});
+  h.tick(120000);p.checkHealth();assert.equal(h.frame.src,'about:blank');assert.equal(h.navigations.length,before+1);assert.equal(p.wantPlay,false);p.destroy();
+ }
 });

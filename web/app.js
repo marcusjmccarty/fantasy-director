@@ -41,6 +41,7 @@ function persist(){try{localStorage.setItem(STORE,JSON.stringify(S.mode==='repla
 // ---------- state ----------
 const S={scope:'game',center:null,range:null,mode:'live',archive:null,clips:[],liveClips:[],day:0,games:[],at:Date.now()/1000,lastAt:null,
  program:{kind:'idle'},pending:null,pinned:null,selection:null,highlight:null,decision:null,playing:false,started:false,
+ fullscreenWanted:false,fullscreenRequest:0,
  cooldown:new Map(),ads:new Set(),breaks:new Map(),detectedBreaks:new Map(),sources:new Map(),syncs:new Map(),usedClips:new Map(),failedClips:new Map(),seekHold:false,cuts:0,
  lastStep:0,lastWarm:0,lastRender:0,live:{games:[],feed:new LiveFeed(),scores:new Map(),summaryPending:new Map(),fetched:0,error:'',generation:0},toastTimer:null,unmuteHint:false};
 const clock=new Clock(),director=new Director(),coverage=new Coverage(),nfl=new NFLSourceCatalog(),breakControl=new BreakControl();
@@ -52,6 +53,15 @@ const pool=new PlayerPool($('layers'),{capacity:3,
   render();
  },
  onClose:key=>S.ads.delete(key),
+ onReconnect:key=>{
+  if(key!==pool.visible||!S.playing)return;
+  const stage=document.querySelector('.stage'),active=document.fullscreenElement||document.webkitFullscreenElement;
+  if(active&&active!==stage){
+   // Install the in-window fallback before navigation. Older browsers may
+   // still allow a nested player to own native fullscreen and drop it here.
+   S.fullscreenWanted=true;stage.classList.add('theater');
+  }
+ },
  onEnded:key=>{
   if(S.highlight?.src.key===key)finishHighlight({ended:true});
   else if(S.program.kind==='game'&&S.program.id===key){S.pinned=null;S.selection=null;S.cooldown.set(key,performance.now()+COOLDOWN);director.reset();}
@@ -201,7 +211,7 @@ function nudge(now){
  const p=S.program,player=pool.current;
  if(p.kind!=='game'||!S.playing||picture(p.id)!=='video'||!player||pool.visible!==p.id||player.inAd){S.stall=null;return;}
  // Page load readiness cannot detect a frozen cross-origin video. Give embeds
- // their bounded load retries and the viewer's chosen reconnect fallback.
+ // their spaced load retries and the viewer's chosen reconnect fallback.
  if(player.kind==='embed'){S.stall=null;player.checkHealth?.({online:window.navigator?.onLine!==false,foreground:!document.hidden});return;}
  if(player.target===null&&player.progressing){S.stall=null;return;}
  S.stall??={since:now,step:0};const stalled=now-S.stall.since;
@@ -723,22 +733,37 @@ $('games').onclick=e=>{
 $('fullButton').onclick=async()=>{
  const stage=document.querySelector('.stage'),d=document;
  const active=d.fullscreenElement||d.webkitFullscreenElement;
+ const request=++S.fullscreenRequest;
+ if(active||stage.classList.contains('theater')||S.fullscreenWanted){
+  S.fullscreenWanted=false;stage.classList.remove('theater');
+  try{if(active)await (d.exitFullscreen?d.exitFullscreen():d.webkitExitFullscreen());}catch{}
+  render();return;
+ }
+ S.fullscreenWanted=true;stage.classList.add('theater');render();let timer;
  try{
-  if(active){await (d.exitFullscreen?d.exitFullscreen():d.webkitExitFullscreen());return;}
-  if(stage.classList.contains('theater')){stage.classList.remove('theater');render();return;}
   const req=stage.requestFullscreen||stage.webkitRequestFullscreen;
   if(!req)throw new Error('no fullscreen');
-  const slow=new Promise((_,reject)=>setTimeout(()=>reject(new Error('no answer')),800));
-  await Promise.race([Promise.resolve(req.call(stage,{navigationUI:'hide'})),slow]);
+  const slow=new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('no answer')),800);});
+  const entered=Promise.resolve(req.call(stage,{navigationUI:'hide'})).then(async()=>{
+   // A delayed browser response must not undo an explicit exit or Escape.
+   if(request!==S.fullscreenRequest&&!S.fullscreenWanted&&(d.fullscreenElement||d.webkitFullscreenElement)===stage){
+    await (d.exitFullscreen?d.exitFullscreen():d.webkitExitFullscreen());
+   }
+  });
+  await Promise.race([entered,slow]);
   if(!(d.fullscreenElement||d.webkitFullscreenElement))throw new Error('not granted');
- }catch{stage.classList.add('theater');render();}
+ }catch{if(request===S.fullscreenRequest&&S.fullscreenWanted){stage.classList.add('theater');render();}}
+ finally{clearTimeout(timer);}
 };
 for(const ev of ['fullscreenchange','webkitfullscreenchange'])document.addEventListener(ev,()=>{
- const full=!!(document.fullscreenElement||document.webkitFullscreenElement);
- document.body.classList.toggle('is-full',full);if(full)document.querySelector('.stage').classList.remove('theater');render();
+ const full=!!(document.fullscreenElement||document.webkitFullscreenElement),stage=document.querySelector('.stage');
+ document.body.classList.toggle('is-full',full);
+ if(full)stage.classList.remove('theater');
+ else if(!stage.classList.contains('theater'))S.fullscreenWanted=false;
+ render();
 });
 document.addEventListener('keydown',e=>{
- if(e.key==='Escape'){const stage=document.querySelector('.stage');if(stage.classList.contains('theater')){stage.classList.remove('theater');render();$('fullButton').focus();}return;}
+ if(e.key==='Escape'){S.fullscreenWanted=false;S.fullscreenRequest++;const stage=document.querySelector('.stage');if(stage.classList.contains('theater')){stage.classList.remove('theater');render();$('fullButton').focus();}return;}
  if(e.target.closest('input,textarea,select,dialog,button,a,summary,#gamesPanel,#scores'))return;
  if(e.key===' '||e.key==='k'){e.preventDefault();if(S.started||S.archive)setPlaying(!S.playing);}
  else if((e.key==='ArrowLeft'||e.key==='ArrowRight')&&S.mode==='replay'){e.preventDefault();seekTo(S.at+(e.key==='ArrowRight'?1:-1)*(e.shiftKey?60:10));}
