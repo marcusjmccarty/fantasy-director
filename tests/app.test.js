@@ -17,7 +17,7 @@ import * as preferences from '../web/preferences.js';
 import * as liveHighlights from '../web/live-highlights.js';
 import * as continuity from '../web/continuity.js';
 import * as breaks from '../web/breaks.js';
-import {PlayerPool} from '../web/players.js';
+const {PlayerPool}=await import(process.env.FANTASY_AUDIT_POOL||'../web/players.js');
 import {EmbedPlayer} from '../web/embed-player.js';
 const html=readFileSync(new URL('../web/index.html',import.meta.url),'utf8');
 // Point at a historical app.js to reproduce the audit cases against that revision.
@@ -32,7 +32,7 @@ class Element{
  get innerHTML(){return this.html||'';}
  querySelectorAll(selector){return this.children.filter(e=>selector==='input,select'?['input','select'].includes(e.tag):selector==='.roster-entry'?e.className==='roster-entry':e.tag===selector);}
  querySelector(selector){return this.querySelectorAll(selector)[0]||new Element();}
- append(e){this.children.push(e);}replaceChildren(){this.children=[];}setAttribute(n,v){this[n]=v;}removeAttribute(n){delete this[n];}addEventListener(){}focus(){this.focused=true;}showModal(){this.open=true;}close(){this.open=false;}remove(){}
+ append(e){this.children.push(e);e.parentNode=this;}replaceWith(e){const parent=this.parentNode;if(parent){const i=parent.children.indexOf(this);parent.children[i]=e;e.parentNode=parent;this.parentNode=null;}this.removed=true;}replaceChildren(){this.children=[];}setAttribute(n,v){this[n]=v;}removeAttribute(n){delete this[n];}addEventListener(){}focus(){this.focused=true;}showModal(){this.open=true;}close(){this.open=false;}remove(){if(this.parentNode)this.parentNode.children=this.parentNode.children.filter(e=>e!==this);this.parentNode=null;this.removed=true;}
 }
 class Video extends Element{
  constructor(){super();this.events=new Map();this.paused=true;this.currentTime=0;this.duration=NaN;this.readyState=4;this.seeking=false;this.calls=[];}
@@ -57,14 +57,15 @@ function app(fetcher=async()=>Response.json({events:[]}),{media=false,native=fal
  const elements=new Map([...html.matchAll(/id="([^"]+)"/g)].map(m=>[m[1],new Element()]));
  const pageEvents=new Map(),stage=new Element(),document={getElementById(id){assert.ok(elements.has(id),`Missing UI element: ${id}`);return elements.get(id);},querySelectorAll(){return [];},querySelector(selector){return selector==='.stage'?stage:new Element();},createElement(tag){return tag==='video'?new Video():new Element();},addEventListener(name,fn){if(!pageEvents.has(name))pageEvents.set(name,[]);pageEvents.get(name).push(fn);},body:new Element()};
  const time={now:1000},timers=new Map();let timerId=0;
- const createFrame=()=>{const f=new Video();f.navigations=[];Object.defineProperty(f,'src',{get(){return f.navigations.at(-1);},set(url){f.navigations.push(url);f.onNavigate?.(url);}});return f;};
- class MediaPool extends PlayerPool{constructor(host,options){super(host,{...options,now:()=>time.now,create:source=>embeds&&source.type==='embed/page'?new EmbedPlayer(source.url,{now:()=>time.now,createFrame,autoReconnect:source.autoReconnect}):native?new ctx.Native(source):new Media(source)});}}
+ const frameEvents={};
+ const frameFactory=()=>{const navigations=[];return ()=>{const f=new Video();let src;f.navigations=navigations;Object.defineProperty(f,'src',{get(){return src;},set(url){src=url;navigations.push(url);frameEvents.onNavigate?.(url,f);}});return f;};};
+ class MediaPool extends PlayerPool{constructor(host,options){super(host,{...options,now:()=>time.now,create:source=>embeds&&source.type==='embed/page'?new EmbedPlayer(source.url,{now:()=>time.now,createFrame:frameFactory(),autoReconnect:source.autoReconnect}):native?new ctx.Native(source):new Media(source)});}}
  const storage=new Map(stored===null?[]:[['fantasy-stream-v3',JSON.stringify(stored)]]);
  const ctx={...archive,...sync,...director,...coverage,...replays,...live,...scoring,...roster,...highlights,...preferences,...liveHighlights,...continuity,...breaks,PlayerPool:media?MediaPool:Pool,NFLSourceCatalog:class{},document,window:{navigator:{onLine:true},addEventListener(){}},localStorage:{getItem:key=>storage.get(key)||null,setItem(key,value){if(storageBlocked)throw new Error('Storage unavailable');storage.set(key,value);}},performance:{now:()=>time.now},setTimeout(fn,delay){timers.set(++timerId,{fn,delay});return timerId;},clearTimeout(id){timers.delete(id);},setInterval:()=>0,fetch:fetcher,AbortSignal,AbortController,Response,URL,Date,console};
  vm.createContext(ctx);
  if(native){ctx.attachMediaSource=async()=>null;const code=readFileSync(new URL('../web/native-player.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace('export class NativePlayer','class NativePlayer');vm.runInContext(code+'\nglobalThis.Native=NativePlayer;',ctx);}
  vm.runInContext(script+'\n globalThis.a={S,pool,director,coverage,clock,step,updateBreaks,advanceClock,skipBreak,selectGame,excluded,cutTo,warm,startHighlight,updateHighlight,finishHighlight,syncFor,nudge,nfl,setMode,setPlaying,setDay,seekTo,replaySource,useRoster,importLeague,pollLive,pollLiveClips,prepareReplay,retryMissedReplays,failHighlight,render,init,roster,get saved(){return saved;}};',ctx);
- return {...ctx.a,time,timers,storage,page:document,stage,emitPage(name,event={}){for(const fn of pageEvents.get(name)||[])fn(event);},network:ctx.window.navigator, get saved(){return ctx.a.saved;},el:id=>elements.get(id)};
+ return {...ctx.a,time,timers,storage,page:document,stage,frameEvents,emitPage(name,event={}){for(const fn of pageEvents.get(name)||[])fn(event);},network:ctx.window.navigator, get saved(){return ctx.a.saved;},el:id=>elements.get(id)};
 }
 const player={name:'Jonathan Taylor',team:'IND',position:'RB'};
 const game={id:'A',name:'IND @ MIN',kind:'live',teams:[{id:'11',abbr:'IND'},{id:'16',abbr:'MIN'}],state:'in',phase:'live',possession:0,down:1,distance:10,yardsToGoal:40,nextSnapIn:null,date:'2026-11-01T18:00:00Z',scores:[],score:[0,0]};
@@ -394,9 +395,9 @@ test('embed fullscreen: theater fallback remains open through failures and Escap
 });
 test('embed fullscreen: legacy nested fullscreen gets a parent fallback before its document reloads',async()=>{
  const a=embeddedGame(),p=a.pool.current;a.page.fullscreenElement=p.element;a.emitPage('fullscreenchange');p.element.emit('load');
- p.element.onNavigate=()=>{assert.equal(a.stage.classList.contains('theater'),true,'fallback exists before the old document disappears');a.page.fullscreenElement=null;a.emitPage('fullscreenchange');};
+ a.frameEvents.onNavigate=()=>{assert.equal(a.stage.classList.contains('theater'),true,'fallback exists before the old document disappears');a.page.fullscreenElement=null;a.emitPage('fullscreenchange');};
  a.time.now=121000;a.step(a.time.now);assert.equal(a.stage.classList.contains('theater'),true);assert.equal(a.el('fullButton').textContent,'Exit full screen');
- p.element.onNavigate=null;await a.el('fullButton').onclick();a.time.now=136000;a.step(a.time.now);assert.equal(a.stage.classList.contains('theater'),false);assert.equal(a.S.playing,true);
+ a.frameEvents.onNavigate=null;await a.el('fullButton').onclick();a.time.now=136000;a.step(a.time.now);assert.equal(a.stage.classList.contains('theater'),false);assert.equal(a.S.playing,true);
 });
 test('embed fullscreen: late failure or success of a fullscreen request cannot undo an explicit exit',async()=>{
  for(const outcome of ['failure','success','late-success']){
@@ -468,6 +469,25 @@ test('site recovery: homepage links explain why reconnect can return to a site m
 test('site recovery: duplicate and absent backups never create an automatic source-switch loop',()=>{
  const a=embeddedGame(),p=a.pool.current;a.saved.streamBackups={'IND-MIN':p.url};a.render();assert.equal(a.el('nextStream').hidden,true);a.el('nextStream').onclick();assert.equal(a.pool.current,p);
  for(const now of [16000,36000,66000,126000]){a.time.now=now;a.step(now);}assert.equal(a.pool.current,p);assert.equal(p.destroyed,false);
+});
+test('embed switching: returning to older slots retires the outgoing context before opening the next site',()=>{
+ const a=app(undefined,{media:true,embeds:true});ready(a);const other={...game,id:'B',teams:[{abbr:'SEA'},{abbr:'SF'}]};a.S.games.push(other);a.S.live.games.push(other);a.S.live.feed.push(a.S.games,970);
+ a.saved.streams={'IND-MIN':'https://streamcorner.st/stream/a','SEA-SF':'https://streamcorner.st/stream/b'};a.saved.autoReconnect=false;
+ let outgoing=null,previousPlayer=null;
+ a.frameEvents.onNavigate=url=>{if(url!=='about:blank'&&outgoing)assert.equal(outgoing.removed,true,'the old browsing context must be detached before the new source begins');};
+ for(let i=0;i<100;i++){
+  a.selectGame(i%2?'B':'A');const p=a.pool.current;
+  if(previousPlayer){assert.equal(previousPlayer.loadedAt,null);outgoing.emit('load');assert.equal(previousPlayer.loadedAt,null);}
+  assert.equal(a.el('layers').children.filter(f=>f.src&&f.src!=='about:blank').length,1);
+  assert.equal(p.element.parentNode,a.el('layers'));assert.equal(p.element.classList.contains('on'),true);assert.equal(p.element.tabIndex,0);assert.equal(p.element['aria-hidden'],'false');
+  p.element.emit('load');a.time.now+=2000;assert.equal(p.progressing,true);outgoing=p.element;previousPlayer=p;
+ }
+ a.frameEvents.onNavigate=null;
+});
+test('embed switching: selecting the same loaded game does not replace its frame or restart its page',()=>{
+ const a=embeddedGame(),p=a.pool.current,frame=p.element;frame.emit('load');a.time.now+=2000;
+ for(let i=0;i<10;i++){a.selectGame('A');a.pool.show('A');}
+ assert.equal(p.element,frame);assert.equal(frame.removed,undefined);assert.equal(p.loadedAt,1000);assert.equal(a.pool.current,p);
 });
 test('choosing a franchise cancels an older import of another league',async()=>{
  const pending=deferred(),a=app(()=>pending.promise);ready(a);a.saved.leagueId='111';a.saved.league={teams:[{id:'1',name:'Chosen team',players:[player]}]};a.el('leagueId').value='222';const importing=a.importLeague();

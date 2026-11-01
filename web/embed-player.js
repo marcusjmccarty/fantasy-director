@@ -13,29 +13,44 @@ export class EmbedPlayer{
   this.primed=true;this.advances=2;this.loadedAt=null;this.audioLocked=false;this.isMuted=true;this.duration=NaN;this.visible=false;
   this.destroyed=false;
   this.autoReconnect=!!autoReconnect;this.loadStartedAt=null;this.nextReconnectAt=null;this.loadRetries=0;this.lastReconnectAt=-Infinity;this.suspendedAt=null;this.offline=false;this.recoveryMessage='';
-  const f=this.element=createFrame();f.className='layer';f.title='Stream';
+  this.createFrame=createFrame;this.element=this.newFrame();
+ }
+ newFrame(){
+  const f=this.createFrame();f.className='layer';f.title='Stream';
+  f.classList?.toggle('on',this.visible);f.setAttribute('aria-hidden',String(!this.visible));f.tabIndex=this.visible?0:-1;
   // This also confines nested players and ad frames. Keep playback/storage
   // working, but never let an embedded page open tabs, navigate our window,
   // launch browser dialogs or download files, even after a viewer clicks it.
   f.setAttribute('sandbox','allow-scripts allow-same-origin allow-forms allow-presentation');
   // Fullscreen belongs to our stable outer stage. Fullscreen owned by a video
   // inside this frame ends when that document reconnects or is switched out.
-  f.allow="autoplay; fullscreen 'none'; picture-in-picture; encrypted-media";f.referrerPolicy='no-referrer';
-  f.addEventListener('load',()=>{if(!this.destroyed&&this.visible&&f.src===this.url){this.loadedAt=this.now();this.loadRetries=0;}});
+  // Stream pages may redirect or embed media from a different origin. Delegate
+  // media features across that chain, while keeping fullscreen on our stage.
+  f.allow="autoplay *; fullscreen 'none'; picture-in-picture *; encrypted-media *";f.referrerPolicy='no-referrer';
+  f.addEventListener('load',()=>{if(!this.destroyed&&f===this.element&&this.visible&&this.wantPlay&&this.loadStartedAt!==null&&f.src===this.url){this.loadedAt=this.now();this.loadRetries=0;}});
+  return f;
+ }
+ replaceFrame(url){
+  // A fresh browsing context keeps late events from about:blank, the previous
+  // game, or an aborted reload from being accepted as the current attempt.
+  const old=this.element,f=this.newFrame();this.element=f;f.src=url;old.replaceWith(f);
+ }
+ unload(){
+  if(this.element.src&&this.element.src!=='about:blank')this.replaceFrame('about:blank');
  }
  on(name,callback){if(!this.listeners.has(name))this.listeners.set(name,new Set());this.listeners.get(name).add(callback);}
  emit(name,detail){for(const callback of this.listeners.get(name)||[])callback(detail);}
  setVisible(on){
   if(this.destroyed)return;
   this.visible=!!on;const f=this.element;
-  if(on){if(f.src!==this.url){this.resetRecovery();this.navigate();}}
-  else{this.resetRecovery();if(f.src&&f.src!=='about:blank')f.src='about:blank';}
+  if(on){if(this.wantPlay&&f.src!==this.url){this.resetRecovery();this.navigate();}}
+  else{this.resetRecovery();this.unload();}
  }
  get currentTime(){return 0;}
  get progressing(){return !this.destroyed&&!this.error&&(!this.visible||this.loadedAt!==null&&this.now()-this.loadedAt>1500);}
  near(){return this.progressing;}
  play(){if(this.destroyed)return;this.wantPlay=true;if(this.visible)this.setVisible(true);}
- pause(){this.wantPlay=false;this.resetRecovery();if(this.visible)this.element.src='about:blank';}
+ pause(){this.wantPlay=false;this.resetRecovery();this.unload();}
  seek(){}
  // A cross-origin page can display an error or navigate inside its own frame
  // without telling us. Reload just that document; preserve the channel state.
@@ -44,7 +59,7 @@ export class EmbedPlayer{
  navigate(message='',detail={}){
   const now=this.now();this.loadedAt=null;this.loadStartedAt=now;this.lastReconnectAt=now;this.nextReconnectAt=this.autoReconnect?now+RECONNECT_EVERY:null;this.recoveryMessage=message;
   if(message)this.emit('reconnect',detail);
-  if(!this.destroyed&&this.visible&&(!message||this.wantPlay))this.element.src=this.url;
+  if(!this.destroyed&&this.visible&&this.wantPlay)this.replaceFrame(this.url);
  }
  setAutoReconnect(value){
   if(this.autoReconnect===!!value)return;

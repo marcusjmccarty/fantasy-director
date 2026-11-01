@@ -25,6 +25,7 @@ function fakeElement(){
  el.setAttribute=(k,v)=>{el.attrs.set(k,String(v));};
  el.getAttribute=k=>el.attrs.has(k)?el.attrs.get(k):null;
  el.removeAttribute=k=>{el.attrs.delete(k);if(k==='src')delete el.src;};
+ el.replaceWith=next=>{if(el.parent){const parent=el.parent;parent.children[parent.children.indexOf(el)]=next;next.parent=parent;el.parent=null;}el.removed=true;};
  el.remove=()=>{el.removed=true;if(el.parent){el.parent.children=el.parent.children.filter(c=>c!==el);el.parent=null;}};
  return el;
 }
@@ -972,7 +973,7 @@ test('EmbedPlayer: hidden it has no page and counts as ready; shown it loads the
   let now=0;const p=new EmbedPlayer('https://stream.example/game',{now:()=>now});
   assert.equal(p.kind,'embed');assert.equal(frame.src,undefined,'nothing loads until shown');
   assert.equal(p.progressing,true,'hidden: nothing to wait for');assert.equal(p.near(),true);
-  p.setVisible(true);
+  p.setVisible(true);p.play();
   assert.equal(frame.src,'https://stream.example/game');assert.equal(p.progressing,false,'shown: not until the page has loaded');
   now=1000;frame.listeners.load();assert.equal(p.progressing,false);
   now=2600;assert.equal(p.progressing,true);
@@ -988,7 +989,7 @@ test('PlayerPool.show()/hide() tell players whether they are on screen',()=>{
  const make=key=>({kind:'embed',element:fakeElement(),listeners:new Map(),on(){},play(){},pause(){},seek(){},destroy(){},near(){return true;},progressing:true,target:null,primed:true,advances:2,wantPlay:false,error:null,set muted(v){},get muted(){return true;},setVisible(on){shown.push([key,on]);}});
  const pool=new PlayerPool(host,{capacity:3,create:s=>make(s.url),now:()=>0});
  pool.open('a',{url:'a',type:'embed/page'});pool.open('b',{url:'b',type:'embed/page'});
- pool.show('a');assert.deepEqual(shown.splice(0),[['a',true],['b',false]]);
+ pool.show('a');assert.deepEqual(shown.splice(0),[['b',false],['a',true]]);
  pool.show('b');assert.deepEqual(shown.splice(0),[['a',false],['b',true]]);
  pool.hide();assert.deepEqual(shown.splice(0),[['a',false],['b',false]]);
 });

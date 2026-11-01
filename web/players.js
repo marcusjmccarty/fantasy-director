@@ -58,7 +58,10 @@ export class PlayerPool{
  ready(key,target,tolerance=TOLERANCE){const p=this.slots.get(key)?.player;return !!p&&(target===null||target===undefined?p.progressing:p.near(target,tolerance));}
  show(key){
   const slot=this.slots.get(key);if(!slot)return false;
-  for(const s of this.slots.values()){const on=s.key===key;s.player.element.classList.toggle('on',on);s.player.element.setAttribute('aria-hidden',String(!on));s.player.element.tabIndex=on?0:-1;s.player.muted=!on||this.muted;s.player.setVisible?.(on);}
+  // Retire every outgoing page before starting the incoming one, including a
+  // return to an older slot that precedes the current one in insertion order.
+  for(const s of this.slots.values())if(s!==slot){s.player.element.classList.remove('on');s.player.element.setAttribute('aria-hidden','true');s.player.element.tabIndex=-1;s.player.muted=true;s.player.setVisible?.(false);}
+  slot.player.element.classList.add('on');slot.player.element.setAttribute('aria-hidden','false');slot.player.element.tabIndex=0;slot.player.muted=this.muted;slot.player.setVisible?.(true);
   this.visible=key;this.touch(slot);if(this.running)slot.player.play();return true;
  }
  hide(){for(const s of this.slots.values()){s.player.element.classList.remove('on');s.player.element.setAttribute('aria-hidden','true');s.player.element.tabIndex=-1;s.player.muted=true;s.player.setVisible?.(false);}this.visible=null;}

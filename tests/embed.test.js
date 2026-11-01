@@ -2,14 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 const {EmbedPlayer}=await import(process.env.FANTASY_AUDIT_EMBED||'../web/embed-player.js');
 function harness(){
- let now=0;const attributes=new Map(),events=new Map(),navigations=[];
- const frame={setAttribute:(k,v)=>attributes.set(k,v),addEventListener:(k,v)=>events.set(k,v),remove(){this.removed=true;},get src(){return navigations.at(-1)?.url;},set src(url){navigations.push({url,sandbox:attributes.get('sandbox')});}};
+ let now=0;const navigations=[],frames=[];
+ const createFrame=()=>{const attributes=new Map(),events=new Map();let src;const frame={attributes,events,setAttribute:(k,v)=>attributes.set(k,v),addEventListener:(k,v)=>events.set(k,v),replaceWith(){this.removed=true;},remove(){this.removed=true;},get src(){return src;},set src(url){src=url;navigations.push({url,sandbox:attributes.get('sandbox')});}};frames.push(frame);return frame;};
  // The original adapter used the global document; keep the negative-control
  // harness compatible so failures exercise behavior, not injection support.
  const previous=globalThis.document;let p;
- globalThis.document={createElement:()=>frame};
- try{p=new EmbedPlayer('https://ntv.st/game/example',{now:()=>now,createFrame:()=>frame});}finally{globalThis.document=previous;}
- return {p,frame,navigations,attributes,load:()=>events.get('load')(),tick:value=>{now=value;}};
+ globalThis.document={createElement:createFrame};
+ try{p=new EmbedPlayer('https://ntv.st/game/example',{now:()=>now,createFrame});}finally{globalThis.document=previous;}
+ return {p,get frame(){return p.element;},frames,navigations,load:(frame=p.element)=>frame.events.get('load')(),tick:value=>{now=value;}};
 }
 test('embed safety: every stream navigation is sandboxed before loading, including returns and reloads',()=>{
  const h=harness(),{p}=h;p.setVisible(true);p.play();
@@ -90,4 +90,23 @@ test('embed recovery: reconnect announces navigation first and respects synchron
   p.on('reconnect',()=>{assert.equal(h.navigations.length,before,'prepare the parent before unloading the frame');p[stop]();});
   h.tick(120000);p.checkHealth();assert.equal(h.frame.src,'about:blank');assert.equal(h.navigations.length,before+1);assert.equal(p.wantPlay,false);p.destroy();
  }
+});
+test('embed switching: a paused visible page cannot restart through a repeated show',()=>{
+ const h=harness(),{p}=h;p.setVisible(true);assert.equal(h.navigations.length,0);p.play();h.load();p.pause();const count=h.navigations.length;
+ p.setVisible(true);p.setVisible(true);assert.equal(h.navigations.length,count);assert.equal(p.wantPlay,false);assert.equal(p.loadedAt,null);p.destroy();
+});
+test('embed switching: late load events from a retired page or blank document cannot ready the returning stream',()=>{
+ const h=harness(),{p}=h;p.setVisible(true);p.play();const first=p.element;h.load();p.setVisible(false);const blank=p.element;p.setVisible(true);const current=p.element;
+ h.tick(1000);h.load(first);h.load(blank);assert.equal(p.loadedAt,null,'old document events cannot acknowledge the current request');assert.equal(p.progressing,false);
+ assert.notEqual(current,first);assert.notEqual(current,blank);assert.equal(first.removed,true);assert.equal(blank.removed,true);
+ h.load(current);h.tick(3000);assert.equal(p.progressing,true);p.destroy();
+});
+test('embed switching: reloading the same URL creates a new attempt and rejects the previous load event',()=>{
+ const h=harness(),{p}=h;p.setVisible(true);p.play();const old=p.element;p.reload();h.tick(1000);h.load(old);assert.equal(p.loadedAt,null);
+ h.load();h.tick(3000);assert.equal(p.progressing,true);assert.equal(old.removed,true);p.destroy();
+});
+test('embed switching: all active documents delegate media across origins and retain navigation containment',()=>{
+ const h=harness(),{p}=h;p.setVisible(true);p.play();p.reload();p.setVisible(false);p.setVisible(true);
+ for(const frame of h.frames){assert.match(frame.allow,/autoplay \*/);assert.match(frame.allow,/encrypted-media \*/);assert.match(frame.allow,/fullscreen 'none'/);assert.doesNotMatch(frame.attributes.get('sandbox'),/allow-popups|allow-top-navigation/);}
+ p.destroy();
 });
