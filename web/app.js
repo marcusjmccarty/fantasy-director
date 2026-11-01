@@ -256,7 +256,9 @@ function commit(id){
  // Keep an unfinished replay moving until the replacement picture is ready.
  if(S.highlight?.playing&&!S.highlight.done)finishHighlight();
  if(picture(id)==='video'){pool.show(id);if(S.highlight)closeHighlight();}else{pool.hide();if(S.highlight)closeHighlight();}
- S.program={kind:'game',id,since:S.at};S.pending=null;director.committed(S.at);
+ // Each newly shown page gets its own recovery window. Carrying the previous
+ // player's stalled timer across cuts can immediately reject a healthy embed.
+ S.program={kind:'game',id,since:S.at};S.pending=null;S.stall=null;director.committed(S.at);
  S.unmuteHint=false;
  if(was!==id||confirming)S.cuts++;
  render();
@@ -614,6 +616,7 @@ function renderTransport(){
  $('pinCurrent').hidden=!inGame||!current;
  $('pinCurrent').textContent=S.pinned?'Let the channel choose':'Stay on this game';$('pinCurrent').setAttribute('aria-pressed',String(!!S.pinned));
  $('skipBreak').hidden=!inGame||picture(currentGameId())!=='video';$('skipBreak').disabled=!S.playing;
+ $('reloadStream').hidden=!inGame||pool.current?.kind!=='embed';$('reloadStream').disabled=!S.playing;
  $('leaveHighlight').hidden=!S.highlight||S.highlight.done;$('leaveHighlight').disabled=!S.playing;
  $('undoBreak').hidden=!S.breaks.size;
 }
@@ -666,6 +669,10 @@ $('setupWatch').onclick=()=>{saved.muted=false;persist();setPlaying(true);if(S.s
 $('setupStreams').onclick=()=>{if(S.mode==='live'&&!hasLineup()){openLineup();return;}openStreams();};
 $('timingButton').onclick=()=>openSettings('sync');
 $('skipBreak').onclick=skipBreak;
+$('reloadStream').onclick=()=>{
+ if(S.mode!=='live'||S.program.kind!=='game'||S.highlight||!S.playing||pool.current?.kind!=='embed')return;
+ if(pool.current.reload()){S.stall=null;S.lastAt=null;toast('Reloading this stream. If it stays blank, try another link in Game streams.');render();}
+};
 $('undoBreak').onclick=()=>{S.breaks.clear();director.reset();if(S.playing)step(performance.now());render();toast('The skipped game is available again.');};
 $('pinCurrent').onclick=()=>{if(S.pinned){S.pinned=null;S.selection=null;director.reset();render();}else selectGame(currentGameId());};
 $('leaveHighlight').onclick=()=>{if(!S.highlight)return;skipHighlight();S.pending=null;director.reset();if(S.playing)step(performance.now());render();};

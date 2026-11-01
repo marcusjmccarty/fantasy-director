@@ -18,6 +18,7 @@ import * as liveHighlights from '../web/live-highlights.js';
 import * as continuity from '../web/continuity.js';
 import * as breaks from '../web/breaks.js';
 import {PlayerPool} from '../web/players.js';
+import {EmbedPlayer} from '../web/embed-player.js';
 const html=readFileSync(new URL('../web/index.html',import.meta.url),'utf8');
 // Point at a historical app.js to reproduce the audit cases against that revision.
 const script=readFileSync(process.env.FANTASY_AUDIT_APP||new URL('../web/app.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace(/\ninit\(\);\s*$/,'');
@@ -52,11 +53,11 @@ class Media{
  play(){this.wantPlay=true;}pause(){this.wantPlay=false;}seek(at){this.currentTime=at;}near(at,tolerance=2.5){return this.progressing&&Math.abs(this.currentTime-at)<=tolerance;}
  destroy(){this.wantPlay=false;this.destroyed=true;}
 }
-function app(fetcher=async()=>Response.json({events:[]}),{media=false,native=false,stored=null,storageBlocked=false}={}){
+function app(fetcher=async()=>Response.json({events:[]}),{media=false,native=false,embeds=false,stored=null,storageBlocked=false}={}){
  const elements=new Map([...html.matchAll(/id="([^"]+)"/g)].map(m=>[m[1],new Element()]));
  const stage=new Element(),document={getElementById(id){assert.ok(elements.has(id),`Missing UI element: ${id}`);return elements.get(id);},querySelectorAll(){return [];},querySelector(selector){return selector==='.stage'?stage:new Element();},createElement(tag){return tag==='video'?new Video():new Element();},addEventListener(){},body:new Element()};
  const time={now:1000},timers=new Map();let timerId=0;
- class MediaPool extends PlayerPool{constructor(host,options){super(host,{...options,now:()=>time.now,create:source=>native?new ctx.Native(source):new Media(source)});}}
+ class MediaPool extends PlayerPool{constructor(host,options){super(host,{...options,now:()=>time.now,create:source=>embeds&&source.type==='embed/page'?new EmbedPlayer(source.url,{now:()=>time.now,createFrame:()=>new Video()}):native?new ctx.Native(source):new Media(source)});}}
  const storage=new Map(stored===null?[]:[['fantasy-stream-v3',JSON.stringify(stored)]]);
  const ctx={...archive,...sync,...director,...coverage,...replays,...live,...scoring,...roster,...highlights,...preferences,...liveHighlights,...continuity,...breaks,PlayerPool:media?MediaPool:Pool,NFLSourceCatalog:class{},document,window:{addEventListener(){}},localStorage:{getItem:key=>storage.get(key)||null,setItem(key,value){if(storageBlocked)throw new Error('Storage unavailable');storage.set(key,value);}},performance:{now:()=>time.now},setTimeout(fn,delay){timers.set(++timerId,{fn,delay});return timerId;},clearTimeout(id){timers.delete(id);},setInterval:()=>0,fetch:fetcher,AbortSignal,Response,URL,Date,console};
  vm.createContext(ctx);
@@ -302,6 +303,38 @@ test('a scoreboard outage does not suspend stalled-video recovery',()=>{
  const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.com/a.mp4'};a.setPlaying(true);a.step(1000);const video=a.pool.current;video.moving=false;
  a.S.live.error='unavailable';a.S.live.fetched=Date.now()-60000;a.S.stall={since:1000,step:2};a.time.now=25000;a.step(25000);
  assert.equal(video.destroyed,true);assert.equal(a.S.cooldown.has('A'),true);
+});
+test('embed safety: reloading a stream preserves manual choice, lineup, coverage and the other player',()=>{
+ const a=app(undefined,{media:true,embeds:true});ready(a);a.saved.streams={'IND-MIN':'https://ntv.st/game/a'};a.selectGame('A');
+ const p=a.pool.current;a.time.now=2000;p.element.emit('load');a.time.now=4000;assert.equal(p.progressing,true);
+ const spare=a.pool.open('spare',{url:'https://ntv.st/game/b',type:'embed/page'}).player;
+ a.coverage.watch('A',998,1000);const lineup=JSON.stringify(a.saved),cuts=a.S.cuts,choice=a.S.selection;
+ a.S.stall={since:0,step:2};a.render();assert.equal(a.el('reloadStream').hidden,false);a.el('reloadStream').onclick();
+ assert.equal(a.pool.current,p);assert.equal(p.loadedAt,null);assert.equal(a.S.stall,null);assert.equal(a.S.pinned,'A');assert.equal(a.S.selection,choice);assert.equal(a.S.cuts,cuts);
+ assert.equal(JSON.stringify(a.saved),lineup);assert.equal(a.coverage.intervals.get('A').length,1);assert.equal(a.pool.get('spare').player,spare);assert.equal(spare.element.src,undefined);
+ a.setPlaying(false);a.render();assert.equal(a.el('reloadStream').disabled,true);a.el('reloadStream').onclick();assert.equal(p.element.src,'about:blank');assert.equal(a.S.playing,false);
+});
+test('embed safety: repeated switches unload the outgoing page and retain the sandbox on return',()=>{
+ const a=app(undefined,{media:true,embeds:true});ready(a);
+ const other={...game,id:'B',teams:[{abbr:'SEA'},{abbr:'SF'}]};a.S.games.push(other);a.S.live.games.push(other);a.S.live.feed.push(a.S.games,970);
+ a.saved.streams={'IND-MIN':'https://ntv.st/game/a','SEA-SF':'https://ntv.st/game/b'};
+ for(let i=0;i<16;i++){
+  const id=i%2?'B':'A';a.selectGame(id);const current=a.pool.current;assert.equal(a.pool.visible,id,`switch ${i}: the new page must get its own load/recovery window`);assert.match(current.element.sandbox,/allow-scripts/);assert.equal(current.element.sandbox.includes('allow-popups'),false);
+  for(const slot of a.pool.slots.values())if(slot.key!==id)assert.ok(!slot.player.element.src||slot.player.element.src==='about:blank');
+  current.element.emit('load');a.time.now+=2000;assert.equal(current.progressing,true);
+ }
+});
+test('embed safety: a page that never loads releases the manual selection and recovers to another game',()=>{
+ const a=app(undefined,{media:true,embeds:true});ready(a);const other={...game,id:'B',teams:[{abbr:'SEA'},{abbr:'SF'}]};
+ a.useRoster([player,{name:'Other starter',team:'SEA',position:'WR'}],{teamName:'Two games'});a.S.games=[game,other];a.S.live.games=a.S.games;a.S.live.feed.push(a.S.games,970);
+ a.saved.streams={'IND-MIN':'https://ntv.st/game/a','SEA-SF':'https://example.test/b.mp4'};a.selectGame('A');const p=a.pool.current;
+ for(const now of [5000,12000,25000,25250]){a.time.now=now;a.step(now);}
+ assert.equal(p.destroyed,true);assert.equal(a.S.cooldown.has('A'),true);assert.equal(a.S.pinned,null);assert.equal(a.pool.visible,'B');assert.equal(a.S.playing,true);
+ p.element.emit('load');assert.equal(p.loadedAt,null);assert.equal(a.pool.visible,'B');
+});
+test('embed safety: reload is unavailable for direct video and highlights',()=>{
+ const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.selectGame('A');a.render();assert.equal(a.el('reloadStream').hidden,true);
+ const p=a.pool.current;a.el('reloadStream').onclick();assert.equal(a.pool.current,p);assert.equal(p.wantPlay,true);
 });
 test('choosing a franchise cancels an older import of another league',async()=>{
  const pending=deferred(),a=app(()=>pending.promise);ready(a);a.saved.leagueId='111';a.saved.league={teams:[{id:'1',name:'Chosen team',players:[player]}]};a.el('leagueId').value='222';const importing=a.importLeague();
