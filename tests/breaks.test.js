@@ -88,3 +88,41 @@ test('unavailable or finished games cannot retain old break exclusions',()=>{
  assert.equal(update(control,{...live,state:'post',score:[7,0]}).blocked.size,0);
  assert.equal(update(control,{...live,score:[7,0]}).blocked.size,0);
 });
+test('release: missing play metadata cannot reopen a known scoring break',()=>{
+ const control=new BreakControl();update(control,live);
+ update(control,{...live,score:[7,0],lastPlayId:'td'});
+ for(const patch of [{lastPlayId:''},{lastPlayId:'',clock:'9:59'},{lastPlayId:'td',clock:'9:58'}]){
+  assert.equal(update(control,{...live,score:[7,0],...patch}).blocked.has('A'),true,'wait for an identified new play');
+ }
+ assert.equal(update(control,{...live,score:[7,0],lastPlayId:'drive'}).blocked.size,0);
+});
+test('release: missing IDs on repeated scoring snapshots retain the known boundary',()=>{
+ const control=new BreakControl();update(control,live);
+ update(control,{...live,phase:'break',breakKind:'score',score:[7,0],lastPlayId:'td'});
+ update(control,{...live,phase:'break',breakKind:'score',score:[7,0],lastPlayId:''});
+ assert.equal(update(control,{...live,score:[7,0],lastPlayId:'td',clock:'9:59'}).blocked.has('A'),true);
+ assert.equal(update(control,{...live,score:[7,0],lastPlayId:'drive'}).blocked.size,0);
+});
+test('release: an overturned touchdown restores football without needing another play ID',()=>{
+ const control=new BreakControl();update(control,live);
+ assert.equal(update(control,{...live,score:[6,0],lastPlayId:'review'}).blocked.has('A'),true);
+ assert.equal(update(control,{...live,lastPlayId:'review',down:2}).blocked.size,0);
+});
+test('release: a PAT correction is not an overturned touchdown',()=>{
+ const control=new BreakControl();update(control,live);
+ update(control,{...live,score:[6,0],lastPlayId:'td'});
+ update(control,{...live,score:[7,0],lastPlayId:'pat',down:0});
+ assert.equal(update(control,{...live,score:[6,0],lastPlayId:'pat',down:1}).blocked.has('A'),true);
+ assert.equal(update(control,{...live,score:[6,0],lastPlayId:'drive'}).blocked.size,0);
+});
+test('release: overturning a score does not reopen an explicit review timeout',()=>{
+ const control=new BreakControl();update(control,live);
+ update(control,{...live,score:[6,0],lastPlayId:'review'});
+ assert.equal(update(control,{...live,phase:'break',breakKind:'timeout',lastPlayId:'review'}).blocked.has('A'),true);
+ assert.equal(update(control,{...live,lastPlayId:'review'}).blocked.size,0);
+});
+test('release: incomplete team scores cannot masquerade as an overturned touchdown',()=>{
+ const control=new BreakControl();update(control,live);update(control,{...live,score:[7,0],lastPlayId:'td'});
+ assert.equal(update(control,{...live,scoreKnown:false,lastPlayId:'td'}).blocked.has('A'),true);
+ assert.equal(update(control,{...live,score:[7,0],lastPlayId:'drive'}).blocked.size,0,'restored totals do not fabricate another score');
+});

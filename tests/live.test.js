@@ -42,6 +42,16 @@ const summary=({previous=[],current,scoringPlays=[]}={})=>({drives:{previous:pre
 const scoringPlay=(id,teamId,text,{type='Passing Touchdown',scoringType='touchdown',away=0,home=0,period=1,clock='10:12'}={})=>
  ({id:String(id),team:{id:String(teamId)},text,type:{text:type},scoringType:{name:scoringType},awayScore:away,homeScore:home,period:{number:period},clock:{displayValue:clock}});
 const WC1='2025-10-19T17:08:31Z',WC2='2025-10-19T17:20:00Z',WC3='2025-10-19T17:40:00Z';
+test('release: only complete numeric scoreboard totals can confirm a score correction',()=>{
+ for(const value of [undefined,null,'',' ',true,'unknown',-1,Infinity]){
+  const e=event();e.competitions[0].competitors[0].score=value;
+  assert.equal(one(scoreboard(e)).scoreKnown,false,String(value));
+ }
+ for(const value of [0,'0',7,'7']){
+  const e=event();e.competitions[0].competitors[0].score=value;
+  assert.equal(one(scoreboard(e)).scoreKnown,true,String(value));
+ }
+});
 
 test('corrections: invalid timestamps cannot create immediately settled scores',()=>{
  const g=one(scoreboard(event())),s=summary({previous:[[play(1,'not-a-date',11)]],scoringPlays:[scoringPlay(1,11,'Jonathan Taylor 4 Yd Rush')]});

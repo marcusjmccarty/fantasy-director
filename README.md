@@ -33,7 +33,7 @@ Public leagues import with just the league ID. For private leagues, viewers past
 4. **Leave breaks.** An active roster game fills in first. If all roster games are in breaks or unavailable, another configured game can fill the screen. It does not continue after the roster slate ends. Reported provider ads hide and mute immediately, including while a replacement buffers. Inferred replay breaks wait for the scoring footage to finish and remain remembered through compressed edits. Delayed live scoreboard increases also identify a scoring break when a timeout snapshot is missing. If no eligible video is ready, a waiting screen replaces the break; replays can advance to the next known football play. **Skip this break** handles ads the player cannot report, with a ninety-second exclusion and an Undo control. Pausing preserves that timer. Add optional backup links below the player.
 5. **Finish short highlights.** Once a short score clip is visible, finish it before automatic switching. Manual game choices override it. Long or unknown clips have a bounded opening protection window; failed or ad-reporting clips enter recovery. See the audit below for the exact limits and tradeoffs.
 
-The layout separates initial setup, the player, the tabbed game guide, and stream entry. Captions and alerts sit outside the video. The red dot identifies the brand in both modes; the mode label indicates live versus recorded viewing.
+The layout separates initial setup, the player, the always-visible game guide, and stream entry. Captions and alerts sit outside the video. The red dot identifies the brand in both modes; the mode label indicates live versus recorded viewing.
 
 ## Live games through the stream's delay (`web/live.js`)
 
@@ -76,7 +76,7 @@ Calibrating a recording is automatic: `node scripts/scorebug-ocr/jobs.mjs` resol
 
 ## Tests
 
-`npm test` runs 529 tests covering the director, coverage, alignment, scoring parser, archive sampling and play windows, replay matching, live normalization and the delayed live feed, the provider handshake, page embeds and the player pool, a full-Sunday rehearsal, and the server endpoints. They are deterministic simulations; real playback still needs a browser with the page in view (the provider's player stops reporting while the page is hidden).
+`npm test` runs 545 tests covering the director, coverage, alignment, scoring parser, archive sampling and play windows, replay matching, live normalization and the delayed live feed, the provider handshake, page embeds and the player pool, full-Sunday rehearsals through the director and the app, and the server endpoints. They are deterministic simulations; real playback still needs a browser with the page in view (the provider's player stops reporting while the page is hidden).
 
 ## Reliability checks and live limits
 
@@ -111,6 +111,8 @@ and the stream-delay setting. Automated tests rehearse decision/state behavior;
 they do not verify the availability of third-party live broadcasts.
 
 ## Latest audit and interface changes
+
+See [Sunday release logic pass](docs/sunday-release-logic.md) for independent scoreboard polling, stricter scoring-break recovery, playable commercial backups, the 545-test result, baseline negative controls, and public highlight delivery checks.
 
 See [viewing room refinement](docs/viewing-room-refinement.md) for the permanent lineup shortcut, always-visible game guide, separate starters/scores sections, compact playback controls, and validation limits.
 

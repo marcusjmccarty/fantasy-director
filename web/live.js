@@ -15,6 +15,8 @@ export function liveGames(raw,nowSeconds=Date.now()/1000){
  return raw.events.map(e=>{
   const c=e.competitions?.[0]||{},s=c.situation||{},status=c.status||e.status||{},type=status.type||{};
   const ordered=[...(c.competitors||[])].sort((a,b)=>(a.homeAway==='away'?0:1)-(b.homeAway==='away'?0:1));
+  // Display defaults must not be treated as evidence of a score correction.
+  const scoreKnown=ordered.length===2&&ordered.every(t=>['number','string'].includes(typeof t.score)&&String(t.score).trim()!==''&&Number.isFinite(Number(t.score))&&Number(t.score)>=0);
   const teams=ordered.map(t=>({id:String(t.team?.id||t.id),abbreviation:t.team?.abbreviation||'?',abbr:alias(t.team?.abbreviation||'?'),name:t.team?.displayName||'',score:Number(t.score||0)}));
   const possession=teams.findIndex(t=>t.id===String(s.possession?.id??s.possession??''));
   const state=type.completed?'post':type.state||'pre';
@@ -29,7 +31,7 @@ export function liveGames(raw,nowSeconds=Date.now()/1000){
    else if(last.scoringPlay||/touchdown|field goal good/i.test(lastType)){phase='break';breakKind='score';}
    else if(possession<0){phase='break';breakKind='stoppage';}
   }
-  return {id:String(e.id),name:e.shortName||e.name||'NFL game',kind:'live',teams,state,phase,breakKind,score:teams.map(t=>t.score),
+  return {id:String(e.id),name:e.shortName||e.name||'NFL game',kind:'live',teams,state,phase,breakKind,score:teams.map(t=>t.score),scoreKnown,
    possession,down,distance:Number(s.distance||0),yardsToGoal:ytg,special:down<=0||/kickoff|punt/i.test(lastType)&&down<=0,
    period:Number(status.period||0),clock:status.displayClock||'',detail:type.shortDetail||'',downDistance:s.shortDownDistanceText||'',
    lastPlay:last.text||'',lastPlayId,playType:lastType,nextSnapIn:null,date:e.date,season:Number(raw.season?.year||e.season?.year)||null,week:Number(raw.week?.number||e.week?.number)||null,scores:[],fetchedAt:nowSeconds};

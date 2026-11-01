@@ -42,7 +42,7 @@ function persist(){try{localStorage.setItem(STORE,JSON.stringify(S.mode==='repla
 const S={scope:'game',center:null,range:null,mode:'live',archive:null,clips:[],liveClips:[],day:0,games:[],at:Date.now()/1000,lastAt:null,
  program:{kind:'idle'},pending:null,pinned:null,selection:null,highlight:null,decision:null,playing:false,started:false,
  cooldown:new Map(),ads:new Set(),breaks:new Map(),detectedBreaks:new Map(),sources:new Map(),syncs:new Map(),usedClips:new Map(),failedClips:new Map(),seekHold:false,cuts:0,
- lastStep:0,lastWarm:0,lastRender:0,live:{games:[],feed:new LiveFeed(),scores:new Map(),fetched:0,error:'',generation:0},toastTimer:null,unmuteHint:false};
+ lastStep:0,lastWarm:0,lastRender:0,live:{games:[],feed:new LiveFeed(),scores:new Map(),summaryPending:new Map(),fetched:0,error:'',generation:0},toastTimer:null,unmuteHint:false};
 const clock=new Clock(),director=new Director(),coverage=new Coverage(),nfl=new NFLSourceCatalog(),breakControl=new BreakControl();
 const pool=new PlayerPool($('layers'),{capacity:3,
  onAd:(key,on)=>{
@@ -89,7 +89,17 @@ function excluded(){
  for(const key of S.detectedBreaks.keys())out.add(key);
  const breakNow=S.playing?now:S.pausedAt??now;
  for(const [id,until] of S.breaks)if(until>breakNow)out.add(id);else S.breaks.delete(id);
- if(S.mode==='live')for(const g of S.games)if(!sourceFor(g.id)&&S.games.some(x=>x.state==='in'&&hasRoster(x,roster())&&sourceFor(x.id)&&!out.has(x.id)))out.add(g.id);
+ if(S.mode==='live'){
+  const videos=S.games.filter(g=>g.state==='in'&&sourceFor(g.id));
+  const rosterVideo=videos.some(g=>hasRoster(g,roster())&&!out.has(g.id));
+  const videoBreak=videos.some(g=>S.ads.has(g.id)||S.detectedBreaks.has(g.id)||S.breaks.has(g.id));
+  const backup=videoBreak&&videos.some(g=>g.phase!=='break'&&!out.has(g.id));
+  // A commercial should yield to available football, even when another
+  // starter's game has only a text tracker. Keep trackers as the fallback
+  // when no replacement video is available. Before any break, an unrelated
+  // link alone still cannot displace the viewer's roster tracker.
+  if(rosterVideo||backup)for(const g of S.games)if(!sourceFor(g.id))out.add(g.id);
+ }
  return out;
 }
 const LIVE_SLACK=12;   // seconds the scoreboard may trail the snap on top of the stream delay
@@ -750,16 +760,20 @@ async function setMode(mode){
 $('replayMode').onclick=()=>setMode('replay');$('liveMode').onclick=()=>setMode('live');
 async function espn(path,signal){const r=await fetch(ESPN+path,{credentials:'omit',referrerPolicy:'no-referrer',cache:'no-store',signal});if(!r.ok)throw new Error('ESPN unavailable');return r.json();}
 async function pollLive(generation){
- if(generation!==S.live.generation)return;
+ if(generation!==S.live.generation||S.mode!=='live')return;
+ let summaries;
  try{
   const games=liveGames(await espn('scoreboard',AbortSignal.timeout(8000)));
   if(generation!==S.live.generation||S.mode!=='live')return;
   for(const g of games)g.scores=S.live.scores.get(g.id)||[];
   S.live.games=games;S.live.error='';S.live.fetched=Date.now();S.live.feed.push(games,Date.now()/1000);if($('streamsStatus').textContent==='Refreshing the schedule…')$('streamsStatus').textContent='Schedule updated.';
   const teams=rosterTeams(roster());
-  await Promise.allSettled(games.filter(g=>g.state!=='pre'&&g.teams.some(t=>teams.has(t.abbr))&&Date.now()-(S.live.summaryAt?.[g.id]||0)>25000).sort((a,b)=>(S.live.summaryAt?.[a.id]||0)-(S.live.summaryAt?.[b.id]||0)).slice(0,4).map(async g=>{
+  const pending=S.live.summaryPending,capacity=Math.max(0,4-[...pending.values()].filter(request=>request.generation===generation).length);
+  summaries=Promise.allSettled(games.filter(g=>g.state!=='pre'&&g.teams.some(t=>teams.has(t.abbr))&&pending.get(g.id)?.generation!==generation&&Date.now()-(S.live.summaryAt?.[g.id]||0)>25000).sort((a,b)=>(S.live.summaryAt?.[a.id]||0)-(S.live.summaryAt?.[b.id]||0)).slice(0,capacity).map(async g=>{
    // Space failed attempts too, so one unavailable group cannot starve later games.
    S.live.summaryAt={...S.live.summaryAt,[g.id]:Date.now()};
+   const request={generation};pending.set(g.id,request);
+   try{
    const summary=await espn('summary?event='+g.id,AbortSignal.timeout(10000));
    if(generation!==S.live.generation||S.mode!=='live')return;
    const previous=S.live.scores.get(g.id)||[],scores=liveScores(summary,g,previous);g.scores=scores;S.live.scores.set(g.id,scores);
@@ -773,11 +787,15 @@ async function pollLive(generation){
    }
    const clips=normalizeHighlights(summary,g).filter(c=>c.kind==='clip').map(c=>({...c,inlinePlayable:playable(c),athletes:[],short:!/(?:highlights|best plays|every|all .*plays)/i.test(c.title)}));
    S.liveClips=[...new Map([...S.liveClips,...clips].map(c=>[c.id,c])).values()].slice(-240);
+   }finally{if(pending.get(g.id)===request)pending.delete(g.id);}
   }));
-  if(generation!==S.live.generation||S.mode!=='live')return;
-  retryMissedReplays();
  }catch{if(generation===S.live.generation){S.live.error='unavailable';$('streamsStatus').textContent='Could not refresh games. Retrying automatically.';}}
- finally{if(generation===S.live.generation)setTimeout(()=>pollLive(generation),S.live.games.some(g=>g.state==='in')?5000:30000);}
+ // Commercial decisions use the scoreboard. Slow highlight/score summaries
+ // must not add their ten-second timeout to its next polling interval.
+ finally{if(generation===S.live.generation&&S.mode==='live')setTimeout(()=>pollLive(generation),S.live.games.some(g=>g.state==='in')?5000:30000);}
+ await summaries;
+ if(generation!==S.live.generation||S.mode!=='live')return;
+ retryMissedReplays();
  if(!S.live.games.length&&S.mode==='live')render();
 }
 async function pollLiveClips(generation){

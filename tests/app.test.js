@@ -46,28 +46,65 @@ class Pool{
 // The real pool coordinates these media boundaries. Playback advances only
 // when requested; tests can leave a clip buffering or emit provider events.
 class Media{
- constructor(source){this.source=source;this.kind='native';this.element=new Element();this.listeners=new Map();this.target=null;this.currentTime=0;this.primed=true;this.advances=2;this.wantPlay=false;this.moving=true;this.inAd=false;}
+ constructor(source){this.source=source;this.kind='native';this.element=new Element();this.listeners=new Map();this.target=null;this.currentTime=0;this.primed=true;this.advances=2;this.wantPlay=false;this.moving=true;this.inAd=false;this.muted=true;}
  on(name,fn){this.listeners.set(name,fn);}emit(name,value){if(name==='ad')this.inAd=value;this.listeners.get(name)?.(value);}
  get progressing(){return this.wantPlay&&this.moving&&!this.inAd;}
- play(){this.wantPlay=true;}pause(){this.wantPlay=false;}seek(at){this.currentTime=at;}near(at){return this.progressing&&Math.abs(this.currentTime-at)<3;}
+ play(){this.wantPlay=true;}pause(){this.wantPlay=false;}seek(at){this.currentTime=at;}near(at,tolerance=2.5){return this.progressing&&Math.abs(this.currentTime-at)<=tolerance;}
  destroy(){this.wantPlay=false;this.destroyed=true;}
 }
 function app(fetcher=async()=>Response.json({events:[]}),{media=false,native=false,stored=null,storageBlocked=false}={}){
  const elements=new Map([...html.matchAll(/id="([^"]+)"/g)].map(m=>[m[1],new Element()]));
  const stage=new Element(),document={getElementById(id){assert.ok(elements.has(id),`Missing UI element: ${id}`);return elements.get(id);},querySelectorAll(){return [];},querySelector(selector){return selector==='.stage'?stage:new Element();},createElement(tag){return tag==='video'?new Video():new Element();},addEventListener(){},body:new Element()};
- const time={now:1000};
+ const time={now:1000},timers=new Map();let timerId=0;
  class MediaPool extends PlayerPool{constructor(host,options){super(host,{...options,now:()=>time.now,create:source=>native?new ctx.Native(source):new Media(source)});}}
  const storage=new Map(stored===null?[]:[['fantasy-stream-v3',JSON.stringify(stored)]]);
- const ctx={...archive,...sync,...director,...coverage,...replays,...live,...scoring,...roster,...highlights,...preferences,...liveHighlights,...continuity,...breaks,PlayerPool:media?MediaPool:Pool,NFLSourceCatalog:class{},document,window:{addEventListener(){}},localStorage:{getItem:key=>storage.get(key)||null,setItem(key,value){if(storageBlocked)throw new Error('Storage unavailable');storage.set(key,value);}},performance:{now:()=>time.now},setTimeout:()=>0,clearTimeout(){},setInterval:()=>0,fetch:fetcher,AbortSignal,Response,URL,Date,console};
+ const ctx={...archive,...sync,...director,...coverage,...replays,...live,...scoring,...roster,...highlights,...preferences,...liveHighlights,...continuity,...breaks,PlayerPool:media?MediaPool:Pool,NFLSourceCatalog:class{},document,window:{addEventListener(){}},localStorage:{getItem:key=>storage.get(key)||null,setItem(key,value){if(storageBlocked)throw new Error('Storage unavailable');storage.set(key,value);}},performance:{now:()=>time.now},setTimeout(fn,delay){timers.set(++timerId,{fn,delay});return timerId;},clearTimeout(id){timers.delete(id);},setInterval:()=>0,fetch:fetcher,AbortSignal,Response,URL,Date,console};
  vm.createContext(ctx);
  if(native){ctx.attachMediaSource=async()=>null;const code=readFileSync(new URL('../web/native-player.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace('export class NativePlayer','class NativePlayer');vm.runInContext(code+'\nglobalThis.Native=NativePlayer;',ctx);}
  vm.runInContext(script+'\n globalThis.a={S,pool,director,coverage,clock,step,updateBreaks,advanceClock,skipBreak,selectGame,excluded,cutTo,warm,startHighlight,updateHighlight,finishHighlight,syncFor,nudge,nfl,setMode,setPlaying,setDay,seekTo,replaySource,useRoster,importLeague,pollLive,pollLiveClips,prepareReplay,retryMissedReplays,failHighlight,render,init,roster,get saved(){return saved;}};',ctx);
- return {...ctx.a,time,storage, get saved(){return ctx.a.saved;},el:id=>elements.get(id)};
+ return {...ctx.a,time,timers,storage, get saved(){return ctx.a.saved;},el:id=>elements.get(id)};
 }
 const player={name:'Jonathan Taylor',team:'IND',position:'RB'};
 const game={id:'A',name:'IND @ MIN',kind:'live',teams:[{id:'11',abbr:'IND'},{id:'16',abbr:'MIN'}],state:'in',phase:'live',possession:0,down:1,distance:10,yardsToGoal:40,nextSnapIn:null,date:'2026-11-01T18:00:00Z',scores:[],score:[0,0]};
 function ready(a){a.S.mode='live';a.useRoster([player],{teamName:'My lineup'});a.S.at=1000;a.S.games=[game];a.S.live.games=[game];a.S.live.feed.push([game],970);}
 const deferred=()=>{let resolve;return {promise:new Promise(r=>resolve=r),get resolve(){return resolve;}};};
+const flush=()=>new Promise(resolve=>setImmediate(resolve));
+const feedEvent=(id,abbr='IND',situation={})=>({id,competitions:[{status:{type:{state:'in'}},situation,competitors:[{homeAway:'away',team:{id:'11',abbreviation:abbr}},{homeAway:'home',team:{id:'16',abbreviation:'MIN'}}]}]});
+test('release: incomplete scoreboard responses cannot reopen a scoring commercial',()=>{
+ const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.saved.delay=0;a.setPlaying(true);
+ const push=(scores,id)=>{const event=feedEvent('A','IND',{possession:'11',down:1,lastPlay:{id,type:{text:'Rush'}}});if(scores)event.competitions[0].competitors.forEach((team,i)=>team.score=String(scores[i]));a.S.live.feed.push(live.liveGames({events:[event]}),1000);a.step(a.time.now+=250);};
+ push([0,0],'before');assert.equal(a.pool.visible,'A');push([7,0],'td');assert.equal(a.pool.visible,null);
+ push(null,'td');assert.equal(a.pool.visible,null,'missing scores are not an authoritative overturn');
+ push([7,0],'next-drive');assert.equal(a.pool.visible,'A');
+});
+test('release: slow summaries cannot delay scoreboard polling or commercial detection',async()=>{
+ const summary=deferred();let requests=0;
+ const a=app(url=>String(url).includes('scoreboard')?Promise.resolve(Response.json({events:[feedEvent('A','IND',{possession:'11',down:1,lastPlay:{id:String(++requests),type:{text:requests===1?'Rush':'Timeout'}}})]})):summary.promise,{media:true});
+ ready(a);a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.saved.delay=0;a.setPlaying(true);
+ const pending=a.pollLive(0);await flush();
+ const next=[...a.timers.values()].find(t=>t.delay===5000);assert.ok(next,'schedule the next scoreboard while the summary is unresolved');
+ a.S.at=Date.now()/1000+1;a.step(1000);assert.equal(a.pool.visible,'A');
+ await next.fn();a.S.at=Date.now()/1000+1;a.step(1250);
+ assert.equal(requests,2);assert.equal(a.pool.visible,null,'the timeout hides video even while highlights are loading');
+ summary.resolve(Response.json({scoringPlays:[],videos:[]}));await pending;
+});
+test('release: overlapping polls bound summary requests and give later games a turn',async()=>{
+ const summaries=[],names=['IND','DAL','BUF','SEA','KC'];
+ const a=app(url=>{if(String(url).includes('scoreboard'))return Promise.resolve(Response.json({events:names.map((name,i)=>feedEvent(String(i),name))}));const request=deferred();summaries.push({id:String(url).split('event=')[1],...request});return request.promise;});
+ a.useRoster(names.map(team=>({name:'Player '+team,team,position:'RB'})),{teamName:'Five games'});
+ const first=a.pollLive(0);await flush();assert.equal(summaries.length,4);
+ const second=a.pollLive(0);await flush();assert.equal(summaries.length,4,'at most four summaries may be in flight');
+ for(const request of summaries)request.resolve(Response.json({scoringPlays:[],videos:[]}));await Promise.all([first,second]);
+ const third=a.pollLive(0);await flush();assert.equal(summaries.length,5);assert.equal(summaries[4].id,'4');
+ summaries[4].resolve(Response.json({scoringPlays:[],videos:[]}));await third;
+});
+test('release: a slow obsolete summary cannot change a refreshed schedule',async()=>{
+ const old=deferred();let summaryCount=0;
+ const a=app(url=>String(url).includes('scoreboard')?Promise.resolve(Response.json({events:[feedEvent('A')]})):++summaryCount===1?old.promise:Promise.resolve(Response.json({videos:[{id:'102',headline:'New video',links:{source:{href:'https://espnmedia-cdn.akamaized.net/new.mp4'}}}]})));
+ ready(a);const first=a.pollLive(0);await flush();a.S.live.generation=1;a.S.live.summaryAt={};await a.pollLive(1);
+ old.resolve(Response.json({videos:[{id:'101',headline:'Old video',links:{source:{href:'https://espnmedia-cdn.akamaized.net/old.mp4'}}}]}));await first;
+ assert.equal(a.S.liveClips.some(c=>c.id==='clip:101'),false);assert.equal(a.S.liveClips.some(c=>c.id==='clip:102'),true);
+});
 function liveReplay(a){
  ready(a);a.S.at=Date.now()/1000;
  const score={id:'A:td',at:a.S.at-60,kind:'TD',text:'Jonathan Taylor 4 Yd Rush',players:[{name:'Jonathan Taylor',role:'scorer'}]},g={...game,date:new Date(Date.now()-3600000).toISOString(),season:2026,week:8,scores:[score]};
@@ -290,6 +327,40 @@ test('an obsolete highlight lookup cannot replace the newer source for the same 
  assert.equal(a.S.sources.get(item.id),current);
 });
 function replayReady(a){ready(a);a.S.archive=new archive.ReplayArchive(archiveData);a.S.day=1;const day=a.S.archive.sessions[1];a.clock.end=day.end;a.clock.seek(day.start,0);return day;}
+test('release: the real app completes the Sunday slate with manual cuts, ads, pauses and broadcast highlights',async t=>{
+ const a=app(undefined,{media:true}),day=replayReady(a);a.S.mode='replay';a.useRoster(roster.SAMPLE,{teamName:'Sunday rehearsal'});a.saved.muted=false;
+ const teams=director.rosterTeams(a.roster()),games=a.S.archive.games.filter(g=>day.gameIds.includes(g.id)&&g.teams.some(t=>teams.has(scoring.alias(t.abbreviation))));assert.ok(games.length>=7);
+ const end=Math.max(...games.map(g=>g.end))+30;a.seekTo(Math.min(...games.map(g=>g.start)));a.setPlaying(true);a.step(a.time.now);
+ let frames=0,choices=0,ads=0,pauses=0;const highlights=new Set(),shown=new Set();
+ while(a.S.at<end&&frames<60000){
+  frames++;a.time.now+=500;
+  for(const slot of a.pool.slots.values()){
+   // The provider boundary advances when asked and lands seeks immediately.
+   // Actual browser decoding and provider latency are covered separately.
+   slot.player.kind='provider';if(slot.player.progressing)slot.player.currentTime+=.5;
+  }
+  a.advanceClock(a.time.now);a.step(a.time.now);
+  if(frames%20===0)await flush();
+  if(frames%2000===0){
+   const next=a.S.games.find(g=>g.state==='in'&&g.id!==a.pool.visible&&!a.excluded().has(g.id));
+   if(next){a.selectGame(next.id);choices++;assert.equal(a.S.pinned,next.id);assert.equal(a.S.pending?.id||a.pool.visible,next.id);}
+  }
+  if(frames%4500===0&&a.S.program.kind==='game'&&a.pool.current){
+   const p=a.pool.current;p.emit('ad',true);assert.equal(a.pool.visible,null);assert.equal(p.muted,true);a.step(a.time.now);p.emit('ad',false);ads++;
+  }
+  if(frames%5000===0){
+   a.setPlaying(false);const at=a.S.at;a.time.now+=30000;a.advanceClock(a.time.now);assert.equal(a.S.at,at);a.setPlaying(true);pauses++;
+  }
+  assert.ok(a.pool.slots.size<=3,'bounded player pool');
+  const audible=[...a.pool.slots.values()].filter(slot=>!slot.player.muted);
+  assert.ok(audible.length<=1,'at most one audible player');if(audible.length)assert.equal(audible[0].key,a.pool.visible);
+  if(a.pool.visible){assert.equal(a.excluded().has(a.pool.visible),false,'a known commercial cannot be on screen');shown.add(a.pool.visible);}
+  for(const entry of a.coverage.log)if(entry.status==='replayed')highlights.add(entry.id);
+ }
+ assert.ok(a.S.at>=end,'the complete roster slate must finish without a playback deadlock');
+ assert.ok(choices>2&&ads>0&&pauses>0);assert.ok(highlights.size>1,'missed scores finish their broadcast highlights');
+ t.diagnostic(JSON.stringify({frames,simulatedPlaybackSeconds:frames/2,manualChoices:choices,providerAds:ads,pauses,completedHighlights:highlights.size,distinctPictures:shown.size}));
+});
 test('family: first replay visit starts near the selected lineup’s first action',async()=>{
  const a=app(),day=replayReady(a);await a.setMode('replay');const mine=a.S.archive.games.find(g=>day.gameIds.includes(g.id)&&g.teams.some(t=>t.abbreviation==='IND'));
  assert.ok(a.S.at>=mine.start-60,'do not make a newcomer wait through unrelated morning games');assert.ok(a.S.at<mine.start+900);
@@ -574,6 +645,26 @@ test('break recovery: a provider ad yields to a non-roster stream without counti
  const other={...game,id:'X',name:'SF at SEA',teams:[{abbr:'SF'},{abbr:'SEA'}]};a.S.games=[game,other];a.S.live.feed.push([game,other],970);
  a.setPlaying(true);a.cutTo('A',1000);a.S.lastAt=999;a.pool.current.emit('ad',true);a.step(1000);
  assert.equal(a.S.program.id,'X');assert.equal(a.coverage.intervals.size,0);
+});
+for(const reason of ['provider ad','feed break','reported break'])test(`release: ${reason} uses a watchable backup before a roster tracker`,()=>{
+ const a=app(undefined,{media:true});ready(a);a.useRoster([player,{name:'Puka Nacua',team:'LAR',position:'WR'}],{teamName:'Two games'});
+ const tracker={...game,id:'B',teams:[{abbr:'LAR'},{abbr:'LV'}],yardsToGoal:1},backup={...game,id:'X',teams:[{abbr:'SEA'},{abbr:'SF'}]};
+ a.saved.streams={'IND-MIN':'https://example.test/a.mp4','SEA-SF':'https://example.test/x.mp4'};a.S.games=[game,tracker,backup];a.S.live.feed.push(a.S.games,970);
+ a.setPlaying(true);a.step(1000);assert.equal(a.pool.visible,'A');
+ const p=a.pool.current;
+ if(reason==='provider ad')p.emit('ad',true);
+ else if(reason==='feed break')a.S.live.feed.push([{...game,phase:'break'},tracker,backup],970);
+ else a.skipBreak();
+ a.step(1250);assert.equal(a.pool.visible,'X');assert.equal(a.S.program.id,'X');assert.equal(p.muted,true);
+ a.pool.current.emit('error',new Error('Backup unavailable'));a.step(1500);
+ assert.equal(a.S.program.id,'B','retain the roster tracker when no replacement video works');assert.equal(a.pool.visible,null);
+});
+test('release: a manually selected non-roster stream also yields to backup football during its ad',()=>{
+ const a=app(undefined,{media:true});ready(a);
+ const selected={...game,id:'X',teams:[{abbr:'SEA'},{abbr:'SF'}]},backup={...game,id:'Y',teams:[{abbr:'BUF'},{abbr:'MIA'}]};
+ a.saved.streams={'SEA-SF':'https://example.test/x.mp4','BUF-MIA':'https://example.test/y.mp4'};a.S.games=[game,selected,backup];a.S.live.feed.push(a.S.games,970);
+ a.selectGame('X');assert.equal(a.pool.visible,'X');a.pool.current.emit('ad',true);
+ for(const now of [1250,1500,1750]){a.step(now);assert.equal(a.pool.visible,'Y');assert.equal(a.S.pinned,null);}
 });
 test('interface: the persistent lineup summary stays current during playback and opens its editor',()=>{
  const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/live.mp4'};a.render();assert.match(a.el('lineupSummary').textContent,/My lineup/);assert.match(a.el('lineupPreview').textContent,/Jonathan Taylor/);

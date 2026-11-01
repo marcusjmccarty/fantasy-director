@@ -52,16 +52,22 @@ export class BreakControl{
     if(hold&&hold.until<=at)this.holds.delete(g.id);
     else if(hold){blocked.add(g.id);reasons.set(g.id,hold);}
    }else{
-    const previous=this.live.get(g.id),key=situation(g),score=g.score||[];
-    const increased=previous&&score.some((n,i)=>Number(n)>Number(previous.score[i]??n));
+    const previous=this.live.get(g.id),key=situation(g),score=g.score||[],scoreKnown=g.scoreKnown!==false;
+    const increased=scoreKnown&&previous&&score.some((n,i)=>Number(n)>Number(previous.score[i]??n));
     // A scoreboard score can arrive without a dedicated timeout snapshot.
     // Wait for fresh action evidence, not an arbitrary wall-clock expiry.
     let hold=previous?.hold;
-    const fresh=hold&&(hold.playId&&g.lastPlayId?hold.playId!==g.lastPlayId:key!==hold.key);
-    if(hold&&g.phase!=='break'&&fresh&&g.possession>=0&&g.down>0)hold=null;
-    if(increased||g.phase==='break'&&g.breakKind==='score'){hold={key,playId:g.lastPlayId,kind:'score'};released.add(g.id);}
+    // Losing an ID is missing evidence, never evidence of a new play.
+    const fresh=hold&&(hold.playId?g.lastPlayId&&hold.playId!==g.lastPlayId:key!==hold.key);
+    // A review can overturn the score without replacing its play ID. Retain
+    // the pre-touchdown total through PAT updates; 7 -> 6 is not an overturn.
+    const overturned=scoreKnown&&hold?.before?.length===score.length&&score.length>0&&score.every((n,i)=>Number(n)<=Number(hold.before[i]));
+    if(hold&&!increased&&g.phase!=='break'&&(fresh||overturned)&&g.possession>=0&&g.down>0)hold=null;
+    if(increased||g.phase==='break'&&g.breakKind==='score'){
+     hold={key,playId:g.lastPlayId||hold?.playId,before:hold?.before??(increased?[...previous.score]:null),kind:'score'};released.add(g.id);
+    }
     if(g.phase==='break'||hold){blocked.add(g.id);released.add(g.id);reasons.set(g.id,hold||{kind:g.breakKind||'stoppage'});}
-    this.live.set(g.id,{score:[...score],hold});
+    this.live.set(g.id,{score:scoreKnown?[...score]:previous?.score||[],hold});
    }
   }
   return {blocked,released,reasons};
