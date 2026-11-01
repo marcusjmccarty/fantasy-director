@@ -78,6 +78,6 @@ export class PlayerPool{
 }
 export function createPlayer(source){
  if(source.type==='provider/ok')return new ProviderPlayer(source.url,{duration:source.duration});
- if(source.type==='embed/page')return new EmbedPlayer(source.url);
+ if(source.type==='embed/page')return new EmbedPlayer(source.url,{autoReconnect:source.autoReconnect});
  return new NativePlayer(source);
 }

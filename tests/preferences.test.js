@@ -24,3 +24,6 @@ test('a duplicate starter is rejected instead of increasing ranking and scoring 
 test('direct video links with fragments retain their native player type',()=>{
  assert.equal(streamType('https://example.com/game.m3u8#live'),'application/vnd.apple.mpegurl');assert.equal(streamType('https://example.com/game.mp4#t=30'),'video/mp4');assert.equal(streamType('https://example.com/watch?id=123'),'embed/page');
 });
+test('automatic embed reconnect defaults on and preserves an explicit opt-out',()=>{
+ assert.equal(normalizePreferences({}).autoReconnect,true);assert.equal(normalizePreferences({autoReconnect:'false'}).autoReconnect,true);assert.equal(normalizePreferences({autoReconnect:false}).autoReconnect,false);
+});

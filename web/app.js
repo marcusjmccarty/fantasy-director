@@ -73,7 +73,7 @@ function syncFor(game){
 function sourceFor(id){
  if(S.mode==='replay'){const g=archiveGame(id);return g?.embed?{url:g.embed,type:'provider/ok',duration:g.recordingDuration}:null;}
  const g=gameState(id),url=g&&saved.streams[gameKey(g)];
- return url?{url,type:streamType(url)}:null;
+ return url?{url,type:streamType(url),autoReconnect:saved.autoReconnect}:null;
 }
 const picture=id=>S.mode==='replay'?(saved.dataOnly?'data':'video'):(sourceFor(id)?'video':'data');
 function target(id){if(S.mode!=='replay')return null;const g=archiveGame(id);return g?syncFor(g).media(S.at-g.start):0;}
@@ -199,7 +199,11 @@ function step(now){
 // The picture on screen stopped moving: ask the player again, then re-seek it, then give up on that game for a while.
 function nudge(now){
  const p=S.program,player=pool.current;
- if(p.kind!=='game'||!S.playing||picture(p.id)!=='video'||!player||pool.visible!==p.id||player.inAd||player.target===null&&player.progressing){S.stall=null;return;}
+ if(p.kind!=='game'||!S.playing||picture(p.id)!=='video'||!player||pool.visible!==p.id||player.inAd){S.stall=null;return;}
+ // Page load readiness cannot detect a frozen cross-origin video. Give embeds
+ // their bounded load retries and the viewer's chosen reconnect fallback.
+ if(player.kind==='embed'){S.stall=null;player.checkHealth?.({online:window.navigator?.onLine!==false,foreground:!document.hidden});return;}
+ if(player.target===null&&player.progressing){S.stall=null;return;}
  S.stall??={since:now,step:0};const stalled=now-S.stall.since;
  if(S.stall.step===0&&stalled>3000){S.stall.step=1;player.kick?.();}
  else if(S.stall.step===1&&stalled>10000){S.stall.step=2;const t=target(p.id);if(t!==null)player.seek(t);player.play();}
@@ -611,7 +615,7 @@ function renderTransport(){
  $('autoChip').textContent=S.pinned?'Your choice':'Automatic';$('autoChip').classList.toggle('on',!S.pinned);$('resumeAuto').hidden=!S.pinned;
  const d=S.decision;
  $('reason').textContent=S.started&&!S.playing?'Paused':!S.started?(S.mode==='live'&&!hasLineup()?'Start with your lineup above.':`${saved.teamName} · ${starterCount(roster().length)}`):S.pending?`Opening ${gameState(S.pending.id)?.name||'video'}…`:S.highlight?.playing?'Replaying a score you missed':d?.reason||'';
- $('pictureNote').textContent=S.mode==='live'?(S.live.error?'Game updates unavailable · retrying':`${saved.delay} sec stream delay`):saved.dataOnly?'Game tracker':'Recorded game video';
+ $('pictureNote').textContent=S.mode==='live'?(pool.current?.reconnecting?pool.current.recoveryMessage:S.live.error?'Game updates unavailable · retrying':`${saved.delay} sec stream delay`):saved.dataOnly?'Game tracker':'Recorded game video';
  const current=gameState(currentGameId()),inGame=S.program.kind==='game'&&!S.highlight;
  $('pinCurrent').hidden=!inGame||!current;
  $('pinCurrent').textContent=S.pinned?'Let the channel choose':'Stay on this game';$('pinCurrent').setAttribute('aria-pressed',String(!!S.pinned));
@@ -927,6 +931,7 @@ function openSettings(tab='viewing'){
  $('settingsError').textContent='';
  $('optDefense').checked=saved.includeDefense;$('optHighlights').checked=saved.highlights;$('optData').checked=saved.dataOnly;$('optDelay').value=saved.delay;
  $('optData').disabled=S.mode!=='replay';
+ $('optReconnect').checked=saved.autoReconnect;
  $('syncGame').innerHTML=(S.archive?.games||[]).map(g=>`<option value="${esc(g.id)}">${esc(g.name)}</option>`).join('');
  const cur=currentGameId();if(cur&&S.mode==='replay')$('syncGame').value=cur;
  syncStatus();showTab(tab);$('settings').showModal();
@@ -948,6 +953,7 @@ for(const id of ['optDefense','optHighlights','optData'])$(id).onchange=()=>{
  persist();director.reset();render();
 };
 $('optDelay').onchange=e=>{saved.delay=Math.max(0,Math.min(600,Number(e.target.value)||0));resetBreaks();persist();};
+$('optReconnect').onchange=e=>{saved.autoReconnect=e.target.checked;for(const slot of pool.slots.values())slot.player.setAutoReconnect?.(saved.autoReconnect);persist();render();};
 $('saveStreams').onclick=()=>{
  const streams={...saved.streams};
  for(const input of streamFields()){

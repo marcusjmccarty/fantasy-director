@@ -24,7 +24,7 @@
  <p id="storageNotice" class="error" role="status" hidden>This browser couldn’t save your changes. They will last only until you close or reload this page.</p>
  <section class="stage" aria-label="Your channel">
   <div class="player-frame">
-  <div class="watch-heading"><h1 id="watchTitle" tabindex="-1">Your channel</h1><div class="watch-context"><span class="channel-mode" id="channelMode">Live games</span><span id="pictureNote" class="muted"></span></div></div>
+  <div class="watch-heading"><h1 id="watchTitle" tabindex="-1">Your channel</h1><div class="watch-context"><span class="channel-mode" id="channelMode">Live games</span><span id="pictureNote" class="muted" role="status"></span></div></div>
   <div class="screen" id="screen">
    <div class="layers" id="layers"></div>
    <div class="field-view" id="fieldView" hidden>
@@ -121,6 +121,7 @@
   <label class="check"><input type="checkbox" id="optDefense" checked> Follow my D/ST when no other starter is on the field</label>
   <label class="check"><input type="checkbox" id="optHighlights" checked> Replay scores I missed</label>
   <label class="check"><input type="checkbox" id="optData"> Use the game tracker instead of replay video (Try a replay only)</label>
+  <label class="check"><input type="checkbox" id="optReconnect" checked> Reconnect NTV and other embedded streams every 2 minutes</label><p class="muted">A fallback for freezes inside stream websites. This briefly reloads even a working stream. Pause stops reconnects. Direct video links and replays are unaffected.</p>
   <label for="optDelay">Live stream delay (seconds)</label><input id="optDelay" type="number" min="0" max="600" step="5" value="30"><p class="muted">Set it so the clock below the video matches the scorebug on your stream. The channel then follows the game as you see it: switching and score alerts timed to your picture. Timing is approximate and can vary between streams.</p>
   <div class="rules"><h3>How the channel decides</h3><ul>
    <li>Follows your starters’ teams using possession and field position. Individual player substitutions are not tracked.</li>
