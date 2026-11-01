@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {scoreCards,fantasyBoard,FantasyScoreFeed,formatPoints} from '../web/scoreboard.js';
+import {scoreCards,fantasyBoard,fantasyMatchup,FantasyScoreFeed,formatPoints} from '../web/scoreboard.js';
 import {fantasyScores} from '../server/api.js';
 
 const starter=(id,points,slot=2)=>({lineupSlotId:slot,playerPoolEntry:{appliedStatTotal:points,player:{id,fullName:'Player '+id,proTeamId:11,defaultPositionId:2,stats:[{scoringPeriodId:8,statSourceId:0,statSplitTypeId:1,appliedTotal:points}]}}});
@@ -62,4 +62,39 @@ test('week rollover clears old points and rejects a response from the wrong scor
  const feed=new FantasyScoreFeed({fetcher:async()=>Response.json({...result(),season:2026})});
  await feed.sync({...connection,week:8,season:2026});assert.equal(feed.data.scoring.week,8);
  await feed.sync({...connection,week:9,season:2026});assert.equal(feed.data,null);assert.match(feed.error,/Retrying/);
+});
+
+const matchupLeague=()=>({scoringPeriodId:8,settings:{scheduleSettings:{matchupPeriods:{4:[7,8],5:[9,10]}}},status:{currentMatchupPeriod:5},teams:[{id:1,roster:{entries:[starter(1,22)]}},{id:2,roster:{entries:[starter(2,15)]}}],schedule:[{id:40,matchupPeriodId:4,home:{teamId:1,totalPoints:120,totalPointsLive:125.75},away:{teamId:2,totalPoints:130}},{id:50,matchupPeriodId:5,home:{teamId:1,totalPoints:0},away:{teamId:3,totalPoints:0}}]});
+test('matchup periods follow league week mapping, including multi-week matchups',()=>{
+ const scoring=fantasyScores(matchupLeague());assert.deepEqual(scoring.matchupWeeks,[7,8]);assert.equal(scoring.matchups.length,1);assert.equal(scoring.matchups[0].id,'40');assert.equal(scoring.matchups[0].home.points,125.75);assert.equal(scoring.matchups[0].away.teamId,'2');
+});
+test('matchup display shows official adjusted totals, opponent starters and reversed perspective',()=>{
+ const data={teams:[{id:'1',name:'Our team'},{id:'2',name:'Opponent'}],scoring:fantasyScores(matchupLeague())};
+ const mine=fantasyMatchup(data,'1');assert.equal(mine.yours.points,'125.75');assert.equal(mine.opponent.points,'130.00');assert.match(mine.opponent.rows,/Player 2/);assert.equal(mine.status,'Behind by 4.25');
+ const other=fantasyMatchup(data,'2');assert.equal(other.opponent.name,'Our team');assert.equal(other.status,'Ahead by 4.25');
+});
+test('missing multi-week totals cannot be replaced by a single week of starter points',()=>{
+ const raw=matchupLeague();delete raw.schedule[0].home.totalPointsLive;delete raw.schedule[0].home.totalPoints;
+ const m=fantasyMatchup({scoring:fantasyScores(raw)},'1');assert.equal(m.yours.points,'—');assert.match(m.yours.rows,/22.00/);assert.equal(m.status,'Waiting for matchup points');
+});
+test('missing schedules and bye weeks never invent an opponent',()=>{
+ const raw=matchupLeague();delete raw.schedule[0].away;assert.equal(fantasyMatchup({scoring:fantasyScores(raw)},'1').status,'Bye week');
+ raw.schedule=[];assert.equal(fantasyMatchup({scoring:fantasyScores(raw)},'1').status,'Opponent not available for this week');
+ assert.equal(fantasyMatchup(null,'1'),null);
+});
+test('doubleheaders can select either actual scheduled opponent',()=>{
+ const raw=matchupLeague();raw.schedule.push({id:41,matchupPeriodId:4,home:{teamId:3,totalPoints:140},away:{teamId:1,totalPoints:125.75}});
+ const m=fantasyMatchup({scoring:fantasyScores(raw)},'1',[],'41');assert.equal(m.matches.length,2);assert.equal(m.opponent.id,'3');assert.equal(m.status,'Behind by 14.25');
+});
+test('matchup roster uses scoring-period entries and sorts lineup slots with FLEX after TE',()=>{
+ const raw=matchupLeague();raw.schedule[0].home.rosterForCurrentScoringPeriod={entries:[starter(8,3,17),starter(7,1,23),starter(6,2,6),starter(9,9,0),starter(10,50,20)]};
+ const team=fantasyScores(raw).teams[0];assert.deepEqual(team.players.map(p=>p.slot),['QB','TE','FLEX','K']);assert.equal(team.points,15);
+});
+test('zero official matchup scores remain zero even if a starter snapshot is incomplete',()=>{
+ const raw=matchupLeague();raw.schedule[0].home.totalPointsLive=0;
+ const m=fantasyMatchup({scoring:fantasyScores(raw)},'1');assert.equal(m.yours.points,'0.00');
+});
+test('switching teams reuses the league snapshot and does not start another request',async()=>{
+ let calls=0;const feed=new FantasyScoreFeed({fetcher:async()=>{calls++;return Response.json(result());}});
+ await feed.sync(connection);const snapshot=feed.data;await feed.sync({...connection,teamId:'2'});assert.equal(calls,1);assert.equal(feed.data,snapshot);
 });

@@ -452,3 +452,29 @@ test('continuity: protected footage stays despite a newly urgent game, but final
  assert.equal(d.decide({...input,current:{kind:'highlight',id:'score',protected:true}}).id,'score');
  assert.equal(d.decide({...input,games:[{...mine,state:'post',phase:'final'},urgent]}).id,'B');
 });
+
+test('live RedZone mode fills an empty fantasy slate with the closest available scoring chance',()=>{
+ const d=new Director(),near=game('N','SF','SEA',{yardsToGoal:8}),far=game('F','BUF','MIA',{yardsToGoal:45}),unlinked=game('U','NYJ','NE',{yardsToGoal:1});
+ const base={games:[near,far,unlinked],roster:[RB],at:1000,backups:new Set(['N','F']),redzone:true};
+ assert.equal(d.decide(base).id,'N');
+ assert.equal(d.decide({...base,games:[...base.games,game('A','IND','MIN',{state:'post',phase:'final'})]}).id,'N');
+ assert.equal(d.decide({...base,excluded:new Set(['N'])}).id,'F');
+ assert.equal(d.decide({...base,games:[{...near,phase:'break'},far]}).id,'F');
+ assert.equal(d.decide({...base,backups:new Set()}).kind,'standby');
+});
+test('live RedZone mode covers bench time and gives active fantasy players priority',()=>{
+ const d=new Director({debounce:0}),mine=game('A','IND','MIN',{possession:1,yardsToGoal:60}),other=game('B','SF','SEA',{yardsToGoal:3});
+ const base={games:[mine,other],roster:[RB],at:1000,current:{kind:'game',id:'A'},backups:new Set(['A','B']),redzone:true};
+ assert.equal(d.decide(base).id,'B');
+ assert.equal(d.decide({...base,games:[{...mine,possession:0},other],current:{kind:'game',id:'B'}}).id,'A');
+});
+test('RedZone fallback keeps plays, dwell, margin and debounce protections',()=>{
+ const d=new Director(),a=game('A','SF','SEA',{yardsToGoal:60}),b=game('B','BUF','MIA',{yardsToGoal:8});
+ const base={games:[a,b],roster:[RB],at:1000,current:{kind:'game',id:'A'},backups:new Set(['A','B']),redzone:true};
+ d.committed(995);assert.equal(d.decide(base).id,'A');
+ assert.equal(d.decide({...base,at:1010,games:[{...a,phase:'play'},b]}).id,'A');
+ assert.equal(d.decide({...base,at:1010,games:[{...a,nextSnapIn:2},b]}).id,'A');
+ assert.equal(d.decide({...base,at:1010}).id,'A');assert.equal(d.decide({...base,at:1012}).id,'B');
+ assert.equal(d.decide({...base,at:1013,games:[{...a,yardsToGoal:14},b]}).id,'A');
+ assert.equal(d.decide({...base,excluded:new Set(['A']),current:{kind:'game',id:'A',protected:true}}).id,'B');
+});

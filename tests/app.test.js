@@ -1048,3 +1048,35 @@ test('score center: a slow fantasy refresh cannot reload video or replace the vi
  pending.resolve(Response.json({leagueId:'123',teams:[{id:'1',players:[{name:'Other player'}]}],scoring:{week:8,teams:[{id:'1',points:22.34,complete:true,players:[{...player,points:22.34}]}]}}));await flush();a.render();
  assert.equal(a.el('fantasyTotal').textContent,'22.34');assert.match(a.el('fantasyPlayers').innerHTML,/Jonathan Taylor/);assert.equal(a.saved.roster[0].name,'Jonathan Taylor');assert.equal(a.pool.current,video);assert.equal(video.destroyed,undefined);
 });
+
+test('matchup picker changes followed roster and opponent while rejecting an obsolete import',async()=>{
+ const pending=deferred(),a=app(()=>pending.promise);ready(a);
+ const other={name:'Justin Jefferson',team:'MIN',position:'WR'};
+ const league={leagueId:'123',name:'Our league',week:8,teams:[{id:'1',name:'First team',players:[player]},{id:'2',name:'Second team',players:[other]}],scoring:{week:8,matchupWeeks:[8],teams:[{id:'1',points:20,complete:true,players:[{...player,points:20}]},{id:'2',points:30,complete:true,players:[{...other,points:30}]}],matchups:[{id:'8',home:{teamId:'1',points:20},away:{teamId:'2',points:30}}]}};
+ a.saved.leagueId='123';a.saved.teamId='1';a.saved.league=league;a.fantasyFeed.data=league;a.render();
+ assert.equal(a.el('opponentTitle').textContent,'Second team');assert.equal(a.el('opponentTotal').textContent,'30.00');
+ const importing=a.importLeague({refresh:true,quiet:true});a.el('scoreTeam').onchange({target:{value:'2'}});
+ assert.equal(a.saved.teamId,'2');assert.equal(a.saved.roster[0].name,'Justin Jefferson');assert.equal(a.el('fantasyTotal').textContent,'30.00');assert.equal(a.el('opponentTitle').textContent,'First team');assert.equal(a.el('franchise').value,'2');
+ pending.resolve(Response.json({...league,ownedTeamId:'1'}));await importing;assert.equal(a.saved.teamId,'2');assert.equal(a.saved.roster[0].name,'Justin Jefferson');
+ assert.equal(JSON.parse(a.storage.get('fantasy-stream-v3')).teamId,'2');
+});
+test('stream links cover the entire slate even with no lineup or no lineup games',()=>{
+ const other={...game,id:'B',name:'SF at SEA',teams:[{abbr:'SF'},{abbr:'SEA'}]};
+ for(const withLineup of [false,true]){
+  const a=app();if(withLineup)ready(a);a.saved.streams={'IND-MIN':'https://example.test/mine.mp4'};
+  a.S.games=[other];a.S.live.games=[other];a.render();assert.equal(a.el('backupStreams').hidden,false);assert.equal(a.el('saveStreams').hidden,false);
+  const input=a.el('backupInputs').querySelector('input');assert.ok(input);input.value='https://example.test/other.mp4';a.el('saveStreams').onclick();
+  assert.equal(a.saved.streams['SEA-SF'],'https://example.test/other.mp4');assert.equal(a.saved.streams['IND-MIN'],'https://example.test/mine.mp4');
+ }
+});
+test('live RedZone mode plays a saved non-roster game after all starters finish and returns to roster action',()=>{
+ const a=app(undefined,{media:true});ready(a);const mine={...game,state:'post',phase:'final'},other={...game,id:'B',name:'SF at SEA',teams:[{abbr:'SF'},{abbr:'SEA'}],yardsToGoal:8};
+ a.saved.streams={'IND-MIN':'https://example.test/mine.mp4','SEA-SF':'https://example.test/other.mp4'};a.S.games=[mine,other];a.S.live.games=[mine,other];a.S.live.feed.push([mine,other],970);a.setPlaying(true);a.step(1000);
+ assert.equal(a.pool.visible,'B');assert.match(a.S.decision.reason,/RedZone mode/);
+ a.S.live.feed.push([game,other],970);a.step(1250);assert.equal(a.pool.visible,'A');
+});
+test('manual choice remains authoritative in RedZone mode until its natural break',()=>{
+ const a=app(undefined,{media:true});ready(a);const mine={...game,state:'post',phase:'final'},selected={...game,id:'B',name:'SF at SEA',teams:[{abbr:'SF'},{abbr:'SEA'}],yardsToGoal:70},near={...game,id:'C',name:'BUF at MIA',teams:[{abbr:'BUF'},{abbr:'MIA'}],yardsToGoal:3};
+ a.saved.streams={'SEA-SF':'https://example.test/selected.mp4','BUF-MIA':'https://example.test/near.mp4'};a.S.games=[mine,selected,near];a.S.live.feed.push(a.S.games,970);a.selectGame('B');a.step(1000);assert.equal(a.pool.visible,'B');assert.equal(a.S.pinned,'B');
+ a.pool.current.emit('ad',true);a.step(1250);assert.equal(a.pool.visible,'C');assert.equal(a.S.pinned,null);
+});

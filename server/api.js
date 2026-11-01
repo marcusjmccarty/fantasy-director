@@ -33,15 +33,23 @@ export function normalizedLeague(raw,ownerSwid=''){
 export function fantasyScores(raw){
  const week=Number(raw.scoringPeriodId)||0;
  const points=value=>typeof value==='number'&&Number.isFinite(value)?value:null;
- return {week,teams:(raw.teams||[]).map(t=>{
-  const entries=(t.roster?.entries||[]).filter(e=>![20,21].includes(Number(e.lineupSlotId)));
+ const periods=raw.settings?.scheduleSettings?.matchupPeriods||{};
+ const period=Object.keys(periods).find(key=>Array.isArray(periods[key])&&periods[key].includes(week));
+ const scheduled=period?(raw.schedule||[]).filter(m=>Number(m.matchupPeriodId)===Number(period)):[];
+ const side=s=>s?.teamId!=null?{teamId:String(s.teamId),points:points(s.totalPointsLive)??points(s.totalPoints)}:null;
+ const matchups=scheduled.map(m=>({id:String(m.id),home:side(m.home),away:side(m.away)}));
+ const slots={0:'QB',2:'RB',4:'WR',6:'TE',7:'OP',16:'D/ST',17:'K',23:'FLEX'};
+ const order=[0,2,4,6,23,7,16,17];
+ return {week,matchupWeeks:period?periods[period]:[],matchups,teams:(raw.teams||[]).map(t=>{
+  const matchupSide=scheduled.flatMap(m=>[m.home,m.away]).find(s=>String(s?.teamId)===String(t.id));
+  const entries=(matchupSide?.rosterForCurrentScoringPeriod?.entries??t.roster?.entries??[]).filter(e=>![20,21].includes(Number(e.lineupSlotId))).slice().sort((a,b)=>(order.indexOf(Number(a.lineupSlotId))<0?99:order.indexOf(Number(a.lineupSlotId)))-(order.indexOf(Number(b.lineupSlotId))<0?99:order.indexOf(Number(b.lineupSlotId))));
   const players=entries.map(e=>{
    const pool=e.playerPoolEntry||{},p=pool.player||{};
    const actual=week>0?(p.stats||[]).find(s=>s.scoringPeriodId===week&&s.statSourceId===0&&s.statSplitTypeId===1):null;
    // appliedStatTotal on the pool entry may span several weeks, even when
    // scoringPeriodId is requested. Only the dated actual stat is authoritative.
    const value=points(actual?.appliedTotal);
-   return {id:String(p.id||''),name:p.fullName||'Unknown player',team:TEAM[p.proTeamId]||'',position:POS[p.defaultPositionId]||'FLEX',points:value};
+   return {id:String(p.id||''),name:p.fullName||'Empty slot',team:TEAM[p.proTeamId]||'',position:POS[p.defaultPositionId]||'FLEX',slot:slots[e.lineupSlotId]||POS[p.defaultPositionId]||'FLEX',points:value};
   });
   const complete=players.length>0&&players.every(p=>p.points!==null);
   return {id:String(t.id),players,complete,points:complete?Math.round(players.reduce((sum,p)=>sum+p.points,0)*100)/100:null};
@@ -64,7 +72,7 @@ export async function leagueAPI(request,env={},fetcher=fetch){
  if(own)headers.Cookie=`SWID=${own.swid}; espn_s2=${own.s2}`;else if(useSaved)headers.Cookie=`SWID=${env.ESPN_SWID}; espn_s2=${env.ESPN_S2}`;
  const signedIn=!!(own||useSaved);
  // Workers throws synchronously for redirect:'error'. Manual also prevents cookie forwarding.
- try{const response=await fetcher(`https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/${year}/segments/0/leagues/${id}?view=mRoster&view=mTeam&view=mSettings&view=mLiveScoring${week===null?'':'&scoringPeriodId='+week}`,{headers,redirect:'manual',signal:AbortSignal.timeout(12000)});
+ try{const response=await fetcher(`https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/${year}/segments/0/leagues/${id}?view=mRoster&view=mTeam&view=mSettings&view=mLiveScoring&view=mMatchup&view=mMatchupScore${week===null?'':'&scoringPeriodId='+week}`,{headers,redirect:'manual',signal:AbortSignal.timeout(12000)});
  if(response.status>=300&&response.status<400)return json({error:'ESPN redirected the roster request. Your saved ESPN login may need refreshing.',code:'ESPN_REDIRECT'},502);
  if([401,403,404].includes(response.status))return json({error:response.status===404?'ESPN has no league with that ID for this season.':signedIn?'ESPN would not open this league with those cookies. Copy fresh SWID and espn_s2 values from a browser where you are signed in to ESPN.':'This league is private. Paste your ESPN SWID and espn_s2 cookies below the league ID to import it.',code:signedIn?'ESPN_DENIED':'LEAGUE_PRIVATE'},response.status===404?404:401);
  if(!response.ok)return json({error:'ESPN is temporarily unavailable. Please try again.'},502);

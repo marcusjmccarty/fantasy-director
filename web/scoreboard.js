@@ -34,9 +34,30 @@ export function fantasyBoard(data,teamId,games=[]){
  const rows=team.players.map(p=>{
   const game=games.find(g=>g.teams.some(t=>t.abbr===alias(p.team)));
   const status=game?(game.state==='pre'?kickoff(game):game.state==='post'?'Final':game.detail||'In progress'):'No game in this slate';
-  return `<tr><td><span class="sb-position">${escape(p.position)}</span></td><th scope="row">${escape(p.name)}<small>${escape(p.team)} · ${escape(status)}</small></th><td class="sb-points ${typeof p.points==='number'&&p.points<0?'sb-negative':''}">${formatPoints(p.points)}</td></tr>`;
+  return `<tr><td><span class="sb-position">${escape(p.slot||p.position)}</span></td><th scope="row">${escape(p.name)}<small>${escape(p.team)} · ${escape(status)}</small></th><td class="sb-points ${typeof p.points==='number'&&p.points<0?'sb-negative':''}">${formatPoints(p.points)}</td></tr>`;
  }).join('');
  return {points:formatPoints(team.points),complete:team.complete,rows,week:data.scoring.week};
+}
+
+export function fantasyMatchup(data,teamId,games=[],matchupId=null){
+ if(!data?.scoring)return null;
+ const matches=(data?.scoring?.matchups||[]).filter(m=>m.home?.teamId===teamId||m.away?.teamId===teamId);
+ const match=matches.find(m=>m.id===matchupId)||matches[0];
+ const mine=match?.home?.teamId===teamId?match.home:match?.away;
+ const other=match?.home?.teamId===teamId?match.away:match?.home;
+ const build=side=>{
+  if(!side)return null;
+  const board=fantasyBoard(data,side.teamId,games);
+  const official=typeof side.points==='number'&&Number.isFinite(side.points);
+  const multi=(data.scoring.matchupWeeks||[]).length>1;
+  const value=official?side.points:!multi?data.scoring.teams.find(t=>t.id===side.teamId)?.points:null;
+  return {...board,id:side.teamId,name:data.teams?.find(t=>t.id===side.teamId)?.name||'Team '+side.teamId,points:formatPoints(value),value,official};
+ };
+ const yours=build(mine||{teamId}),opponent=build(other);
+ const known=Number.isFinite(yours?.value)&&Number.isFinite(opponent?.value);
+ const difference=known?Math.round((yours.value-opponent.value)*100)/100:null;
+ const status=!match?'Opponent not available for this week':!opponent?'Bye week':!known?'Waiting for matchup points':difference===0?'Tied':difference>0?'Ahead by '+formatPoints(difference):'Behind by '+formatPoints(-difference);
+ return {yours,opponent,status,matches,matchupId:match?.id||null,weeks:data?.scoring?.matchupWeeks||[]};
 }
 
 // Score updates have no access to the player, director, roster or saved state.
@@ -44,7 +65,9 @@ export function fantasyBoard(data,teamId,games=[]){
 export class FantasyScoreFeed{
  constructor({fetcher=fetch,now=()=>Date.now()}={}){this.fetcher=fetcher;this.now=now;this.key='';this.data=null;this.updated=0;this.error='';this.next=0;this.pending=null;}
  sync(connection){
-  const key=connection?JSON.stringify(connection):'';
+  // Every response contains all teams. Changing franchises can reuse the same
+  // league snapshot immediately; changing credentials/week still retires it.
+  const key=connection?JSON.stringify({...connection,teamId:undefined}):'';
   if(key!==this.key){this.pending?.abort();this.pending=null;this.key=key;this.data=null;this.updated=0;this.error='';this.next=0;}
   if(!key||this.pending||this.now()<this.next)return;
   const controller=new AbortController();this.pending=controller;

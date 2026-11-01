@@ -63,7 +63,7 @@ export class Director{
  reset(){this.lastCut=-Infinity;this.challenger=null;}
  committed(at){this.lastCut=at;this.challenger=null;}
  // current: {kind:'game'|'highlight'|'standby', id}
- decide({games,roster,at,current={},excluded=new Set(),queue=[],includeDefense=true,recentScore=()=>false,backups=new Set()}){
+ decide({games,roster,at,current={},excluded=new Set(),queue=[],includeDefense=true,recentScore=()=>false,backups=new Set(),redzone=false}){
   const r=this.rules,ranked=rank(games,roster,{excluded,includeDefense,currentId:current.id}),best=ranked[0];
   const curGame=current.kind==='game'?games.find(g=>g.id===current.id&&!excluded.has(g.id)&&hasRoster(g,roster)):null;
   const cur=curGame?(ranked.find(e=>e.game.id===curGame.id)||{game:curGame,players:[],...rate(curGame,[])}):null;
@@ -91,6 +91,10 @@ export class Director{
   if(queue.length&&!ranked.some(e=>e.critical)&&(!cur||cur.tier===0||curGame.phase!=='play'&&(at-queue[0].queuedAt>=r.highlightWait||!best)))
    return {kind:'highlight',id:queue[0].id,reason:'Replaying a score you missed'};
   if(!best){
+   if(redzone){
+    const filler=this.redzoneChoice({games,at,current,excluded,backups});
+    if(filler)return filler;
+   }
    this.challenger=null;
    if(curGame&&curGame.state==='in'&&curGame.phase!=='break')return stay('Your players are off the field');
    const fallback=games.filter(g=>g.state==='in'&&hasRoster(g,roster)&&!excluded.has(g.id)).sort((a,b)=>(a.phase==='break')-(b.phase==='break')||a.id.localeCompare(b.id))[0];
@@ -113,6 +117,21 @@ export class Director{
   const better=best.tier>cur.tier||best.score>=cur.score+r.margin||urgentUpgrade||best.imminent&&!cur.critical&&best.score>cur.score;
   if(!better){this.challenger=null;return stay(explain(cur));}
   return go(best,explain(best));
+ }
+ // Live fallback only: available streams compete for the closest scoring
+ // chance. Roster involvement above always takes priority. Dwell, margin and
+ // debounce prevent feed jitter from cycling embedded pages.
+ redzoneChoice({games,at,current,excluded,backups}){
+  const distance=g=>Number.isFinite(g.yardsToGoal)&&g.possession>=0&&!g.special?g.yardsToGoal:100;
+  const candidates=games.filter(g=>g.state==='in'&&g.phase!=='break'&&backups.has(g.id)&&!excluded.has(g.id))
+   .sort((a,b)=>distance(a)-distance(b)||(b.id===current.id)-(a.id===current.id)||a.id.localeCompare(b.id));
+  const best=candidates[0];if(!best)return null;
+  const cur=candidates.find(g=>g.id===current.id),r=this.rules;
+  const choose=g=>({kind:'game',id:g.id,entry:{game:g,players:[],...rate(g,[])},reason:'RedZone mode · '+(distance(g)<100?`${g.name}, ${distance(g)} yards out`:'best available game')});
+  if(!cur){this.challenger=null;return choose(best);}
+  if(cur.id===best.id||current.protected||cur.phase==='play'||cur.nextSnapIn!=null&&cur.nextSnapIn<=r.preSnap||at-this.lastCut<r.dwell||distance(cur)-distance(best)<r.margin){this.challenger=null;return choose(cur);}
+  if(this.challenger?.id!==best.id)this.challenger={id:best.id,since:at};
+  return choose(at-this.challenger.since>=r.debounce?best:cur);
  }
 }
 
