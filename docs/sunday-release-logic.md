@@ -73,13 +73,21 @@ added or inferred from that probe.
 
 ## Release boundary
 
-The source and built Worker are ready for deployment and a final test with the
-actual live sources. This pass does not deploy Cloudflare. In the normal local
-checkout, run `git pull --ff-only` followed by `npm run deploy`.
+The interrupted release was recovered and pushed to `main` as
+`d61e0d74aa49a73dc61688153ed2d603548d5112`. The recovery reran all 545 tests,
+the 60,000 director comparisons, the production build, and the compiled asset
+and route checks successfully. The rebuilt Worker was unchanged from the
+recovered bundle.
 
-The browser could not launch in this work environment, so this pass does not
-claim fresh visual, audio, autoplay or real-provider playback verification.
-The remaining meaningful check is to use the actual streams in a browser:
+The existing Cloudflare Worker was then published through its signed-in
+dashboard; Cloudflare confirmed version `1916e8e2` as active and latest.
+Public requests to `/app.js`, `/breaks.js`, and `/live.js` each returned HTTP 200
+and matched the tested source exactly. The homepage also opened in a browser.
+
+The original logic pass could not launch a browser. Recovery verified
+publication and asset delivery, but does not claim fresh audio, autoplay or
+real-provider playback verification. The remaining meaningful check is to use
+the actual streams in a browser:
 confirm sound, switch manually, pause/resume, observe a score and commercial
 transition, and allow a missed-score highlight to complete and return.
 
