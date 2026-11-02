@@ -29,11 +29,13 @@
    <button id="playButton" class="primary" aria-label="Play">Play</button>
    <span class="spacer"></span>
    <button id="reloadStream" hidden>Reload stream</button>
+   <a id="openStream" class="stream-original" href="#" target="_blank" rel="noopener noreferrer" hidden>Open stream ↗</a>
    <button id="nextStream" hidden>Try backup</button>
    <button id="muteButton" aria-label="Turn sound on">Turn sound on</button>
    <button id="fullButton" aria-label="Full screen" title="Keep the channel full screen through stream reconnects">Full screen</button>
    </div>
    <p id="streamHealth" class="stream-health" role="status" hidden></p>
+   <p id="embedHelp" class="embed-help" hidden>Press Play inside the stream if it asks. Use the player’s own fullscreen button for video only. If it won’t run here, Open stream opens the saved page.</p>
    <div class="replay-controls" id="replayControls" hidden>
    <div class="replay-seek">   <button id="backButton" class="seek-button" aria-label="Back 30 seconds">−30 sec</button>
    <button id="forwardButton" class="seek-button" aria-label="Forward 30 seconds">+30 sec</button>
@@ -62,8 +64,8 @@
   <section id="gamesPanel" tabindex="0" aria-labelledby="gamesHead"><ol class="games" id="games"></ol></section>
  </aside>
  <section class="score-center" id="scoreboard" aria-labelledby="scoreboardTitle">
-  <div class="score-center-heading"><div><span class="eyebrow">YOUR LEAGUE. YOUR MATCHUP.</span><h2 id="scoreboardTitle" tabindex="-1">Fantasy scoreboard</h2><p id="scoreboardMeta">Connect your ESPN league to follow the matchup.</p></div><div class="matchup-controls"><label id="scoreTeamPicker" hidden>Follow a team<select id="scoreTeam" aria-label="Team to follow"></select></label><label id="matchupPicker" hidden>Opponent<select id="matchupSelect" aria-label="Choose matchup"></select></label><button id="lineupButton" class="sb-edit">Edit lineup</button></div></div>
-  <div class="matchup-status"><b id="matchupStatus">Your team vs. your opponent</b><p id="fantasyStatus">Import your ESPN league to get started.</p></div>
+  <div class="score-center-heading"><div><span class="eyebrow">YOUR LEAGUE. YOUR MATCHUP.</span><h2 id="scoreboardTitle" tabindex="-1">Fantasy scoreboard</h2><p id="scoreboardMeta">Connect your ESPN league to follow the matchup.</p></div><div class="matchup-controls"><label id="scoreTeamPicker">Change fantasy team<select id="scoreTeam" aria-label="Change fantasy team"><option value="">Connect ESPN to choose a team</option></select></label><label id="matchupPicker" hidden>Opponent<select id="matchupSelect" aria-label="Choose matchup"></select></label><button id="connectLeague" class="primary">Connect ESPN</button><button id="lineupButton" class="sb-edit">Edit followed players</button></div></div>
+  <div class="matchup-status"><b id="matchupStatus">Your team vs. your opponent</b><p id="fantasyStatus" role="status">Import your ESPN league to get started.</p><button id="retryFantasy" hidden>Retry scores</button></div>
   <div class="score-center-body matchup-board">
    <section class="fantasy-board your-fantasy" aria-labelledby="fantasyTitle"><span class="eyebrow">FOLLOWING</span><h3 id="fantasyTitle">Your team</h3><div class="sb-total"><strong id="fantasyTotal">—</strong><span>MATCHUP POINTS<small id="fantasyWeek">This week</small></span></div><div class="sb-player-scroll"><table class="sb-players" id="fantasyTable" hidden><caption class="sr-only">Your starting players and fantasy points</caption><thead><tr><th scope="col">Slot</th><th scope="col">Starter</th><th scope="col">PTS</th></tr></thead><tbody id="fantasyPlayers"></tbody></table></div></section>
    <section class="fantasy-board opponent-fantasy" aria-labelledby="opponentTitle"><span class="eyebrow">OPPONENT</span><h3 id="opponentTitle">Your opponent</h3><div class="sb-total"><strong id="opponentTotal">—</strong><span>MATCHUP POINTS<small id="opponentWeek">This week</small></span></div><div class="sb-player-scroll"><table class="sb-players" id="opponentTable" hidden><caption class="sr-only">Opponent’s starting players and fantasy points</caption><thead><tr><th scope="col">Slot</th><th scope="col">Starter</th><th scope="col">PTS</th></tr></thead><tbody id="opponentPlayers"></tbody></table></div><p class="sb-caption" id="opponentEmpty">Your opponent’s starters will appear after your ESPN league connects.</p></section>
@@ -95,8 +97,8 @@
 <dialog id="lineupDialog" aria-labelledby="lineupTitle"><form method="dialog" id="lineupForm">
  <div class="dialog-head"><h2 id="lineupTitle">Your lineup</h2><button type="button" id="closeLineup" aria-label="Close lineup">Close</button></div>
  <section>
-  <p class="muted">Add the players starting for you this week. You can change them at any time.</p>
-  <details id="leagueImport"><summary>Import a team from ESPN instead</summary>  <div class="form-intro"><h3>Bring in your ESPN team</h3><p class="muted">Connect your league and choose your team. We’ll use its starters.</p></div>
+  <p class="muted">Choose the players this channel follows. Editing this list keeps your ESPN connection; the fantasy scoreboard uses your league’s official starting lineup.</p>
+  <details id="leagueImport"><summary>Connect or refresh your ESPN league</summary>  <div class="form-intro"><h3>Bring in your ESPN team</h3><p class="muted">Connect your league and choose your team. We’ll use its starters.</p></div>
   <label for="leagueId">ESPN league ID</label><div class="inline"><input id="leagueId" inputmode="numeric" autocomplete="off" placeholder="e.g. 12345678"><button type="button" id="importLeague" class="primary">Find my team</button></div>
   <p class="muted" id="leagueStatus" role="status">Enter the number in your ESPN league’s web address. We import starters only.</p>
   <details id="cookieDetails"><summary>Private league? Add your ESPN cookies</summary>

@@ -17,10 +17,10 @@ test('embed safety: every stream navigation is sandboxed before loading, includi
  p.reload();p.setVisible(false);p.setVisible(true);
  for(const navigation of h.navigations){
   const flags=new Set(navigation.sandbox.split(' '));
-  for(const required of ['allow-scripts','allow-same-origin','allow-forms','allow-presentation'])assert.ok(flags.has(required));
+  for(const required of ['allow-scripts','allow-same-origin','allow-forms','allow-presentation','allow-storage-access-by-user-activation'])assert.ok(flags.has(required));
   for(const unsafe of ['allow-popups','allow-popups-to-escape-sandbox','allow-top-navigation','allow-top-navigation-by-user-activation','allow-top-navigation-to-custom-protocols','allow-modals','allow-downloads'])assert.equal(flags.has(unsafe),false,unsafe);
  }
- assert.match(h.frame.allow,/autoplay/);assert.match(h.frame.allow,/fullscreen 'none'/);p.destroy();
+ assert.match(h.frame.allow,/autoplay/);assert.match(h.frame.allow,/fullscreen \*/);p.destroy();
 });
 test('embed safety: reload restores the original stream after internal navigation and waits for a fresh load',()=>{
  const h=harness(),{p}=h;p.setVisible(true);p.play();h.load();h.tick(2000);assert.equal(p.progressing,true);
@@ -107,6 +107,6 @@ test('embed switching: reloading the same URL creates a new attempt and rejects 
 });
 test('embed switching: all active documents delegate media across origins and retain navigation containment',()=>{
  const h=harness(),{p}=h;p.setVisible(true);p.play();p.reload();p.setVisible(false);p.setVisible(true);
- for(const frame of h.frames){assert.match(frame.allow,/autoplay \*/);assert.match(frame.allow,/encrypted-media \*/);assert.match(frame.allow,/fullscreen 'none'/);assert.doesNotMatch(frame.attributes.get('sandbox'),/allow-popups|allow-top-navigation/);}
+ for(const frame of h.frames){assert.match(frame.allow,/autoplay \*/);assert.match(frame.allow,/encrypted-media \*/);assert.match(frame.allow,/fullscreen \*/);assert.equal(frame.allowFullscreen,true);assert.doesNotMatch(frame.attributes.get('sandbox'),/allow-popups|allow-top-navigation/);}
  p.destroy();
 });

@@ -4,7 +4,7 @@ A RedZone-style channel for one fantasy roster. It follows your starters’ team
 
 ## Live site
 
-The channel runs on Cloudflare Workers at **https://fantasy-stream.fantasy-hub.workers.dev** (free plan, one Worker, no other services). Open it on any device; there is nothing to run locally. The page opens in Live games. Choose **Edit lineup** in the fantasy scoreboard below the player, import your ESPN league and select your team (or enter players with the name/team/position form), then paste and save your game links in **Game streams** below the player. Press **Start watching**. **Try a replay** opens the included Week 7 rehearsal. Your lineup takes an ESPN league ID (public leagues need nothing else; a private league needs your own SWID and espn_s2 cookies pasted under the ID).
+The channel runs on Cloudflare Workers at **https://fantasy-stream.fantasy-hub.workers.dev** (free plan, one Worker, no other services). Open it on any device; there is nothing to run locally. The page opens in Live games. Choose **Connect ESPN** in the fantasy scoreboard below the player, import your league, and use **Change fantasy team** to select a franchise (or use **Choose players** to enter a manual lineup), then paste and save your game links in **Game streams** below the player. Press **Start watching**. **Try a replay** opens the included Week 7 rehearsal. Your lineup takes an ESPN league ID (public leagues need nothing else; a private league needs your own SWID and espn_s2 cookies pasted under the ID).
 
 Redeploy after a change with `npm run deploy` (builds `dist/` and uploads it with the Cloudflare account that `npx wrangler login` authorized; `wrangler.toml` names the Worker).
 
@@ -129,3 +129,10 @@ See [viewing room refinement](docs/viewing-room-refinement.md) for the permanent
 See [commercial logic follow-up](docs/commercial-logic-follow-up.md) for the Bucs scoring-break reproduction, commercial suppression, regression checks, and remaining detection limits. The [continuity and workspace overhaul](docs/continuity-and-workspace-overhaul.md) records the preceding structural UI and playback work. Earlier audit documents describe their respective historical revisions.
 
 See [fantasy matchups](docs/fantasy-matchups.md) for the head-to-head scoreboard, league team selector, all-game stream links, and live RedZone fallback.
+
+See [live connection and fullscreen fixes](docs/live-connection-fixes.md) for visible
+team controls, roster loading and reconnect states, non-overlapping guide layout,
+and video-focused fullscreen. The embedded provider's own fullscreen button is
+now permitted; it can isolate its video, whereas our button expands the entire
+saved frame with compact controls. Provider fullscreen can end on a game switch
+or reconnect; the channel retains a fullscreen-layout fallback.

@@ -63,12 +63,19 @@ export function fantasyMatchup(data,teamId,games=[],matchupId=null){
 // Score updates have no access to the player, director, roster or saved state.
 // An old request can never replace a newly selected league or replay mode.
 export class FantasyScoreFeed{
- constructor({fetcher=fetch,now=()=>Date.now()}={}){this.fetcher=fetcher;this.now=now;this.key='';this.data=null;this.updated=0;this.error='';this.next=0;this.pending=null;}
- sync(connection){
+ constructor({fetcher=fetch,now=()=>Date.now()}={}){this.fetcher=fetcher;this.now=now;this.key='';this.data=null;this.updated=0;this.error='';this.needsConnection=false;this.next=0;this.pending=null;}
+ valid(data,connection){return data?.leagueId===connection.leagueId&&Array.isArray(data.scoring?.teams)&&data.scoring.teams.length>0&&(!connection.teamId||data.scoring.teams.some(t=>t.id===connection.teamId))&&(!connection.week||data.scoring.week===connection.week)&&(!connection.season||data.season===connection.season);}
+ sync(connection,seed=null){
   // Every response contains all teams. Changing franchises can reuse the same
   // league snapshot immediately; changing credentials/week still retires it.
   const key=connection?JSON.stringify({...connection,teamId:undefined}):'';
-  if(key!==this.key){this.pending?.abort();this.pending=null;this.key=key;this.data=null;this.updated=0;this.error='';this.next=0;}
+  if(key!==this.key){this.pending?.abort();this.pending=null;this.key=key;this.data=null;this.updated=0;this.error='';this.needsConnection=false;this.next=0;}
+  // A successful import already contains all scores. Display it immediately;
+  // do not require a second request before revealing players and points.
+  if(key&&seed&&seed.fetchedAt>this.updated&&seed.fetchedAt<=this.now()&&this.now()-seed.fetchedAt<30000&&this.valid(seed,connection)){
+   this.pending?.abort();this.pending=null;
+   this.data=seed;this.updated=seed.fetchedAt;this.error='';this.needsConnection=false;this.next=seed.fetchedAt+30000;
+  }
   if(!key||this.pending||this.now()<this.next)return;
   const controller=new AbortController();this.pending=controller;
   return this.read(connection,key,controller);
@@ -79,11 +86,10 @@ export class FantasyScoreFeed{
    const response=await this.fetcher('/api/league',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(connection),signal:controller.signal,cache:'no-store'});
    const data=await response.json();
    if(this.key!==key||this.pending!==controller||controller.signal.aborted)return;
-   if(!response.ok)throw new Error('ESPN scores are unavailable');
-   if(data.leagueId!==connection.leagueId||!data.scoring?.teams?.some(t=>t.id===connection.teamId))throw new Error('No team scores returned');
-   if(connection.week&&data.scoring.week!==connection.week||connection.season&&data.season!==connection.season)throw new Error('Scores are for a different week');
-   this.data=data;this.updated=this.now();this.error='';
-  }catch{if(this.key===key&&this.pending===controller)this.error='Could not refresh fantasy points. Retrying automatically.';}
+   if(!response.ok)throw Object.assign(new Error(data.error||'ESPN scores are unavailable'),{reconnect:[400,401,403,404,422].includes(response.status)||['ESPN_REDIRECT','CONNECTION_MISSING'].includes(data.code)});
+   if(!this.valid(data,connection))throw new Error('ESPN did not return scores for the selected team and week.');
+   this.data=data;this.updated=this.now();this.error='';this.needsConnection=false;
+  }catch(error){if(this.key===key&&this.pending===controller){this.needsConnection=!!error.reconnect;this.error=this.needsConnection?'Reconnect ESPN to restore league teams and fantasy scores. '+error.message:'Could not refresh fantasy points. Retrying automatically.';}}
   finally{clearTimeout(timer);if(this.pending===controller){this.pending=null;this.next=this.now()+30000;}}
  }
 }

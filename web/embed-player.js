@@ -21,12 +21,13 @@ export class EmbedPlayer{
   // This also confines nested players and ad frames. Keep playback/storage
   // working, but never let an embedded page open tabs, navigate our window,
   // launch browser dialogs or download files, even after a viewer clicks it.
-  f.setAttribute('sandbox','allow-scripts allow-same-origin allow-forms allow-presentation');
-  // Fullscreen belongs to our stable outer stage. Fullscreen owned by a video
-  // inside this frame ends when that document reconnects or is switched out.
-  // Stream pages may redirect or embed media from a different origin. Delegate
-  // media features across that chain, while keeping fullscreen on our stage.
-  f.allow="autoplay *; fullscreen 'none'; picture-in-picture *; encrypted-media *";f.referrerPolicy='no-referrer';
+  // Let the provider request its own cookie/session access after a viewer's
+  // click. This does not grant access automatically or permit popup windows.
+  f.setAttribute('sandbox','allow-scripts allow-same-origin allow-forms allow-presentation allow-storage-access-by-user-activation');
+  // The site's own player can fullscreen just its video after a viewer click.
+  // Our button uses the stable outer stage; nested fullscreen can end when its
+  // document reconnects, so the app preserves a stage fallback before reload.
+  f.allow="autoplay *; fullscreen *; picture-in-picture *; encrypted-media *";f.allowFullscreen=true;f.referrerPolicy='no-referrer';
   f.addEventListener('load',()=>{if(!this.destroyed&&f===this.element&&this.visible&&this.wantPlay&&this.loadStartedAt!==null&&f.src===this.url){this.loadedAt=this.now();this.loadRetries=0;}});
   return f;
  }

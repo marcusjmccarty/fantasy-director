@@ -98,3 +98,24 @@ test('switching teams reuses the league snapshot and does not start another requ
  let calls=0;const feed=new FantasyScoreFeed({fetcher:async()=>{calls++;return Response.json(result());}});
  await feed.sync(connection);const snapshot=feed.data;await feed.sync({...connection,teamId:'2'});assert.equal(calls,1);assert.equal(feed.data,snapshot);
 });
+
+
+test('fresh import scores seed the feed and retire an older in-flight response',async()=>{
+ let now=1000,calls=0;const old=deferred(),feed=new FantasyScoreFeed({now:()=>now,fetcher:()=>{calls++;return old.promise;}});
+ const reading=feed.sync(connection);now=2000;feed.sync(connection,{...result('123',25),fetchedAt:now});assert.equal(feed.data.scoring.teams[0].points,25);assert.equal(feed.pending,null);
+ old.resolve(Response.json(result('123',5)));await reading;assert.equal(feed.data.scoring.teams[0].points,25);assert.equal(feed.updated,2000);
+ now=31000;feed.sync(connection);assert.equal(calls,1);
+});
+test('score seeds cannot revive stale, future, wrong-league or wrong-week points',async()=>{
+ for(const bad of [{fetchedAt:1},{fetchedAt:90000},{leagueId:'456'},{season:2025},{scoring:{week:7,teams:result().scoring.teams}}]){
+  let calls=0;const feed=new FantasyScoreFeed({now:()=>40000,fetcher:async()=>{calls++;return Response.json({...result(),season:2026});}});
+  await feed.sync({...connection,week:8,season:2026},{...result('123',99),season:2026,fetchedAt:40000,...bad});
+  assert.equal(calls,1);assert.equal(feed.data.scoring.teams[0].points,10);
+ }
+});
+test('league authentication failures offer reconnect and clear after a successful retry',async()=>{
+ for(const [status,code] of [[400,''],[401,'LEAGUE_PRIVATE'],[403,''],[404,''],[422,''],[502,'ESPN_REDIRECT'],[503,'CONNECTION_MISSING']]){
+  let now=1,calls=0;const feed=new FantasyScoreFeed({now:()=>now,fetcher:async()=>++calls===1?Response.json({error:'Check ESPN connection.',code},{status}):Response.json(result())});
+  await feed.sync(connection);assert.equal(feed.needsConnection,true);assert.match(feed.error,/Reconnect ESPN/);now+=30000;await feed.sync(connection);assert.equal(feed.error,'');assert.equal(feed.needsConnection,false);
+ }
+});

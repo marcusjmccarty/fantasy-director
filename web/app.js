@@ -13,7 +13,7 @@ import {normalizePreferences} from './preferences.js';
 import {liveClipCandidates,highlightPage,canRetryReplay,REPLAY_RETRY_MS,REPLAY_WAIT_SECONDS} from './live-highlights.js';
 import {protectedReplayPlay,protectedHighlight,broadcastReplayWindow} from './continuity.js';
 import {BreakControl} from './breaks.js';
-import {scoreCards,fantasyMatchup,FantasyScoreFeed} from './scoreboard.js';
+import {scoreCards,fantasyBoard,fantasyMatchup,FantasyScoreFeed} from './scoreboard.js';
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -642,7 +642,7 @@ function renderTransport(){
  $('timeLabel').textContent=replay?timeLabel(S.at)+' ET':new Date((S.at-saved.delay)*1000).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
  $('autoChip').textContent=S.pinned?'Your choice':'Automatic';$('autoChip').classList.toggle('on',!S.pinned);$('resumeAuto').hidden=!S.pinned;
  const d=S.decision;
- $('reason').textContent=S.started&&!S.playing?'Paused':!S.started?(S.mode==='live'&&!hasLineup()?'Start with your lineup above.':`${saved.teamName} · ${starterCount(roster().length)}`):S.pending?`Opening ${gameState(S.pending.id)?.name||'video'}…`:S.highlight?.playing?'Replaying a score you missed':d?.reason||'';
+ $('reason').textContent=S.started&&!S.playing?'Paused':!S.started?(S.mode==='live'&&!hasLineup()?'Choose your team in the fantasy scoreboard below.':`${saved.teamName} · ${starterCount(roster().length)}`):S.pending?`Opening ${gameState(S.pending.id)?.name||'video'}…`:S.highlight?.playing?'Replaying a score you missed':d?.reason||'';
  $('pictureNote').textContent=S.mode==='live'?(pool.current?.reconnecting?pool.current.recoveryMessage:S.live.error?'Game updates unavailable · retrying':`${saved.delay} sec stream delay`):saved.dataOnly?'Game tracker':'Recorded game video';
  const current=gameState(currentGameId()),inGame=S.program.kind==='game'&&!S.highlight;
  $('pinCurrent').hidden=!inGame||!current;
@@ -652,6 +652,8 @@ function renderTransport(){
  const sources=current?streamURLs(current):[],alternate=sources.find(url=>url!==pool.get(current?.id)?.url);
  $('nextStream').hidden=!inGame||S.mode!=='live'||!alternate;$('nextStream').disabled=!S.playing;
  $('nextStream').textContent=alternate===sources[0]?'Try primary':'Try backup';
+ const embed=inGame&&S.mode==='live'&&pool.current?.kind==='embed',original=embed?pool.get(current?.id)?.url:null;
+ $('openStream').hidden=!original;$('openStream').href=original||'#';$('embedHelp').hidden=!embed;
  const health=S.playing&&inGame&&pool.current?.reconnecting?pool.current.recoveryMessage:'';
  $('streamHealth').hidden=!health;if($('streamHealth').textContent!==health)$('streamHealth').textContent=health;
  $('leaveHighlight').hidden=!S.highlight||S.highlight.done;$('leaveHighlight').disabled=!S.playing;
@@ -908,10 +910,10 @@ async function importLeague({refresh=false,quiet=false}={}){
   // Team IDs are local to a league: team "1" in a new league is not necessarily yours.
   const previousTeamId=saved.leagueId===leagueId?saved.teamId:'';
   if(S.mode==='live'&&saved.leagueId!==data.leagueId)S.replayLineup=null;
-  saved.league=data;saved.leagueId=data.leagueId;
+  data.fetchedAt=Date.now();saved.league=data;saved.leagueId=data.leagueId;
   const team=data.teams.find(t=>t.id===previousTeamId)||data.teams.find(t=>t.id===data.ownedTeamId);
   if(!team)saved.teamId='';
-  if(!team){persist();franchiseOptions();$('leagueStatus').textContent=`${data.name}: choose your team below.`;$('franchise').focus();return;}
+  if(!team){persist();franchiseOptions();render();$('leagueStatus').textContent=`${data.name}: choose your team below.`;$('franchise').focus();return;}
   useRoster(team.players,{teamName:team.name,teamId:team.id});
   $('leagueStatus').textContent=`${data.name}: choose your team below.`;
   fillRosterRows(team.players);$('lineupStatus').textContent=`Following ${team.name}. Your lineup is saved.`;
@@ -925,9 +927,8 @@ $('saveRoster').onclick=()=>{try{
  for(const field of $('rosterRows').querySelectorAll('input,select'))field.removeAttribute('aria-invalid');
  const players=parseRoster([...$('rosterRows').querySelectorAll('.roster-entry')].map(row=>[...row.querySelectorAll('input,select')].map(x=>x.value.trim()).join(', ')).join('\n'));
  const imported=saved.teamId&&saved.league?.teams.find(t=>t.id===saved.teamId);
- const unchanged=imported&&formatRoster(players)===formatRoster(imported.players);
- if(!unchanged){saved.leagueId='';saved.league=null;}S.leagueRequest=(S.leagueRequest||0)+1;$('importLeague').disabled=false;
- useRoster(players,unchanged?{teamName:imported.name,teamId:imported.id}:{teamName:'My lineup'});$('lineupError').textContent='';$('lineupDialog').close();toast('Your lineup is saved. Add your game streams below.');
+ S.leagueRequest=(S.leagueRequest||0)+1;$('importLeague').disabled=false;
+ useRoster(players,imported?{teamName:imported.name,teamId:imported.id}:{teamName:'My lineup'});$('lineupError').textContent='';$('lineupDialog').close();toast('Your lineup is saved. Add your game streams below.');
 }catch(error){$('lineupError').textContent=error.message;const row=$('rosterRows').children[(error.line||1)-1],field=row?.querySelectorAll('input,select')[error.field||0];if(field){field.setAttribute('aria-invalid','true');field.focus();}}};
 function fillRosterRows(players){$('rosterRows').replaceChildren();for(const player of players)addPlayerRow(player);}
 function addPlayerRow(player={name:'',team:'',position:''}){
@@ -948,6 +949,8 @@ function openLineup(){
 }
 $('lineupButton').onclick=openLineup;
 $('closeLineup').onclick=()=>$('lineupDialog').close();
+$('connectLeague').onclick=()=>{openLineup();$('leagueImport').open=true;if(fantasyFeed.needsConnection)$('cookieDetails').open=true;$('leagueId').focus();};
+$('retryFantasy').onclick=()=>{if(fantasyFeed.needsConnection||!saved.leagueId){$('connectLeague').onclick();return;}fantasyFeed.next=0;renderScoreboard();};
 $('lineupForm').onsubmit=e=>{e.preventDefault();$('saveRoster').click();};
 function renderSetup(){
  $('storageNotice').hidden=!S.storageError;
@@ -961,14 +964,18 @@ function renderScoreboard(){
  const age=S.live.fetched?Date.now()-S.live.fetched:Infinity;
  $('scoreboardUpdated').textContent=!live?'Following replay time':S.live.error||age>90000?(S.live.fetched?'Scores delayed · retrying':'Connecting to ESPN…'):'Updated '+new Date(S.live.fetched).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
  $('scoreboardCaption').textContent=live?'Live scores may be ahead of your stream. Gamecast opens ESPN in a new tab.':'Scores follow your replay timeline, so future results stay hidden.';
- const connected=live&&hasLineup()&&saved.leagueId&&saved.teamId;
+ const connected=live&&!!saved.leagueId;
  const season=games.find(g=>g.season)?.season;
- fantasyFeed.sync(connected?{leagueId:saved.leagueId,teamId:saved.teamId,...(week&&season?{week,season}:{}),swid:saved.espn.swid,s2:saved.espn.s2}:null);
- const data=fantasyFeed.data,match=connected?fantasyMatchup(data,saved.teamId,games,S.matchupId):null;
- const board=match?.yours,opponent=match?.opponent;
+ fantasyFeed.sync(connected?{leagueId:saved.leagueId,teamId:saved.teamId,...(week&&season?{week,season}:{}),swid:saved.espn.swid,s2:saved.espn.s2}:null,saved.league);
+ const data=fantasyFeed.data,match=connected&&saved.teamId?fantasyMatchup(data,saved.teamId,games,S.matchupId):null;
  const league=live&&data?.leagueId===saved.leagueId?data:saved.league;
- $('scoreTeamPicker').hidden=!league?.teams?.length;
- put('scoreTeam','<option value="">Choose a team…</option>'+(league?.teams||[]).map(t=>`<option value="${esc(t.id)}">${esc(t.name)}</option>`).join(''));
+ const cached=league?.teams?.find(t=>t.id===saved.teamId),knownPlayers=cached?.players||players;
+ const rosterOnly=knownPlayers.length?fantasyBoard({scoring:{week,teams:[{id:'local',players:knownPlayers.map(p=>({...p,points:null})),points:null,complete:false}]}},'local',games):null;
+ const board=match?.yours||(rosterOnly?{...rosterOnly,name:cached?.name||saved.teamName}:null),opponent=match?.opponent;
+ $('scoreTeamPicker').hidden=false;$('scoreTeam').disabled=!league?.teams?.length;
+ $('connectLeague').textContent=fantasyFeed.needsConnection?'Reconnect ESPN':saved.leagueId?'ESPN connection':'Connect ESPN';
+ $('retryFantasy').hidden=!live||!fantasyFeed.error;$('retryFantasy').disabled=!!fantasyFeed.pending;$('retryFantasy').textContent=fantasyFeed.needsConnection?'Reconnect ESPN':'Retry scores';
+ put('scoreTeam',`<option value="">${league?.teams?.length?'Choose a team…':saved.leagueId?'Loading league teams…':'Connect ESPN to choose a team'}</option>`+(league?.teams||[]).map(t=>`<option value="${esc(t.id)}">${esc(t.name)}</option>`).join(''));
  $('scoreTeam').value=saved.teamId||'';
  const matches=match?.matches||[];$('matchupPicker').hidden=matches.length<2;
  put('matchupSelect',matches.map(m=>{const other=m.home?.teamId===saved.teamId?m.away:m.home;return `<option value="${esc(m.id)}">${esc(league?.teams.find(t=>t.id===other?.teamId)?.name||'Bye')}</option>`;}).join(''));
@@ -976,7 +983,7 @@ function renderScoreboard(){
  $('scoreboardMeta').textContent=[league?.name||'ESPN fantasy football',week?'Week '+week:'',live?'Live matchup':'Replay mode'].filter(Boolean).join(' · ');
  $('fantasyTitle').textContent=board?.name||(live&&hasLineup()?saved.teamName:'Your team');
  $('opponentTitle').textContent=opponent?.name||(match?.matchupId?'Bye week':'Your opponent');
- $('lineupButton').textContent=live&&!hasLineup()?'Choose players':'Edit lineup';
+ $('lineupButton').textContent=live&&!hasLineup()?'Choose players':'Edit followed players';
  $('fantasyTotal').textContent=board?.points||'—';$('opponentTotal').textContent=opponent?.points||'—';
  const period=match?.weeks.length>1?'Weeks '+match.weeks.join(' + '):board?.week?'Week '+board.week:week?'Week '+week:'This week';
  $('fantasyWeek').textContent=period;$('opponentWeek').textContent=period;
@@ -985,8 +992,8 @@ function renderScoreboard(){
  $('matchupStatus').textContent=match?.status||(live?'Your team vs. your opponent':'Fantasy totals are available in Live games.');
  $('opponentEmpty').hidden=!!opponent?.rows;$('opponentEmpty').textContent=match?.matchupId&&!opponent?'No opponent scheduled for this matchup.':'Your opponent’s starters will appear after your ESPN league connects.';
  $('fantasyScoringNote').hidden=!board;
- $('fantasyScoringNote').textContent=`${board?.official?'ESPN matchup totals':'Starter totals where ESPN matchup totals are unavailable'} · Player rows: Week ${board?.week||week||'—'} · Missing stats: — · Subject to stat corrections.`;
- $('fantasyStatus').textContent=!live?'Fantasy totals are available in Live games.':!connected?'Import your ESPN league, then choose a team to follow its roster and matchup.':fantasyFeed.error?(fantasyFeed.updated?'Last update '+new Date(fantasyFeed.updated).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+'. ':'')+fantasyFeed.error:!board?'Getting your matchup from ESPN…':'Updated '+new Date(fantasyFeed.updated).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+' · Refreshes every 30 seconds';
+ $('fantasyScoringNote').textContent=!match?'Saved players · Fantasy points will appear after ESPN connects.':`${board?.official?'ESPN matchup totals':'Starter totals where ESPN matchup totals are unavailable'} · Player rows: Week ${board?.week||week||'—'} · Missing stats: — · Subject to stat corrections.`;
+ $('fantasyStatus').textContent=!live?'Fantasy totals are available in Live games.':!connected?'Connect ESPN to load your league’s teams, opponent and live fantasy points.':fantasyFeed.error?(fantasyFeed.updated?'Last update '+new Date(fantasyFeed.updated).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+'. ':'')+fantasyFeed.error:!saved.teamId?'Choose your fantasy team above to load its matchup.':!match?'Getting your matchup from ESPN… Your saved players are shown while it loads.':'Updated '+new Date(fantasyFeed.updated).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+' · Refreshes every 30 seconds';
 
 }
 $('allScores').onclick=()=>{S.scoresMine=false;renderScoreboard();};
