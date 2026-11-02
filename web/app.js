@@ -526,6 +526,7 @@ function firstAction(d){for(let at=d.start;at<d.end;at+=30)if(rank(S.archive.sam
 const ROLE={offense:'',kicker:'K',defense:'D/ST'};
 function render(){
  if(!S.archive&&S.mode==='replay')return;
+ document.body.dataset.mode=S.mode;
  renderScreen();renderRail();renderTransport();renderSetup();renderStreams();renderScoreboard();
 }
 function renderScreen(){
