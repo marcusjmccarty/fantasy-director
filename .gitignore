@@ -3,3 +3,5 @@ node_modules/
 scripts/scorebug-ocr/frames
 scripts/scorebug-ocr/jobs.tsv
 scripts/scorebug-ocr/results/
+
+.qa/

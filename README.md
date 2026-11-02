@@ -1,6 +1,6 @@
 # Fantasy Stream
 
-A RedZone-style channel for one fantasy roster. It follows your starters’ teams using possession and field position, favors drives near the end zone, skips detected breaks, and replays missed scores when footage is available. Plain browser JavaScript plus a small Cloudflare Worker; no framework.
+A viewing room for NFL, NBA, NHL and MLB streams, with ESPN fantasy rosters and matchup tracking. The NFL channel provides RedZone-style coverage for one fantasy roster. It follows your starters’ teams using possession and field position, favors drives near the end zone, skips detected breaks, and replays missed scores when footage is available. Plain browser JavaScript plus a small Cloudflare Worker; no framework.
 
 ## Live site
 
@@ -136,3 +136,17 @@ and video-focused fullscreen. The embedded provider's own fullscreen button is
 now permitted; it can isolate its video, whereas our button expands the entire
 saved frame with compact controls. Provider fullscreen can end on a game switch
 or reconnect; the channel retains a fullscreen-layout fallback.
+
+## Basketball, hockey and baseball
+
+Use the NBA, NHL or MLB tabs for daily game guides, scores, date navigation,
+per-game primary/backup links and ESPN fantasy connections. Choose **Connect
+ESPN**, select the season-ending year and your league, then use **Change fantasy
+team**. Sport profiles and links are independent; NFL settings are preserved.
+
+Points leagues show official matchup totals and actual scoring-day player
+points. Category/rotisserie leagues show rosters and link to ESPN for category
+standings. Automatic selection follows starters' teams at reported breaks; it
+does not detect individual substitutions. All sports reuse the stream recovery,
+Pause and fullscreen adapters. See [multisport viewing room](docs/multisport-viewing-room.md)
+for supported behavior and verification limits.

@@ -537,7 +537,7 @@ function renderScreen(){
  // overlay states
  let overlay=null;
  if(!S.started)overlay={eyebrow:S.mode==='replay'?`WEEK 7 REPLAY · ${day()?.label.toUpperCase()||''}`:'LIVE',title:'Your starters. One channel.',text:`Following ${saved.teamName}: ${starterCount(roster().length)}. The channel follows your starters’ teams, favors drives near the end zone, and replays missed scores when footage is available.`,button:S.mode==='replay'?'Watch replay':!hasLineup()?'Choose your players':'Start watching',action:S.mode==='live'&&!hasLineup()?'lineup':'start'};
- if(!S.started&&S.mode==='live'){overlay.text=!hasLineup()?'First choose your fantasy lineup. Then add your game streams below and press Start watching.':`Following ${saved.teamName} · ${starterCount(roster().length)}. Add your stream links below. Without a link, you’ll see a game tracker instead of video.`;}
+ if(!S.started&&S.mode==='live'){overlay.title='Your game day starts here.';if(!hasLineup()){overlay.button='Connect ESPN';overlay.action='connect';}overlay.text=!hasLineup()?'Connect your fantasy team, or choose a game from the guide. Add your own stream links to start watching.':`Following ${saved.teamName} · ${starterCount(roster().length)}. Add your stream links below. Without a link, you’ll see a game tracker instead of video.`;}
  else if(S.started&&loading&&!loading.playing&&!pool.visible&&p.kind!=='game')overlay={eyebrow:'REPLAY',title:'Getting your replay ready…',text:'Your games will continue if this clip cannot play.',spinner:true};
  else if(S.started&&(p.kind==='idle'||S.pending&&!pool.visible||p.kind==='game'&&!pool.visible&&picture(p.id)==='video'))overlay={eyebrow:'TUNING IN',title:S.pending?`Opening ${esc(gameState(S.pending.id)?.name||'the game')}…`:'Finding your players…',text:'The picture appears as soon as the game is playing.',spinner:true};
  else if(p.kind==='standby'&&!loading&&S.games.some(g=>g.state==='in'&&(S.ads.has(g.id)||S.breaks.has(g.id)||S.detectedBreaks.has(g.id))))overlay={eyebrow:'COMMERCIAL BREAK',title:'Waiting for a game to return.',text:S.mode==='live'?'Add another game stream to give the channel somewhere to go during breaks. We will retry your games automatically.':'Finding the next available play. You can also move to the next drive.',button:S.mode==='live'?'Add game streams':'Next drive',action:S.mode==='live'?'streams':'next'};
@@ -591,7 +591,7 @@ function nextKickoff(){
 }
 function renderRail(){
  const teams=rosterTeams(roster()),blocked=excluded();
- const mine=S.games.filter(g=>g.teams.some(t=>teams.has(t.abbr))||sourceFor(g.id)||g.id===currentGameId());
+ const mine=S.games.filter(g=>S.mode==='live'||g.teams.some(t=>teams.has(t.abbr))||sourceFor(g.id)||g.id===currentGameId());
  const ranked=rank(S.games,roster(),{excluded:blocked,includeDefense:saved.includeDefense});
  const order=g=>g.id===currentGameId()?0:ranked.findIndex(e=>e.game.id===g.id)>=0?1+ranked.findIndex(e=>e.game.id===g.id):g.state==='in'?50:g.state==='pre'?60:70;
  const items=mine.sort((a,b)=>order(a)-order(b)||(a.start||0)-(b.start||0)).map(g=>{
@@ -604,7 +604,7 @@ function renderRail(){
   const cta=watching?'On screen':S.pending?.id===g.id?'Opening…':blocked.has(g.id)?tag[0]==='BREAK'?'On break':'Unavailable':g.state==='post'&&!selectable?'Final':selectable?(picture(g.id)==='data'?'Game tracker':'Watch'):'Not started';
   return `<li><button class="game ${watching?'watching':''}" data-game="${esc(g.id)}" aria-pressed="${S.pinned===g.id}" aria-label="${esc(g.name+'. '+action)}" ${selectable?'':'disabled'}><span class="g-status"><span class="tag ${tag[1]}">${tag[0]}</span><span class="g-when">${esc(g.detail||'')}</span></span><span class="g-matchup">${teams}</span>${ytg!==null?`<span class="g-drive"><span>${esc(off)} ball · ${esc(g.downDistance||'On offense')}</span><span>${ytg} yds to go</span></span><span class="g-bar" aria-hidden="true"><i style="width:${100-ytg}%"></i></span>`:''}<span class="g-footer"><span class="g-names">${names||'<span>Other game</span>'}</span><span class="g-cta">${cta}${selectable&&!watching?'<span aria-hidden="true"> ↗</span>':''}</span></span></button></li>`;
  }).join('');
- put('games',items||(S.mode==='live'&&!hasLineup()?'<li class="empty">Choose your lineup to see your games.</li>':'<li class="empty">None of your starters play in this window.</li>'));
+ put('games',items||(S.mode==='live'&&!hasLineup()?'<li class="empty">Loading the NFL schedule… You can connect your league below.</li>':'<li class="empty">None of your starters play in this window.</li>'));
  $('gamesNote').textContent=S.pinned?'Your choice':`${mine.filter(g=>g.state==='in').length} in play`;
  // roster
  put('roster',roster().map(p=>{
@@ -695,6 +695,7 @@ function scrubLabel(at){
 
 // ---------- controls ----------
 $('ovButton').onclick=()=>{
+ if($('ovButton').dataset.action==='connect'){$('connectLeague').onclick();return;}
  if($('ovButton').dataset.action==='streams'){openStreams();return;}
  if($('ovButton').dataset.action==='next'){nextDrive();return;}
  if($('ovButton').dataset.action==='retry'){S.cooldown.clear();director.reset();setPlaying(true);return;}
@@ -972,6 +973,7 @@ function renderScoreboard(){
  const cached=league?.teams?.find(t=>t.id===saved.teamId),knownPlayers=cached?.players||players;
  const rosterOnly=knownPlayers.length?fantasyBoard({scoring:{week,teams:[{id:'local',players:knownPlayers.map(p=>({...p,points:null})),points:null,complete:false}]}},'local',games):null;
  const board=match?.yours||(rosterOnly?{...rosterOnly,name:cached?.name||saved.teamName}:null),opponent=match?.opponent;
+ $('scoreboard').dataset.empty=String(!board?.rows&&!opponent?.rows);
  $('scoreTeamPicker').hidden=false;$('scoreTeam').disabled=!league?.teams?.length;
  $('connectLeague').textContent=fantasyFeed.needsConnection?'Reconnect ESPN':saved.leagueId?'ESPN connection':'Connect ESPN';
  $('retryFantasy').hidden=!live||!fantasyFeed.error;$('retryFantasy').disabled=!!fantasyFeed.pending;$('retryFantasy').textContent=fantasyFeed.needsConnection?'Reconnect ESPN':'Retry scores';

@@ -7,7 +7,7 @@ function isOwner(request,env){
  try{return LOOPBACK.has(new URL(request.url).hostname)&&env.ESPN_LOCAL===true;}catch{return false;}
 }
 // Cookies pasted by the viewer for their own private league travel with the request and are used once.
-function ownCookies(data){
+export function ownCookies(data){
  const swid=String(data.swid||'').trim(),s2=String(data.s2||'').trim();
  if(!swid&&!s2)return null;
  if(!swid||!s2)throw new Error('Paste both SWID and espn_s2, or leave both blank for a public league.');
