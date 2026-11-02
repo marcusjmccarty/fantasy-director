@@ -11,7 +11,7 @@ layouts stack the player, guide and matchup without horizontal overflow.
 NBA, NHL and MLB have daily schedules, live scores, date navigation, Gamecast
 links, per-game primary/backup URLs, manual viewing and automatic selection at
 reported breaks. URLs are keyed by sport and event ID, preserving baseball
- doubleheaders and isolating sports. Local calendar dates are explicitly sent
+doubleheaders and isolating sports. Local calendar dates are explicitly sent
 to ESPN; an empty day is never replaced by the last available game. Loading,
 connection failure, delayed results and empty schedules have distinct states.
 
@@ -39,9 +39,11 @@ stable picture area with compact controls. A third-party page's own fullscreen
 button is enabled; the app cannot isolate video inside arbitrary cross-origin
 pages or guarantee their startup, advertisements or decoding.
 
-Validation: 667 automated tests, including 24 new tests for sports data, actual
+Validation: 668 automated tests, including 25 new tests for sports data, actual
 and missing points, category formats, date isolation, stale requests, manual
 choices, source recovery, Pause, fullscreen retention and connection isolation.
+A deployed-runtime check caught Cloudflare's unsupported fetch redirect mode;
+the endpoint now uses manual redirects and rejects non-success status codes.
 The compiled Worker serves 32 exact assets with HEAD/route checks. Real ESPN
 NBA, NHL and MLB schedules and fantasy pro-team metadata were fetched, including
 the correct season-ending year for basketball and hockey.

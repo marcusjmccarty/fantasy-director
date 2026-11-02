@@ -9,7 +9,7 @@ export async function sportsScoreboardAPI(request,fetcher=fetch){
  const url=new URL(request.url),sport=url.searchParams.get('sport'),config=Object.hasOwn(SPORT_SERVICES,sport)?SPORT_SERVICES[sport]:null,date=url.searchParams.get('date');
  if(!config||!validSportDate(date||''))return sportJSON({error:'Choose NBA, NHL or MLB and a valid date.'},400);
  try{
-  const response=await fetcher(`https://site.api.espn.com/apis/site/v2/sports/${config.path}/scoreboard?dates=${date.replaceAll('-','')}&limit=100`,{signal:AbortSignal.timeout(12000),redirect:'error'});
+  const response=await fetcher(`https://site.api.espn.com/apis/site/v2/sports/${config.path}/scoreboard?dates=${date.replaceAll('-','')}&limit=100`,{signal:AbortSignal.timeout(12000),redirect:'manual'});
   if(!response.ok)throw Object.assign(new Error('upstream'),{code:'ESPN_HTTP_'+response.status});const raw=await response.json();if(!Array.isArray(raw.events))throw new Error('invalid');
   return sportJSON({sport,date,season:raw.leagues?.[0]?.season?.year||raw.season?.year,events:raw.events,fetchedAt:Date.now()});
  }catch(error){console.warn('ESPN sports scoreboard failed',error?.name,error?.message);return sportJSON({error:'ESPN game updates are unavailable. Try again shortly.',code:error?.code||error?.cause?.code||'ESPN_NETWORK'},502);}

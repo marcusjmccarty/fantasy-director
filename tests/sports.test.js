@@ -54,3 +54,10 @@ test('fantasy endpoint rejects foreign origins and malformed payloads without re
 test('fantasy redirects cannot forward session cookies and show reconnect instead',async()=>{
  let calls=0;const response=await sportsLeagueAPI(new Request('https://site.test/api/sports/league',{method:'POST',body:JSON.stringify({sport:'nhl',leagueId:'123',season:2027})}),async()=>{calls++;return new Response(null,{status:302,headers:{Location:'https://evil.test'}});});assert.equal(response.status,401);assert.equal(calls,1);assert.equal((await response.json()).code,'ESPN_REDIRECT');
 });
+test('scoreboard fetch works at the Cloudflare edge and rejects upstream redirects',async()=>{
+ let calls=0;
+ const edgeFetch=async(url,options)=>{calls++;if(!['follow','manual'].includes(options.redirect))throw new TypeError('Invalid redirect value at the edge');assert.equal(options.redirect,'manual');return calls===1?Response.json({events:[]}):new Response(null,{status:302,headers:{Location:'https://elsewhere.test'}});};
+ const request=new Request('https://site.test/api/sports?sport=nhl&date=2026-11-01');
+ assert.equal((await sportsScoreboardAPI(request,edgeFetch)).status,200);
+ const redirected=await sportsScoreboardAPI(request,edgeFetch);assert.equal(redirected.status,502);assert.equal((await redirected.json()).code,'ESPN_HTTP_302');assert.equal(calls,2);
+});
