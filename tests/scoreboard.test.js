@@ -119,3 +119,13 @@ test('league authentication failures offer reconnect and clear after a successfu
   await feed.sync(connection);assert.equal(feed.needsConnection,true);assert.match(feed.error,/Reconnect ESPN/);now+=30000;await feed.sync(connection);assert.equal(feed.error,'');assert.equal(feed.needsConnection,false);
  }
 });
+
+test('scoreboard highlights possession activity for offense, defense and kickers without claiming substitutions',()=>{
+ const players=[{name:'Taylor',team:'IND',position:'RB'},{name:'Jefferson',team:'MIN',position:'WR'},{name:'Vikings',team:'MIN',position:'D/ST'},{name:'Colts kicker',team:'IND',position:'K'}];
+ const data={scoring:{teams:[{id:'1',players,points:0}]}};
+ const board=g=>fantasyBoard(data,'1',[g]).rows;
+ const live={...game,phase:'live',down:2,distance:5,yardsToGoal:25};
+ assert.equal((board(live).match(/class="sb-active"/g)||[]).length,2);assert.match(board(live),/Team on offense/);assert.match(board(live),/Team defending/);
+ const kick=board({...live,down:4,distance:8});assert.match(kick,/Field-goal opportunity/);assert.doesNotMatch(kick,/Team on offense/);
+ for(const g of [{...live,phase:'break'},{...live,state:'post'},{...live,state:'pre'},{...live,possession:-1}])assert.doesNotMatch(board(g),/sb-active/);
+});

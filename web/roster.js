@@ -26,6 +26,8 @@ export const formatRoster=roster=>roster.map(p=>`${p.name}, ${p.team}, ${p.posit
 // A stream can be a direct video file, an HLS playlist, or any https page to embed.
 export function safeVideo(value){
  if(!value)return '';
+ value=String(value).trim();if(value.length>8192)throw new Error('That stream link is too long.');
+ if(/^<iframe\b/i.test(value)){const match=/<iframe\b[^>]*?\ssrc\s*=\s*(["'])(.*?)\1/i.exec(value);if(!match)throw new Error('The iframe must include a player src URL.');value=match[2].replace(/&amp;/gi,'&').replace(/&quot;/gi,'"').replace(/&#39;/gi,"'");}
  let u;try{u=new URL(value);}catch{throw new Error('Enter a full https:// link.');}
  if(u.protocol!=='https:'||u.username||u.password)throw new Error('Use an https:// link without a login in it.');
  return u.href;
