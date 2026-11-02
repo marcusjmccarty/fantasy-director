@@ -27,7 +27,7 @@ export class EmbedPlayer{
   // The site's own player can fullscreen just its video after a viewer click.
   // Our button uses the stable outer stage; nested fullscreen can end when its
   // document reconnects, so the app preserves a stage fallback before reload.
-  f.allow="autoplay *; fullscreen *; picture-in-picture *; encrypted-media *";f.allowFullscreen=true;f.referrerPolicy='no-referrer';
+  f.allow="autoplay *; fullscreen *; picture-in-picture *; encrypted-media *";f.allowFullscreen=true;f.referrerPolicy='strict-origin-when-cross-origin';
   f.addEventListener('load',()=>{if(!this.destroyed&&f===this.element&&this.visible&&this.wantPlay&&this.loadStartedAt!==null&&f.src===this.url){this.loadedAt=this.now();this.loadRetries=0;}});
   return f;
  }

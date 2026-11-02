@@ -6,10 +6,10 @@ const players=value=>parseRoster(formatRoster(value));
 // Persisted browser data can come from an older release or an interrupted save.
 // Validate each preference independently so one damaged field cannot break startup.
 export function normalizePreferences(value={}){
- const raw=record(value),out={roster:SAMPLE.map(p=>({...p})),teamName:'Sample lineup',teamId:'',leagueId:'',league:null,streams:{},streamBackups:{},marks:{},muted:false,includeDefense:true,highlights:true,dataOnly:false,autoReconnect:true,delay:30,espn:{swid:'',s2:''},lineupReady:false};
+ const raw=record(value),out={roster:SAMPLE.map(p=>({...p})),teamName:'Sample lineup',teamId:'',leagueId:'',league:null,streams:{},streamBackups:{},marks:{},muted:false,includeDefense:true,highlights:true,dataOnly:false,autoReconnect:true,autoDiscover:true,delay:30,espn:{swid:'',s2:''},lineupReady:false};
  let validRoster=false;try{out.roster=players(raw.roster);validRoster=true;}catch{}
  if(validRoster){out.teamName=text(raw.teamName,'Sample lineup');out.lineupReady=typeof raw.lineupReady==='boolean'?raw.lineupReady:out.teamName!=='Sample lineup';}
- for(const key of ['muted','includeDefense','highlights','dataOnly','autoReconnect'])if(typeof raw[key]==='boolean')out[key]=raw[key];
+ for(const key of ['muted','includeDefense','highlights','dataOnly','autoReconnect','autoDiscover'])if(typeof raw[key]==='boolean')out[key]=raw[key];
  if(typeof raw.delay==='number'&&Number.isFinite(raw.delay))out.delay=Math.max(0,Math.min(600,raw.delay));
  out.leagueId=/^\d{1,12}$/.test(raw.leagueId)?String(raw.leagueId):'';
  out.teamId=/^\d+$/.test(raw.teamId)?String(raw.teamId):'';

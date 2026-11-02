@@ -1,3 +1,4 @@
+import {StreamFinder} from './stream-finder.js';
 import {ReplayArchive,Clock,timeLabel} from './archive.js';
 import {RecordingSync,addMark,wallForClock,mergeAnchors} from './sync.js';
 import {Director,RULES,rank,hasRoster,rosterTeams} from './director.js';
@@ -46,7 +47,8 @@ const S={scope:'game',center:null,range:null,mode:'live',archive:null,clips:[],l
  streamChoices:new Map(),streamRotations:new Map(),
  cooldown:new Map(),ads:new Set(),breaks:new Map(),detectedBreaks:new Map(),sources:new Map(),syncs:new Map(),usedClips:new Map(),failedClips:new Map(),seekHold:false,cuts:0,
  lastStep:0,lastWarm:0,lastRender:0,live:{games:[],feed:new LiveFeed(),scores:new Map(),summaryPending:new Map(),fetched:0,error:'',generation:0},toastTimer:null,unmuteHint:false};
-const fantasyFeed=new FantasyScoreFeed();
+const fantasyFeed=new FantasyScoreFeed(),streamFinder=new StreamFinder({fetcher:(...args)=>fetch(...args)});
+streamFinder.enabled=saved.autoDiscover;
 const clock=new Clock(),director=new Director(),coverage=new Coverage(),nfl=new NFLSourceCatalog(),breakControl=new BreakControl();
 const pool=new PlayerPool($('layers'),{capacity:3,
  onAd:(key,on)=>{
@@ -84,11 +86,11 @@ function syncFor(game){
  if(!sync){sync=new RecordingSync(game,{types:S.archive.types,anchors:mergeAnchors(game.anchors||[],saved.marks[game.id]||[])});S.syncs.set(game.id,sync);}
  return sync;
 }
-function streamURLs(game){const key=gameKey(game);return [...new Set([saved.streams[key],saved.streamBackups[key]].filter(Boolean))];}
+function streamURLs(game){const key=gameKey(game);return streamFinder.urls(game,[saved.streams[key],saved.streamBackups[key]]);}
 function sourceFor(id){
  if(S.mode==='replay'){const g=archiveGame(id);return g?.embed?{url:g.embed,type:'provider/ok',duration:g.recordingDuration}:null;}
- const g=gameState(id),urls=g?streamURLs(g):[],choice=S.streamChoices.get(id),url=urls.includes(choice)?choice:urls[0];
- return url?{url,type:streamType(url),live:true,autoReconnect:saved.autoReconnect}:null;
+ const g=gameState(id),urls=g?streamURLs(g):[],choice=S.streamChoices.get(id),url=urls.includes(choice)?choice:(pool.visible===id?pool.get(id)?.url:null)||urls[0];
+ return url?{url,page:streamFinder.original(url),type:streamType(url),live:true,autoReconnect:saved.autoReconnect}:null;
 }
 // A fallback changes the source for this game, never the director's choice of game.
 function rotateStream(id,manual=false){
@@ -472,6 +474,7 @@ function toast(html,tone='',isHTML=false){
 // ---------- transport ----------
 function day(){return S.archive?.sessions[S.day];}
 function setPlaying(playing,message){
+ S.autoAttempted=true;
  if(playing&&S.mode==='live'&&!hasLineup()&&!S.pinned){openLineup();return;}
  if(playing&&S.mode==='replay'&&!S.archive)return;
  if(S.playing!==playing){
@@ -537,7 +540,7 @@ function renderScreen(){
  // overlay states
  let overlay=null;
  if(!S.started)overlay={eyebrow:S.mode==='replay'?`WEEK 7 REPLAY · ${day()?.label.toUpperCase()||''}`:'LIVE',title:'Your starters. One channel.',text:`Following ${saved.teamName}: ${starterCount(roster().length)}. The channel follows your starters’ teams, favors drives near the end zone, and replays missed scores when footage is available.`,button:S.mode==='replay'?'Watch replay':!hasLineup()?'Choose your players':'Start watching',action:S.mode==='live'&&!hasLineup()?'lineup':'start'};
- if(!S.started&&S.mode==='live'){overlay.title='Your game day starts here.';if(!hasLineup()){overlay.button='Connect ESPN';overlay.action='connect';}overlay.text=!hasLineup()?'Connect your fantasy team, or choose a game from the guide. Add your own stream links to start watching.':`Following ${saved.teamName} · ${starterCount(roster().length)}. Add your stream links below. Without a link, you’ll see a game tracker instead of video.`;}
+ if(!S.started&&S.mode==='live'){overlay.title='Your game day starts here.';if(!hasLineup()){overlay.button='Connect ESPN';overlay.action='connect';}overlay.text=!hasLineup()?'Connect your fantasy team, or choose a game from the guide. We’ll find matching game streams. You can change the links below.':`Following ${saved.teamName} · ${starterCount(roster().length)}. Finding game streams automatically. Your saved links take priority.`;}
  else if(S.started&&loading&&!loading.playing&&!pool.visible&&p.kind!=='game')overlay={eyebrow:'REPLAY',title:'Getting your replay ready…',text:'Your games will continue if this clip cannot play.',spinner:true};
  else if(S.started&&(p.kind==='idle'||S.pending&&!pool.visible||p.kind==='game'&&!pool.visible&&picture(p.id)==='video'))overlay={eyebrow:'TUNING IN',title:S.pending?`Opening ${esc(gameState(S.pending.id)?.name||'the game')}…`:'Finding your players…',text:'The picture appears as soon as the game is playing.',spinner:true};
  else if(p.kind==='standby'&&!loading&&S.games.some(g=>g.state==='in'&&(S.ads.has(g.id)||S.breaks.has(g.id)||S.detectedBreaks.has(g.id))))overlay={eyebrow:'COMMERCIAL BREAK',title:'Waiting for a game to return.',text:S.mode==='live'?'Add another game stream to give the channel somewhere to go during breaks. We will retry your games automatically.':'Finding the next available play. You can also move to the next drive.',button:S.mode==='live'?'Add game streams':'Next drive',action:S.mode==='live'?'streams':'next'};
@@ -652,7 +655,7 @@ function renderTransport(){
  const sources=current?streamURLs(current):[],alternate=sources.find(url=>url!==pool.get(current?.id)?.url);
  $('nextStream').hidden=!inGame||S.mode!=='live'||!alternate;$('nextStream').disabled=!S.playing;
  $('nextStream').textContent=alternate===sources[0]?'Try primary':'Try backup';
- const embed=inGame&&S.mode==='live'&&pool.current?.kind==='embed',original=embed?pool.get(current?.id)?.url:null;
+ const embed=inGame&&S.mode==='live'&&pool.current?.kind==='embed',original=embed?(pool.get(current?.id)?.source?.page||pool.get(current?.id)?.url):null;
  $('openStream').hidden=!original;$('openStream').href=original||'#';$('embedHelp').hidden=!embed;
  const health=S.playing&&inGame&&pool.current?.reconnecting?pool.current.recoveryMessage:'';
  $('streamHealth').hidden=!health;if($('streamHealth').textContent!==health)$('streamHealth').textContent=health;
@@ -807,12 +810,12 @@ async function setMode(mode){
  if(mode==='replay'&&!S.archive){toast('The replay is unavailable. Live games still work.','warn');return;}
  if(S.mode==='replay'){S.replayAt=S.at;S.replayLineup=lineupSnapshot();}
  else S.liveLineup=lineupSnapshot();
- setPlaying(false);pool.destroy();S.mode=mode;S.program={kind:'idle'};S.pending=null;S.pinned=null;S.selection=null;S.highlight=null;S.started=false;
+ setPlaying(false);pool.destroy();S.mode=mode;S.program={kind:'idle'};S.pending=null;S.pinned=null;S.selection=null;S.highlight=null;S.started=false;S.autoAttempted=false;
  S.streamChoices.clear();S.streamRotations.clear();
  if(mode==='live'&&S.liveLineup){saved={...saved,...S.liveLineup};S.liveLineup=null;}
  else if(mode==='replay'&&S.replayLineup)saved={...saved,...S.replayLineup};
  S.resumeOnShow=false;S.pausedAt=null;S.unmuteHint=false;S.audioAsked=0;S.driftSince=null;S.usedClips=new Map();S.failedClips=new Map();franchiseOptions();
- S.leagueRequest=(S.leagueRequest||0)+1;$('importLeague').disabled=false;S.live.generation++;S.live.feed=new LiveFeed();S.live.games=[];S.live.scores.clear();S.live.summaryAt={};S.liveClips=[];S.games=[];S.coverageStart=null;S.decision=null;S.seekHold=false;S.stall=null;coverage.reset();director.reset();S.sources.clear();S.cooldown.clear();S.ads.clear();S.breaks.clear();resetBreaks();S.lastAt=null;
+ streamFinder.cancel();S.leagueRequest=(S.leagueRequest||0)+1;$('importLeague').disabled=false;S.live.generation++;S.live.feed=new LiveFeed();S.live.games=[];S.live.scores.clear();S.live.summaryAt={};S.liveClips=[];S.games=[];S.coverageStart=null;S.decision=null;S.seekHold=false;S.stall=null;coverage.reset();director.reset();S.sources.clear();S.cooldown.clear();S.ads.clear();S.breaks.clear();resetBreaks();S.lastAt=null;
  $('replayMode').setAttribute('aria-pressed',String(mode==='replay'));$('liveMode').setAttribute('aria-pressed',String(mode==='live'));
  if(mode==='live'){S.at=Date.now()/1000;pollLive(S.live.generation);pollLiveClips(S.live.generation);}
  else{seekTo(S.replayAt??firstAction(day())??clock.at);}
@@ -828,7 +831,7 @@ async function pollLive(generation){
   const games=liveGames(await espn('scoreboard',AbortSignal.timeout(8000)));
   if(generation!==S.live.generation||S.mode!=='live')return;
   for(const g of games)g.scores=S.live.scores.get(g.id)||[];
-  S.live.games=games;S.live.error='';S.live.fetched=Date.now();S.live.feed.push(games,Date.now()/1000);if($('streamsStatus').textContent==='Refreshing the schedule…')$('streamsStatus').textContent='Schedule updated.';
+  S.live.games=games;S.live.error='';S.live.fetched=Date.now();S.live.feed.push(games,Date.now()/1000);if(S.discoveryReady)void refreshStreamLinks();if($('streamsStatus').textContent==='Refreshing the schedule…')$('streamsStatus').textContent='Schedule updated.';
   const teams=rosterTeams(roster());
   const pending=S.live.summaryPending,capacity=Math.max(0,4-[...pending.values()].filter(request=>request.generation===generation).length);
   summaries=Promise.allSettled(games.filter(g=>g.state!=='pre'&&g.teams.some(t=>teams.has(t.abbr))&&pending.get(g.id)?.generation!==generation&&Date.now()-(S.live.summaryAt?.[g.id]||0)>25000).sort((a,b)=>(S.live.summaryAt?.[a.id]||0)-(S.live.summaryAt?.[b.id]||0)).slice(0,capacity).map(async g=>{
@@ -929,7 +932,7 @@ $('saveRoster').onclick=()=>{try{
  const players=parseRoster([...$('rosterRows').querySelectorAll('.roster-entry')].map(row=>[...row.querySelectorAll('input,select')].map(x=>x.value.trim()).join(', ')).join('\n'));
  const imported=saved.teamId&&saved.league?.teams.find(t=>t.id===saved.teamId);
  S.leagueRequest=(S.leagueRequest||0)+1;$('importLeague').disabled=false;
- useRoster(players,imported?{teamName:imported.name,teamId:imported.id}:{teamName:'My lineup'});$('lineupError').textContent='';$('lineupDialog').close();toast('Your lineup is saved. Add your game streams below.');
+ useRoster(players,imported?{teamName:imported.name,teamId:imported.id}:{teamName:'My lineup'});$('lineupError').textContent='';closeLineupEditor();toast('Your lineup is saved. Finding game streams…');
 }catch(error){$('lineupError').textContent=error.message;const row=$('rosterRows').children[(error.line||1)-1],field=row?.querySelectorAll('input,select')[error.field||0];if(field){field.setAttribute('aria-invalid','true');field.focus();}}};
 function fillRosterRows(players){$('rosterRows').replaceChildren();for(const player of players)addPlayerRow(player);}
 function addPlayerRow(player={name:'',team:'',position:''}){
@@ -946,16 +949,17 @@ function openLineup(){
  $('manualRoster').value=populated?formatRoster(roster()):'';fillRosterRows(populated?roster():[{}]);
  $('lineupError').textContent='';$('lineupStatus').textContent=populated?`Following ${saved.teamName}.`:'';
  if(S.mode==='replay')$('lineupStatus').textContent+=' Replay changes do not change your live lineup.';
- $('leagueImport').open=!!saved.leagueId;franchiseOptions();$('lineupDialog').showModal();
+ $('leagueImport').open=!!saved.leagueId;franchiseOptions();$('lineupDialog').open=true;$('lineupButton').setAttribute('aria-expanded','true');$('lineupDialog').scrollIntoView?.({behavior:'smooth',block:'nearest'});
 }
+function closeLineupEditor(){$('lineupDialog').open=false;$('lineupButton').setAttribute('aria-expanded','false');}
 $('lineupButton').onclick=openLineup;
-$('closeLineup').onclick=()=>$('lineupDialog').close();
+$('closeLineup').onclick=()=>closeLineupEditor();
 $('connectLeague').onclick=()=>{openLineup();$('leagueImport').open=true;if(fantasyFeed.needsConnection)$('cookieDetails').open=true;$('leagueId').focus();};
 $('retryFantasy').onclick=()=>{if(fantasyFeed.needsConnection||!saved.leagueId){$('connectLeague').onclick();return;}fantasyFeed.next=0;renderScoreboard();};
 $('lineupForm').onsubmit=e=>{e.preventDefault();$('saveRoster').click();};
 function renderSetup(){
  $('storageNotice').hidden=!S.storageError;
- $('streamSummary').textContent=S.mode==='replay'?'Replay videos are already included':`${S.live.games.filter(g=>streamURLs(g).length).length} of ${S.live.games.length} NFL games have saved links`;
+ $('streamSummary').textContent=S.mode==='replay'?'Replay videos are already included':`${S.live.games.filter(g=>streamURLs(g).length).length} of ${S.live.games.length} NFL games have player links`;
 }
 function renderScoreboard(){
  const live=S.mode==='live',games=live?S.live.games:S.games,players=live&&!hasLineup()?[]:roster();
@@ -985,7 +989,7 @@ function renderScoreboard(){
  $('scoreboardMeta').textContent=[league?.name||'ESPN fantasy football',week?'Week '+week:'',live?'Live matchup':'Replay mode'].filter(Boolean).join(' · ');
  $('fantasyTitle').textContent=board?.name||(live&&hasLineup()?saved.teamName:'Your team');
  $('opponentTitle').textContent=opponent?.name||(match?.matchupId?'Bye week':'Your opponent');
- $('lineupButton').textContent=live&&!hasLineup()?'Choose players':'Edit followed players';
+ $('lineupButton').textContent=live&&!hasLineup()?'Choose players':'Edit lineup';
  $('fantasyTotal').textContent=board?.points||'—';$('opponentTotal').textContent=opponent?.points||'—';
  const period=match?.weeks.length>1?'Weeks '+match.weeks.join(' + '):board?.week?'Week '+board.week:week?'Week '+week:'This week';
  $('fantasyWeek').textContent=period;$('opponentWeek').textContent=period;
@@ -1005,9 +1009,9 @@ function renderStreams(){
  const signature=JSON.stringify([S.mode,hasLineup(),games.map(g=>[g.id,gameKey(g)]),others.map(g=>[g.id,gameKey(g)])]);if(signature===S.streamSignature)return;S.streamSignature=signature;
  const drafts=S.streamDrafts??=new Map();for(const i of streamFields())drafts.set(i.dataset.key+(i.dataset.backup==='true'?':backup':''),i.value);
  $('streamsModeNote').textContent=S.mode==='replay'?'Replay videos are included. Choose Live games at the top to add your own live streams.':!S.live.games.length?'Waiting for the NFL schedule. You can refresh below.':'Add links for any NFL game. When your starters are off the field, RedZone mode follows the best scoring chance among your saved streams.';
- $('streamsHelp').textContent=S.mode==='replay'?'Your replay is ready. No stream links needed.':'Add the game or channel page video link for each game. An optional backup link lets the channel try another source for the same game.';
+ $('streamsHelp').textContent=S.mode==='replay'?'Your replay is ready. No stream links needed.':'Automatic streams are ready when available. Paste a player URL, iframe code, or NTV / StreamCorner game link to override one. Leave a field blank to use automatic lookup.';
  $('streamBadge').textContent=S.mode==='replay'?'Included':'Your video links';
- const inputs=list=>S.mode==='live'?list.map(g=>`<div class="stream-row"><label class="stream"><span>${esc(g.name)}<small>${esc(new Date(g.date).toLocaleString([],{weekday:'short',hour:'numeric',minute:'2-digit'}))}</small></span><input type="url" data-key="${esc(gameKey(g))}" value="${esc(drafts.get(gameKey(g))??saved.streams[gameKey(g)]??'')}" placeholder="Paste the https:// video link here" aria-label="Stream for ${esc(g.name)}"></label><details class="stream-backup" ${saved.streamBackups[gameKey(g)]?'open':''}><summary>Backup for this game <span class="muted">(optional)</span></summary><label>Another link to ${esc(g.name)}<input type="url" data-key="${esc(gameKey(g))}" data-backup="true" value="${esc(drafts.get(gameKey(g)+':backup')??saved.streamBackups[gameKey(g)]??'')}" placeholder="https://…" aria-label="Backup stream for ${esc(g.name)}"></label></details></div>`).join(''):'';
+ const inputs=list=>S.mode==='live'?list.map(g=>`<div class="stream-row"><label class="stream"><span>${esc(g.name)}<small>${esc(new Date(g.date).toLocaleString([],{weekday:'short',hour:'numeric',minute:'2-digit'}))}</small></span><input type="text" data-key="${esc(gameKey(g))}" value="${esc(drafts.get(gameKey(g))??saved.streams[gameKey(g)]??'')}" placeholder="Automatic, or paste a player URL / iframe" aria-label="Stream for ${esc(g.name)}"></label><details class="stream-backup" ${saved.streamBackups[gameKey(g)]?'open':''}><summary>Backup for this game <span class="muted">(optional)</span></summary><label>Another link to ${esc(g.name)}<input type="text" data-key="${esc(gameKey(g))}" data-backup="true" value="${esc(drafts.get(gameKey(g)+':backup')??saved.streamBackups[gameKey(g)]??'')}" placeholder="https://…" aria-label="Backup stream for ${esc(g.name)}"></label></details></div>`).join(''):'';
  $('streamInputs').innerHTML=inputs(games);$('backupInputs').innerHTML=inputs(others);$('backupStreams').hidden=S.mode!=='live'||!others.length;
  $('saveStreams').hidden=S.mode!=='live'||!S.live.games.length;$('refreshStreams').hidden=S.mode!=='live';
 }
@@ -1020,6 +1024,18 @@ async function restoreConnection(){
   if(request!==S.leagueRequest||hasLineup())return;
   if(session.savedLeagueId){$('leagueId').value=session.savedLeagueId;await importLeague({quiet:true});}}catch{}
 }
+
+async function refreshStreamLinks(){
+ if(S.mode!=='live'||!S.live.games.length||streamFinder.pending)return;
+ const generation=S.live.generation;streamFinder.enabled=saved.autoDiscover;
+ const manual=[...Object.values(saved.streams),...Object.values(saved.streamBackups)].filter(Boolean);
+ const task=streamFinder.refresh(S.live.games,'nfl',manual),discovery=streamFinder.generation;await task;
+ if(S.mode!=='live'||generation!==S.live.generation||discovery!==streamFinder.generation)return;
+ $('discoveryStatus').textContent=streamFinder.status;render();
+ if(!S.autoAttempted&&!S.started&&saved.leagueId&&saved.teamId&&hasLineup()&&S.live.games.some(g=>g.state==='in'&&streamURLs(g).length))setPlaying(true);
+}
+$('optDiscover').checked=saved.autoDiscover;
+$('optDiscover').onchange=e=>{saved.autoDiscover=e.target.checked;streamFinder.enabled=saved.autoDiscover;streamFinder.cancel();persist();void refreshStreamLinks();render();};
 
 // ---------- settings ----------
 function openSettings(tab='viewing'){
@@ -1062,7 +1078,7 @@ $('saveStreams').onclick=()=>{
   if(slot&&streamURLs(gameState(id)).includes(slot.url)){S.streamChoices.set(id,slot.url);continue;}
   S.streamChoices.delete(id);pool.close(id);S.ads.delete(id);if(S.pending?.id===id)S.pending=null;if(S.program.kind==='game'&&S.program.id===id){S.program={kind:'standby'};S.lastAt=null;}
  }
- director.reset();$('streamsError').textContent='';$('streamsStatus').textContent=homepage?'Links saved. A homepage may return to its menu on reconnect. Save the game or channel page URL to return to the same stream.':S.playing?'Stream links saved. The channel will use your new links.':'Stream links saved. Press Play when you’re ready.';render();
+ void refreshStreamLinks();director.reset();$('streamsError').textContent='';$('streamsStatus').textContent=homepage?'Links saved. A homepage may return to its menu on reconnect. Save the game or channel page URL to return to the same stream.':S.playing?'Stream links saved. The channel will use your new links.':'Stream links saved. Press Play when you’re ready.';render();
 };
 function syncStatus(){const g=archiveGame($('syncGame').value);if(!g)return;const sync=syncFor(g);$('syncStatus').textContent=`${g.name}: ${g.anchors?.length||0} built-in scorebug anchors, ${saved.marks[g.id]?.length||0} of yours.${pool.visible===g.id?` Video is at ${Math.floor(pool.current.currentTime/60)}:${String(Math.floor(pool.current.currentTime%60)).padStart(2,'0')}.`:' Open this game on screen to mark it.'}`;void sync;}
 $('syncGame').onchange=syncStatus;
@@ -1077,7 +1093,7 @@ $('clearSync').onclick=()=>{const id=$('syncGame').value;delete saved.marks[id];
 
 // ---------- start ----------
 async function init(){
- franchiseOptions();render();setInterval(()=>frame(performance.now()),100);pollLive(S.live.generation);pollLiveClips(S.live.generation);restoreConnection();
+ S.discoveryReady=true;franchiseOptions();render();setInterval(()=>frame(performance.now()),100);pollLive(S.live.generation);pollLiveClips(S.live.generation);restoreConnection();setInterval(refreshStreamLinks,15000);
  try{
   const [archive,clips]=await Promise.all([fetch('/week7.json',{signal:AbortSignal.timeout(15000)}).then(r=>{if(!r.ok)throw new Error('The replay archive is unavailable. Reload to try again.');return r.json();}),fetch('/nfl-highlights.json',{signal:AbortSignal.timeout(15000)}).then(r=>r.ok?r.json():{clips:[]}).catch(()=>({clips:[]}))]);
   S.archive=new ReplayArchive(archive);S.clips=clips.clips||[];
@@ -1085,6 +1101,7 @@ async function init(){
   const sunday=Math.max(0,S.archive.sessions.findIndex(s=>s.label.startsWith('Sunday')));
   S.day=sunday;clock.end=day().end;clock.seek(firstAction(day())??day().start,performance.now());$('daySelect').value=String(sunday);
   render();
+ if(window.location&&new URLSearchParams(window.location.search).get('mode')==='replay')setMode('replay');
  }catch(error){$('replayMode').disabled=true;$('replayMode').title=error.message;render();}
 }
 init();

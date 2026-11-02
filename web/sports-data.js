@@ -15,7 +15,7 @@ export function normalizeSportGames(raw,sport){
 export function normalizeSportPreferences(value={}){
  const object=v=>v&&typeof v==='object'&&!Array.isArray(v)?v:{};value=object(value);
  const streams={};for(const [key,entry] of Object.entries(object(value.streams))){if(!/^(nba|nhl|mlb):\d+$/.test(key))continue;const links={};for(const field of ['primary','backup'])try{if(typeof entry?.[field]==='string')links[field]=safeVideo(entry[field]);}catch{}streams[key]=links;}
- return {streams,leagueId:/^\d{1,12}$/.test(value.leagueId)?value.leagueId:'',teamId:/^\d+$/.test(value.teamId)?value.teamId:'',swid:typeof value.swid==='string'?value.swid.slice(0,80):'',s2:typeof value.s2==='string'?value.s2.slice(0,2048):'',muted:!!value.muted,auto:value.auto!==false,autoReconnect:value.autoReconnect!==false,leagueSeason:Number.isInteger(value.leagueSeason)?value.leagueSeason:null,delay:Math.min(600,Math.max(0,Number.isFinite(Number(value.delay))?Number(value.delay):30))};
+ return {streams,leagueId:/^\d{1,12}$/.test(value.leagueId)?value.leagueId:'',teamId:/^\d+$/.test(value.teamId)?value.teamId:'',swid:typeof value.swid==='string'?value.swid.slice(0,80):'',s2:typeof value.s2==='string'?value.s2.slice(0,2048):'',muted:!!value.muted,auto:value.auto!==false,autoReconnect:value.autoReconnect!==false,autoDiscover:value.autoDiscover!==false,leagueSeason:Number.isInteger(value.leagueSeason)?value.leagueSeason:null,delay:Math.min(600,Math.max(0,Number.isFinite(Number(value.delay))?Number(value.delay):30))};
 }
 export function sportPriority(game,followed=[]){
  const mine=game.teams.some(t=>followed.includes(t.id)),scores=game.teams.map(t=>t.score),known=scores.every(s=>s!==null),difference=known?Math.abs(scores[0]-scores[1]):Infinity;
