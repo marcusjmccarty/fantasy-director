@@ -38,3 +38,21 @@ export function streamType(url){
  return 'embed/page';
 }
 export function gameKey(game){return game.teams.map(t=>alias(t.abbreviation||t.abbr)).sort().join('-');}
+// A bright, recognizable color per NFL team (the replay archive carries none),
+// tuned to read on a dark background. ESPN's live feeds supply their own.
+const NFL_COLORS={ARI:'c4294f',ATL:'d0213d',BAL:'7656d6',BUF:'2f6fe0',CAR:'1aa3e8',CHI:'e5642b',CIN:'fb5a1f',CLE:'ff5a1f',DAL:'3b78e7',DEN:'fb6a26',DET:'1d8fd6',GB:'ffbf33',HOU:'d33148',IND:'3f7fd6',JAC:'12a4b8',KC:'ef3346',LAC:'2aa3e6',LAR:'ffae2b',LV:'b9c0c5',MIA:'12b3bd',MIN:'8459cf',NE:'e0334f',NO:'d8c08f',NYG:'3a68d1',NYJ:'2fa36a',PHI:'12919c',PIT:'ffbf33',SEA:'75c83a',SF:'d8343f',TB:'e8303a',TEN:'5ca2e6',WAS:'c0504a'};
+// ESPN's logo codes differ from the feed's abbreviations for a few teams.
+const LOGO_CODES={WAS:'wsh',JAC:'jax'};
+export function teamColor(team,sport='nfl'){
+ const raw=(sport==='nfl'?NFL_COLORS[alias(team?.abbr||team?.abbreviation||'')]:'')||team?.color||'';
+ if(!/^[0-9a-f]{6}$/i.test(raw))return '#5b6b84';
+ // Many official primaries are near-black navy; lift those so they read on the dark page.
+ let [r,g,b]=[0,2,4].map(i=>parseInt(raw.slice(i,i+2),16));const peak=Math.max(r,g,b);
+ if(peak<120){const k=peak<50?.5:.38;[r,g,b]=[r,g,b].map(v=>Math.round(v+(255-v)*k));}
+ return '#'+[r,g,b].map(v=>v.toString(16).padStart(2,'0')).join('');
+}
+export function teamLogo(team,sport='nfl'){
+ if(/^https:\/\/a\.espncdn\.com\//.test(team?.logo||''))return team.logo;
+ const code=String(LOGO_CODES[alias(team?.abbr||'')]||team?.abbreviation||team?.abbr||'').toLowerCase();
+ return /^[a-z]{2,4}$/.test(code)?`https://a.espncdn.com/i/teamlogos/${sport}/500/${code}.png`:'';
+}

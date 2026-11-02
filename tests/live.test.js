@@ -94,8 +94,8 @@ test('liveGames() orders teams away then home regardless of ESPN order and carri
  for(const homeFirst of [true,false]){
   const g=one(scoreboard(event({score:[10,7],situation:sit,homeFirst,period:2,clock:'10:12',shortDetail:'10:12 - 2nd'})),1234.5);
   assert.deepEqual(g.teams.map(t=>t.abbreviation),['IND','MIN']);
-  assert.deepEqual(g.teams[0],{id:'11',abbreviation:'IND',abbr:'IND',name:'Indianapolis Colts',score:10});
-  assert.deepEqual(g.teams[1],{id:'16',abbreviation:'MIN',abbr:'MIN',name:'Minnesota Vikings',score:7});
+  assert.deepEqual(g.teams[0],{id:'11',abbreviation:'IND',abbr:'IND',name:'Indianapolis Colts',color:'',score:10});
+  assert.deepEqual(g.teams[1],{id:'16',abbreviation:'MIN',abbr:'MIN',name:'Minnesota Vikings',color:'',score:7});
   assert.deepEqual(g.score,[10,7]);
   assert.equal(g.id,'401');assert.equal(g.name,'IND @ MIN');assert.equal(g.kind,'live');
   assert.equal(g.state,'in');assert.equal(g.phase,'live');assert.equal(g.breakKind,null);

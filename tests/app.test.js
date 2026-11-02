@@ -242,10 +242,10 @@ test('viewing room: the fullscreen fallback has a working named exit',async()=>{
  await a.el('fullButton').onclick();assert.equal(a.el('fullButton').textContent,'Full screen');
 });
 test('viewing room: selecting a game and returning to automatic switching have explicit labels',()=>{
- const a=app();ready(a);a.render();assert.match(a.el('games').html,/Jonathan Taylor/);assert.match(a.el('games').html,/Open game tracker · add a stream link below for video/);
+ const a=app();ready(a);a.render();assert.match(a.el('games').html,/Jonathan Taylor/);assert.match(a.el('games').html,/Open the game tracker · add a stream for video/);
  a.el('games').onclick({target:{closest:()=>({dataset:{game:'A'}})}});assert.equal(a.S.pinned,'A');assert.equal(a.el('autoChip').textContent,'Your choice');assert.equal(a.el('resumeAuto').hidden,false);assert.match(a.el('games').html,/Your choice until a break · select again/);
  a.el('resumeAuto').onclick();assert.equal(a.S.pinned,null);assert.equal(a.el('autoChip').textContent,'Automatic');assert.equal(a.el('resumeAuto').hidden,true);
- a.S.cooldown.set('A',Infinity);a.render();assert.match(a.el('games').html,/<button[^>]* disabled>/);assert.match(a.el('games').html,/Try another stream link below/);
+ a.S.cooldown.set('A',Infinity);a.render();assert.match(a.el('games').html,/<button[^>]* disabled>/);assert.match(a.el('games').html,/Try another stream for this game/);
 });
 test('saving an unchanged imported lineup retains its ESPN connection',()=>{
  const a=app();ready(a);a.saved.leagueId='123';a.saved.league={teams:[{id:'1',name:'My ESPN team',players:[player]}]};a.saved.teamId='1';
@@ -864,16 +864,16 @@ test('interface: start watching leaves the streams dialog closed and lineup rema
  const a=app();ready(a);a.render();a.setPlaying(true);
  assert.ok(!a.el('streamsDetails').open,'the streams dialog is not open');a.el('lineupButton').onclick();assert.equal(a.el('lineupDialog').open,true);
 });
-test('score center: filters and live score updates leave the active stream intact',()=>{
+test('game tiles: the All/Mine filter and live score updates leave the active stream intact',()=>{
  const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/live.mp4'};a.setPlaying(true);a.cutTo('A',1000);
- const video=a.pool.current;a.S.live.games.push({...game,id:'B',name:'Other game',teams:[{abbr:'SEA'},{abbr:'SF'}]});a.render();
- assert.match(a.el('scoreboardGames').innerHTML,/Other game/);a.el('myScores').onclick();assert.doesNotMatch(a.el('scoreboardGames').innerHTML,/Other game/);
- a.S.live.games=[{...game,score:[24,17]}];a.render();assert.match(a.el('scoreboardGames').innerHTML,/>24</);assert.equal(a.pool.current,video);assert.equal(video.destroyed,undefined);
+ const video=a.pool.current;a.S.live.games.push({...game,id:'B',name:'Other game',teams:[{abbr:'SEA'},{abbr:'SF'}]});a.S.games=a.S.live.games;a.render();
+ assert.match(a.el('games').innerHTML,/Other game/);a.el('myScores').onclick();assert.doesNotMatch(a.el('games').innerHTML,/Other game/);
+ a.S.live.games=[{...game,score:[24,17]}];a.S.games=a.S.live.games;a.render();assert.match(a.el('games').innerHTML,/>24</);assert.equal(a.pool.current,video);assert.equal(video.destroyed,undefined);
  assert.equal(a.el('myScores')['aria-pressed'],'true');
 });
-test('score center: replay scores use the replay timeline, never future live results',()=>{
+test('game tiles: replay scores use the replay timeline, never future live results',()=>{
  const a=app();replayReady(a);a.S.mode='replay';a.S.games=[{...game,score:[7,0]}];a.S.live.games=[{...game,score:[49,42]}];a.render();
- assert.match(a.el('scoreboardGames').innerHTML,/>7</);assert.doesNotMatch(a.el('scoreboardGames').innerHTML,/>49</);assert.match(a.el('fantasyStatus').textContent,/available in Live games/);
+ assert.match(a.el('games').innerHTML,/>7</);assert.doesNotMatch(a.el('games').innerHTML,/>49</);assert.match(a.el('fantasyStatus').textContent,/available in Live games/);
 });
 test('interface: optional backup stream links save and unsaved edits survive schedule changes',()=>{
  const a=app();ready(a);const other={...game,id:'X',name:'SF at SEA',teams:[{abbr:'SF'},{abbr:'SEA'}]};a.S.games.push(other);a.S.live.games.push(other);a.render();

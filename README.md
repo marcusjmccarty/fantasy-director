@@ -33,7 +33,7 @@ Public leagues import with just the league ID. For private leagues, viewers past
 4. **Leave breaks.** An active roster game fills in first. If all roster games are in breaks or unavailable, another configured game can fill the screen. In live mode, RedZone-style coverage continues among your saved streams whenever no starters are active, including before or after their games. It favors the closest scoring chance, preserves plays and manual choices, and returns to active fantasy players first. Reported provider ads hide and mute immediately, including while a replacement buffers. Inferred replay breaks wait for the scoring footage to finish and remain remembered through compressed edits. Delayed live scoreboard increases also identify a scoring break when a timeout snapshot is missing. If no eligible video is ready, a waiting screen replaces the break; replays can advance to the next known football play. **Skip this break** handles ads the player cannot report, with a ninety-second exclusion and an Undo control. Pausing preserves that timer. Add optional backup links below the player.
 5. **Finish short highlights.** Once a short score clip is visible, finish it before automatic switching. Manual game choices override it. Long or unknown clips have a bounded opening protection window; failed or ad-reporting clips enter recovery. See the audit below for the exact limits and tradeoffs.
 
-The layout separates initial setup, the player, the always-visible game guide, and stream entry. Captions and alerts sit outside the video. The red dot identifies the brand in both modes; the mode label indicates live versus recorded viewing.
+Every page has the same three parts and fits one screen with nothing to scroll: the header, a strip of game tiles under it, and the picture with your matchup beside it. Captions and alerts sit outside the video. The red dot beside the name identifies the brand; a small static dot on the Live switch marks live viewing.
 
 ## Live games through the stream's delay (`web/live.js`)
 
@@ -130,6 +130,8 @@ they do not verify the availability of third-party live broadcasts.
 
 ## Latest audit and interface changes
 
+**November 1 night: one strip, one rail, every league.** The game list beside the picture is gone; everything it did now lives in the tiles across the top. Each tile is tinted with both teams' colors and shows their logos, the score, a status tag (On air, Red zone, Driving, Defense, Break, Later, Final), the drive or game situation with a progress bar, your players in that game, and a chip that names the stream source or adds one. Tapping a tile watches it; tapping the chip opens Streams at that game. The space beside the picture holds the matchup as a scorebug: your total in gold on the left, your opponent's in violet on the right, a share bar between them, then starters slot by slot with short names in a narrow column. Highlights keep their tab. The Streams, Fantasy team and Settings dialogs open at full height in Safari (their inner layout no longer collapses), and `#streams`, `#team` and `#settings` links open them directly. NBA, NHL and MLB use the same header, tiles and rail, with a Bench tab for reserves, the TV network on each tile, a countdown to tip-off, puck drop or first pitch, and the winning margin on finals. Their day picker stays, compact, beside the tiles: it browses other days' schedules, so you can add streams ahead of time or look back at results when today has no games (MLB in the offseason).
+
 **November 1 evening: the viewing room, rebuilt.** The header carries the Live/Replay switch (gold when selected) and the sport tabs on the left; on the right a live matchup pill (your score against your opponent's), Streams with a count of games ready to play, the Fantasy team button and settings. Under it, a league strip shows every score at a glance (All or just your games). The picture leads; beside it the guide has two tabs, Games and Highlights, and each game card says where its stream comes from, so tapping it opens Streams right at that game. Streams is a dialog instead of a long form: per game, a one-tap choice of Automatic, NTV, StreamCorner or your own link, with only games still to watch listed. The matchup below the picture is one head-to-head table (your starter against the opponent's starter in the same slot) next to a score summary with a share bar, about half the height of the old two tables; on phones names shorten to "J. Daniels". The Fantasy team dialog is three things: the ESPN league (one field that also accepts a pasted league link, with private-league cookies tucked behind a toggle), your team, and the players the channel follows. Full screen keeps its controls at the top center, clear of scorebugs and player controls. Website-player refresh, whose old default was saved in many browsers, is reset to off once.
 
 **November 1 audit and redesign.** Four independent auditors (logic, safeguards, video, ESPN) reported 54 findings and skeptics confirmed the high-severity ones; the fixes are the live-feed rules above (timeouts, celebrations, lost possession, tempo, 4th-down inference, stale data), reconnect off by default, dead direct links set aside instead of the whole game, ESPN cookies kept only after a successful import, a sandboxed replay player frame, a per-IP rate limit and a same-site check on the API routes, a permissions policy on every page, sanitized NFL error messages, correct NBA and NHL lineup slot tables, and summaries of finished games polled every ten minutes instead of every 25 s. The page is laid out as one stylesheet: the picture with its ticker, the game guide beside it, the fantasy scoreboard below both, then lineup and highlights, with stream setup last; the Live switch carries a red dot.
@@ -152,10 +154,11 @@ or reconnect; the channel retains a fullscreen-layout fallback.
 
 ## Basketball, hockey and baseball
 
-Use the NBA, NHL or MLB tabs for daily game guides, scores, date navigation,
-per-game primary/backup links and ESPN fantasy connections. Choose **Connect
-ESPN**, select the season-ending year and your league, then use **Change fantasy
-team**. Sport profiles and links are independent; NFL settings are preserved.
+Use the NBA, NHL or MLB tabs for daily game tiles, scores, a day picker,
+per-game primary/backup links and ESPN fantasy connections. Open **Fantasy team**,
+paste your league ID or league link (the season is read from the link when
+present), then choose your team. Sport profiles and links are independent; NFL
+settings are preserved.
 
 Points leagues show official matchup totals and actual scoring-day player
 points. Category/rotisserie leagues show rosters and link to ESPN for category

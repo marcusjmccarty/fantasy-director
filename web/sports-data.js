@@ -6,10 +6,10 @@ export function normalizeSportGames(raw,sport){
  if(!Object.hasOwn(SPORTS,sport))return [];
  return (raw.events||[]).map(event=>{
   const c=event.competitions?.[0],status=c?.status||event.status||{},type=status.type||{};
-  const teams=(c?.competitors||[]).slice().sort((a,b)=>(a.homeAway==='away'?0:1)-(b.homeAway==='away'?0:1)).map(t=>({id:String(t.team?.id||t.id),abbr:t.team?.abbreviation||'',name:t.team?.displayName||'',score:t.score!==undefined&&t.score!==''&&Number.isFinite(Number(t.score))?Number(t.score):null}));
+  const teams=(c?.competitors||[]).slice().sort((a,b)=>(a.homeAway==='away'?0:1)-(b.homeAway==='away'?0:1)).map(t=>({id:String(t.team?.id||t.id),abbr:t.team?.abbreviation||'',name:t.team?.displayName||'',nick:t.team?.shortDisplayName||t.team?.name||'',color:/^[0-9a-f]{6}$/i.test(t.team?.color||'')?t.team.color:'',logo:/^https:\/\/a\.espncdn\.com\//.test(t.team?.logo||'')?t.team.logo:'',score:t.score!==undefined&&t.score!==''&&Number.isFinite(Number(t.score))?Number(t.score):null}));
   const interrupted=/POSTPON|CANCEL|SUSPEND|DELAY/i.test(type.name||'');
   const onBreak=interrupted||/HALFTIME|END_PERIOD|INTERMISSION|TIMEOUT|END_INNING/i.test(type.name||'');
-  return {id:String(event.id),key:sport+':'+event.id,sport,name:event.shortName||event.name||SPORTS[sport].label+' game',date:event.date,teams,state:interrupted?'hold':type.state||'pre',onBreak,detail:type.shortDetail||type.description||'',period:Number(status.period)||0,clock:status.displayClock||'',situation:c?.situation||{},season:Number(event.season?.year||raw.season),statusName:type.name||''};
+  return {id:String(event.id),key:sport+':'+event.id,sport,name:event.shortName||event.name||SPORTS[sport].label+' game',date:event.date,teams,state:interrupted?'hold':type.state||'pre',onBreak,detail:type.shortDetail||type.description||'',period:Number(status.period)||0,clock:status.displayClock||'',situation:c?.situation||{},season:Number(event.season?.year||raw.season),statusName:type.name||'',tv:(()=>{const list=Array.isArray(c?.broadcasts)?c.broadcasts:[],pick=list.find(b=>b?.market==='national')||list.find(b=>b?.market==='home')||list[0],name=Array.isArray(pick?.names)?pick.names.find(n=>typeof n==='string'&&n.length<=24):'';return name||'';})()};
  }).filter(g=>g.teams.length===2&&/^\d+$/.test(g.id));
 }
 export function normalizeSportPreferences(value={}){

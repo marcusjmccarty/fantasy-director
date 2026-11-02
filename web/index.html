@@ -2,7 +2,7 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#090c12"><meta name="color-scheme" content="dark"><meta name="description" content="One channel for your fantasy starters. Every snap your players take, the closest drive to the end zone, and a replay of any score you miss."><title>Fantasy Stream</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@600;700&family=Inter:wght@400;500;600;700;800&display=swap"><link rel="stylesheet" href="/style.css"></head><body>
 <a class="skip-link" href="#room">Skip to your channel</a>
 <header class="bar"><div class="bar-inner">
- <a href="/" class="brand" aria-label="Fantasy Stream home"><span class="brand-mark" aria-hidden="true"></span><span class="brand-name">Fantasy<b>Stream</b></span></a>
+ <a href="/" class="brand" aria-label="Fantasy Stream home"><span class="brand-dot" aria-hidden="true"></span><span class="brand-name">Fantasy<b>Stream</b></span></a>
  <nav class="modes" aria-label="Viewing mode"><button id="liveMode" aria-pressed="true"><span class="mode-dot" aria-hidden="true"></span>Live</button><button id="replayMode" aria-pressed="false">Replay</button></nav>
  <nav class="sport-nav" aria-label="Sport"><a href="/" aria-current="page">NFL</a><a href="/sports.html?sport=nba">NBA</a><a href="/sports.html?sport=nhl">NHL</a><a href="/sports.html?sport=mlb">MLB</a></nav>
  <div class="bar-actions">
@@ -13,10 +13,18 @@
  </div>
 </div></header>
 
-<section class="league-strip" aria-label="Around the league">
+<section class="games-strip" aria-label="Game guide">
  <div class="strip-inner">
-  <div class="strip-head"><div class="seg sb-filters" role="group" aria-label="Scores to show"><button id="allScores" aria-pressed="true">All</button><button id="myScores" aria-pressed="false">Mine</button></div><span class="sb-update" id="scoreboardUpdated">Connecting…</span></div>
-  <div class="sb-games" id="scoreboardGames" tabindex="0" aria-label="Scores around the NFL"></div>
+  <div class="strip-head">
+   <h2 id="gamesHead" tabindex="-1">Games <span class="tab-note" id="gamesNote"></span></h2>
+   <div class="seg sb-filters" role="group" aria-label="Games to show"><button id="allScores" aria-pressed="true">All</button><button id="myScores" aria-pressed="false">Mine</button></div>
+   <span class="sb-update" id="scoreboardUpdated">Connecting…</span>
+  </div>
+  <div class="strip-scroller">
+   <button class="strip-arrow prev" id="stripPrev" aria-label="Earlier games" tabindex="-1">‹</button>
+   <ol class="games" id="games" aria-label="Choose a game"></ol>
+   <button class="strip-arrow next" id="stripNext" aria-label="More games" tabindex="-1">›</button>
+  </div>
   <p class="sr-only" id="scoreboardCaption"></p>
  </div>
 </section>
@@ -65,7 +73,7 @@
     <div class="replay-controls" id="replayControls" hidden>
      <div class="replay-seek"><button id="backButton" class="seek-button" aria-label="Back 30 seconds">−30s</button><button id="forwardButton" class="seek-button" aria-label="Forward 30 seconds">+30s</button><button id="nextButton" title="Skip ahead to your next drive">Next drive <span aria-hidden="true">→</span></button></div>
      <div class="replay-progress"><div class="timeline"><div class="ticks" id="ticks" aria-hidden="true"></div><div class="scrub-tip" id="scrubTip" hidden></div><input type="range" id="timeline" min="0" max="1" step="1" value="0" aria-label="Replay time"></div><span class="time" id="timeLabel">—</span></div>
-     <details class="replay-settings"><summary>Replay day and timeline</summary><div class="replay-options"><div><label for="daySelect">Replay day</label><select id="daySelect" aria-label="Replay day"></select></div><div><label for="scope">Timeline</label><select id="scope" aria-label="Timeline range"><option value="game">This game</option><option value="tight">15 minutes</option><option value="day">Whole day</option></select></div><div id="speedControl" hidden><label for="speed">Speed</label><select id="speed" aria-label="Speed" hidden><option value="1">1×</option><option value="4">4×</option><option value="16">16×</option><option value="60">60×</option></select></div><button id="timingButton" class="ghost">Fix replay timing</button></div></details>
+     <details class="replay-settings"><summary title="Replay day, timeline and timing">Options</summary><div class="replay-options"><div><label for="daySelect">Replay day</label><select id="daySelect" aria-label="Replay day"></select></div><div><label for="scope">Timeline</label><select id="scope" aria-label="Timeline range"><option value="game">This game</option><option value="tight">15 minutes</option><option value="day">Whole day</option></select></div><div id="speedControl" hidden><label for="speed">Speed</label><select id="speed" aria-label="Speed" hidden><option value="1">1×</option><option value="4">4×</option><option value="16">16×</option><option value="60">60×</option></select></div><button id="timingButton" class="ghost">Fix replay timing</button></div></details>
     </div>
    </div>
    <div class="direction-controls">
@@ -77,40 +85,35 @@
   </div>
  </section>
 
- <aside class="rail" aria-label="Game guide">
-  <div class="rail-tabs" role="tablist" aria-label="Guide">
-   <button id="gamesTab" role="tab" aria-selected="true" aria-controls="gamesPanel">Games <span class="tab-note" id="gamesNote"></span></button>
+ <aside class="rail" aria-label="Your matchup and highlights">
+  <div class="rail-tabs" role="tablist" aria-label="Side panel">
+   <button id="matchupTab" role="tab" aria-selected="true" aria-controls="matchupPanel">Matchup</button>
    <button id="scoresTab" role="tab" aria-selected="false" aria-controls="scoresPanel" tabindex="-1">Highlights <span class="count" id="scoreCount"></span></button>
   </div>
-  <section id="gamesPanel" class="rail-panel" role="tabpanel" aria-labelledby="gamesTab"><h2 id="gamesHead" class="sr-only" tabindex="-1">Choose a game</h2><ol class="games" id="games"></ol></section>
+  <section id="matchupPanel" class="rail-panel" role="tabpanel" aria-labelledby="matchupTab">
+   <div class="score-center" id="scoreboard">
+    <div class="mu-head">
+     <div><h2 id="scoreboardTitle" tabindex="-1">Your matchup</h2><p id="scoreboardMeta">Connect your ESPN league to follow the matchup.</p></div>
+     <div class="mu-tools"><button id="retryFantasy" hidden>Retry</button><button id="refreshScoreboard" class="icon-button" aria-label="Refresh scores" title="Refresh scores"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.5 8A6 6 0 1 0 16 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M16 3.5V8h-4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
+    </div>
+    <div class="mu-duel">
+     <div class="mu-side mine"><span class="mu-label">You</span><strong id="fantasyTotal">—</strong><h3 id="fantasyTitle">Your team</h3><small class="sr-only" id="fantasyWeek">This week</small></div>
+     <div class="mu-vs" aria-hidden="true">vs</div>
+     <div class="mu-side theirs"><span class="mu-label">Opponent</span><strong id="opponentTotal">—</strong><h3 id="opponentTitle">Your opponent</h3><small class="sr-only" id="opponentWeek">This week</small></div>
+    </div>
+    <div class="mu-track" aria-hidden="true"><i id="matchupBar"></i></div>
+    <p class="mu-status"><b id="matchupStatus">Your team vs. your opponent</b><span class="mu-fine" id="fantasyStatus" role="status">Import your ESPN league to get started.</span></p>
+    <label id="matchupPicker" class="mu-picker" hidden>Matchup<select id="matchupSelect" aria-label="Choose matchup"></select></label>
+    <div class="mu-connect"><p>Connect your ESPN league once. Your starters, your opponent and every point update here while you watch.</p><button id="connectFromBoard" class="primary">Connect ESPN</button></div>
+    <table class="h2h" id="fantasyTable" hidden><caption class="sr-only">Starters slot by slot</caption><thead><tr><th scope="col" class="h2h-name mine">You</th><th scope="col" class="h2h-pts mine">Pts</th><th scope="col" class="h2h-slot"><span class="sr-only">Slot</span></th><th scope="col" class="h2h-pts theirs">Pts</th><th scope="col" class="h2h-name theirs">Opp</th></tr></thead><tbody id="fantasyPlayers"></tbody></table>
+    <p class="mu-fine" id="opponentEmpty" hidden></p>
+    <p class="mu-fine mu-note" id="fantasyScoringNote" hidden></p>
+    <div class="mu-placeholder"><b>Your starters appear here</b><span>Pick your team with Fantasy team, or connect ESPN.</span></div>
+   </div>
+  </section>
   <section id="scoresPanel" class="rail-panel" role="tabpanel" aria-labelledby="scoresTab" hidden><h2 id="scoresHead" class="sr-only" tabindex="-1">Scores and highlights</h2><p class="panel-note" id="scoresNote"></p><ul class="scores" id="scores" aria-label="Scores by your starters"></ul></section>
  </aside>
-
- <section class="score-center" id="scoreboard" aria-labelledby="scoreboardTitle">
-  <div class="mu-summary">
-   <div class="mu-head">
-    <div><h2 id="scoreboardTitle" tabindex="-1">Your matchup</h2><p id="scoreboardMeta">Connect your ESPN league to follow the matchup.</p></div>
-    <div class="mu-tools"><button id="retryFantasy" hidden>Retry</button><button id="refreshScoreboard" class="icon-button" aria-label="Refresh scores" title="Refresh scores"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.5 8A6 6 0 1 0 16 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M16 3.5V8h-4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
-   </div>
-   <div class="mu-score">
-    <div class="mu-side mine"><span class="mu-label">You</span><h3 id="fantasyTitle">Your team</h3><strong id="fantasyTotal">—</strong><small class="sr-only" id="fantasyWeek">This week</small></div>
-    <div class="mu-side theirs"><span class="mu-label">Opponent</span><h3 id="opponentTitle">Your opponent</h3><strong id="opponentTotal">—</strong><small class="sr-only" id="opponentWeek">This week</small></div>
-   </div>
-   <div class="mu-track" aria-hidden="true"><i id="matchupBar"></i></div>
-   <p class="mu-status"><b id="matchupStatus">Your team vs. your opponent</b></p>
-   <p class="mu-fine" id="fantasyStatus" role="status">Import your ESPN league to get started.</p>
-   <label id="matchupPicker" class="mu-picker" hidden>Matchup<select id="matchupSelect" aria-label="Choose matchup"></select></label>
-   <div class="mu-connect"><p>Connect your ESPN league once. Your starters, your opponent and every point update here while you watch.</p><button id="connectFromBoard" class="primary">Connect ESPN</button></div>
-  </div>
-  <div class="mu-board">
-   <table class="h2h" id="fantasyTable" hidden><caption class="sr-only">Starters slot by slot</caption><thead><tr><th scope="col" class="h2h-name mine"><span class="full">Your starters</span><span class="short" aria-hidden="true">You</span></th><th scope="col" class="h2h-pts mine">Pts</th><th scope="col" class="h2h-slot"><span class="sr-only">Slot</span></th><th scope="col" class="h2h-pts theirs">Pts</th><th scope="col" class="h2h-name theirs">Opponent</th></tr></thead><tbody id="fantasyPlayers"></tbody></table>
-   <p class="mu-fine" id="opponentEmpty" hidden></p>
-   <p class="mu-fine mu-note" id="fantasyScoringNote" hidden></p>
-   <div class="mu-placeholder"><b>Your starters appear here</b><span>Pick your team with Fantasy team, or connect ESPN.</span></div>
-  </div>
- </section>
 </main>
-<footer class="page-footer"><p><span class="brand-mark small" aria-hidden="true"></span>Fantasy<b>Stream</b><span class="footer-note">Every snap your starters take.</span></p><span class="footer-keys" aria-hidden="true"><kbd>Space</kbd> play · <kbd>M</kbd> sound · <kbd>F</kbd> full screen</span></footer>
 
 <dialog id="streamsDetails" class="streams-dialog" aria-labelledby="streamsTitle"><div class="dialog-shell">
  <div class="dialog-head"><div><h2 id="streamsTitle" tabindex="-1">Streams</h2><p class="dialog-sub" id="streamSummary">Your video links, all in one place</p></div><span class="section-tag" id="streamBadge"></span><button type="button" id="closeStreams" class="icon-button" aria-label="Close streams">✕</button></div>
@@ -161,6 +164,7 @@
   <label class="setting-row"><span><b>Replay game tracker</b><small>A field view instead of video in Replay.</small></span><input type="checkbox" class="switch" id="optData"></label>
   <label class="setting-row"><span><b>Refresh website players</b><small>Off by default, so a healthy stream is never interrupted. Turn on for a site that silently freezes; it reloads every 2 minutes.</small></span><input type="checkbox" class="switch" id="optReconnect"></label>
   <div class="setting-row"><label for="optDelay"><b>Stream delay</b><small>Seconds your stream runs behind live. Match the clock under the video to your stream’s scorebug.</small></label><input id="optDelay" type="number" min="0" max="600" step="5" value="30"></div>
+  <p class="muted small keys"><kbd>Space</kbd> play or pause · <kbd>M</kbd> sound · <kbd>F</kbd> full screen</p>
   <details class="rules plain"><summary>How the channel decides</summary><ul>
    <li>Only games where one of your starters is on the field, offense first and closest to the end zone. Your D/ST fills in when no offense is on.</li>
    <li>Kickers only on 4th down in field-goal range (inside the opponent 42).</li>

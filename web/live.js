@@ -17,7 +17,7 @@ export function liveGames(raw,nowSeconds=Date.now()/1000){
   const ordered=[...(c.competitors||[])].sort((a,b)=>(a.homeAway==='away'?0:1)-(b.homeAway==='away'?0:1));
   // Display defaults must not be treated as evidence of a score correction.
   const scoreKnown=ordered.length===2&&ordered.every(t=>['number','string'].includes(typeof t.score)&&String(t.score).trim()!==''&&Number.isFinite(Number(t.score))&&Number(t.score)>=0);
-  const teams=ordered.map(t=>({id:String(t.team?.id||t.id),abbreviation:t.team?.abbreviation||'?',abbr:alias(t.team?.abbreviation||'?'),name:t.team?.displayName||'',score:Number(t.score||0)}));
+  const teams=ordered.map(t=>({id:String(t.team?.id||t.id),abbreviation:t.team?.abbreviation||'?',abbr:alias(t.team?.abbreviation||'?'),name:t.team?.displayName||'',color:/^[0-9a-f]{6}$/i.test(t.team?.color||'')?t.team.color:'',score:Number(t.score||0)}));
   const possession=teams.findIndex(t=>t.id===String(s.possession?.id??s.possession??''));
   const state=type.completed?'post':type.state||'pre';
   const last=s.lastPlay||{},lastType=last.type?.text||'',lastPlayId=String(last.id||'');
