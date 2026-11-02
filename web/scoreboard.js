@@ -1,4 +1,5 @@
 import {alias} from './scoring.js';
+import {involvement} from './director.js';
 
 const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 export const formatPoints=value=>typeof value==='number'&&Number.isFinite(value)?value.toFixed(2):'—';
@@ -33,8 +34,9 @@ export function fantasyBoard(data,teamId,games=[]){
  if(!team)return null;
  const rows=team.players.map(p=>{
   const game=games.find(g=>g.teams.some(t=>t.abbr===alias(p.team)));
-  const status=game?(game.state==='pre'?kickoff(game):game.state==='post'?'Final':game.detail||'In progress'):'No game in this slate';
-  return `<tr><td><span class="sb-position">${escape(p.slot||p.position)}</span></td><th scope="row">${escape(p.name)}<small>${escape(p.team)} · ${escape(status)}</small></th><td class="sb-points ${typeof p.points==='number'&&p.points<0?'sb-negative':''}">${formatPoints(p.points)}</td></tr>`;
+  const involved=game&&involvement(game,[p])[0],active=!!involved;
+  const status=active?(involved.role==='defense'?'Team defending':involved.role==='kicker'?'Field-goal opportunity':'Team on offense'):game?(game.state==='pre'?kickoff(game):game.state==='post'?'Final':game.detail||'In progress'):'No game in this slate';
+  return `<tr${active?' class="sb-active"':''}><td><span class="sb-position">${escape(p.slot||p.position)}</span></td><th scope="row">${escape(p.name)}<small>${active?'<i class="player-live-dot" aria-hidden="true"></i>':''}${escape(p.team)} · ${escape(status)}</small></th><td class="sb-points ${typeof p.points==='number'&&p.points<0?'sb-negative':''}">${formatPoints(p.points)}</td></tr>`;
  }).join('');
  return {points:formatPoints(team.points),complete:team.complete,rows,week:data.scoring.week};
 }

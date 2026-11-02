@@ -215,7 +215,7 @@ test('an old ESPN import cannot overwrite a newly selected manual lineup',async(
 });
 test('public league import waits for an explicit team selection',async()=>{
  const a=app(async()=>Response.json({leagueId:'123',name:'Test league',teams:[{id:'1',name:'Somebody else',players:[player]}]}));a.el('leagueId').value='123';await a.importLeague();
- assert.equal(a.saved.teamName,'Sample lineup');assert.equal(a.el('franchise').focused,true);assert.match(a.el('leagueStatus').textContent,/choose your team/);
+ assert.equal(a.saved.teamName,'Sample lineup');assert.equal(a.el('scoreTeam').focused,true);assert.match(a.el('leagueStatus').textContent,/choose your team/);
 });
 test('live initialization survives a missing archive',async()=>{
  const a=app(async url=>{if(url==='/week7.json')return new Response('',{status:404});return Response.json(String(url).includes('scoreboard')?{events:[]}:{clips:[]});});await a.init();
@@ -419,7 +419,7 @@ test('embed fullscreen: stale reconnect events from a retired player cannot chan
 });
 test('site recovery: failed pages rotate same-game backups across arbitrary hosts without losing fullscreen or selection',async()=>{
  for(const host of ['streamcorner.st','ntv.st','sports.example']){
-  const a=app(undefined,{media:true,embeds:true});ready(a);a.saved.streams={'IND-MIN':`https://${host}/embed/game`};a.saved.streamBackups={'IND-MIN':'https://backup.example/channel/game'};a.selectGame('A');nativeFullscreen(a);await a.el('fullButton').onclick();
+  const a=app(undefined,{media:true,embeds:true});ready(a);a.saved.streams={'IND-MIN':`https://${host}/embed/game`};a.saved.streamBackups={'IND-MIN':'https://backup.example/embed/game'};a.selectGame('A');nativeFullscreen(a);await a.el('fullButton').onclick();
   const selection=a.S.selection,cuts=a.S.cuts;let last=a.pool.current,changes=0;
   for(let now=1000;now<=600000;now+=250){
    a.time.now=now;a.step(now);assert.equal(a.pool.visible,'A');assert.equal(a.S.pinned,'A');assert.equal(a.S.selection,selection);assert.equal(a.S.cuts,cuts);assert.equal(a.S.cooldown.size,0);assert.equal(a.page.fullscreenElement,a.stage);
@@ -429,11 +429,11 @@ test('site recovery: failed pages rotate same-game backups across arbitrary host
  }
 });
 test('site recovery: scheduled refresh does not rotate an unobservable loaded page to another source',()=>{
- const a=embeddedGame(),p=a.pool.current;a.saved.streamBackups={'IND-MIN':'https://backup.example/game'};p.element.emit('load');a.time.now=121000;a.step(a.time.now);
+ const a=embeddedGame(),p=a.pool.current;a.saved.streamBackups={'IND-MIN':'https://backup.example/embed/game'};p.element.emit('load');a.time.now=121000;a.step(a.time.now);
  assert.equal(a.pool.current,p);assert.equal(p.destroyed,false);p.element.emit('load');a.time.now=123000;a.step(a.time.now);assert.equal(a.pool.current,p);assert.equal(a.S.streamChoices.size,0);
 });
 test('site recovery: manual backup switches retain lineup, coverage and selection and obey Pause',()=>{
- const a=embeddedGame();a.saved.streamBackups={'IND-MIN':'https://backup.example/game'};a.coverage.watch('A',998,1000);const selection=a.S.selection,roster=JSON.stringify(a.saved.roster),first=a.pool.current;a.render();
+ const a=embeddedGame();a.saved.streamBackups={'IND-MIN':'https://backup.example/embed/game'};a.coverage.watch('A',998,1000);const selection=a.S.selection,roster=JSON.stringify(a.saved.roster),first=a.pool.current;a.render();
  assert.equal(a.el('nextStream').hidden,false);a.el('nextStream').onclick();assert.equal(first.destroyed,true);assert.equal(a.pool.get('A').url,a.saved.streamBackups['IND-MIN']);assert.equal(a.el('nextStream').textContent,'Try primary');assert.equal(a.S.selection,selection);assert.equal(JSON.stringify(a.saved.roster),roster);assert.equal(a.coverage.intervals.get('A').length,1);
  a.setPlaying(false);const paused=a.pool.current;a.el('nextStream').onclick();assert.equal(a.pool.current,paused);assert.equal(a.el('nextStream').disabled,true);
 });
@@ -455,18 +455,18 @@ test('site recovery: a direct source that never starts keeps recovering instead 
  for(let now=1000;now<=300000;now+=250){a.time.now=now;a.step(now);await p.ready;assert.equal(p.destroyed,false);assert.equal(a.S.pinned,'A');assert.equal(a.S.cooldown.size,0);}
  assert.equal(a.pool.visible,'A');assert.ok(p.recoveryAttempts>=6);assert.equal(a.S.playing,true);
 });
-test('site recovery: saving a backup does not reload the healthy primary and both links survive storage',()=>{
+test('site recovery: saving a backup does not reload the healthy primary and both links survive storage',async()=>{
  const a=embeddedGame(),p=a.pool.current;a.render();const fields=a.el('streamInputs').querySelectorAll('input'),backup=fields.find(i=>i.dataset.backup==='true');assert.ok(backup);
- backup.value='https://backup.example/watch';a.el('saveStreams').onclick();assert.equal(a.pool.current,p);assert.equal(p.destroyed,false);assert.equal(a.saved.streamBackups['IND-MIN'],backup.value);assert.equal(a.saved.streams['IND-MIN'],p.url);
+ backup.value='https://backup.example/watch';await a.el('saveStreams').onclick();assert.equal(a.pool.current,p);assert.equal(p.destroyed,false);assert.equal(a.saved.streamBackups['IND-MIN'],backup.value);assert.equal(a.saved.streams['IND-MIN'],p.url);
  const stored=JSON.parse(a.storage.get('fantasy-stream-v3'));assert.equal(stored.streamBackups['IND-MIN'],backup.value);assert.equal(a.el('nextStream').hidden,false);
 });
 test('site recovery: a long sleep during initial direct loading still reveals the player for interaction',async()=>{
  const a=app(undefined,{media:true,native:true});ready(a);a.saved.streams={'IND-MIN':'https://video.example/live.m3u8'};a.selectGame('A');const p=a.pool.get('A').player;await p.ready;
  a.time.now=61000;a.step(a.time.now);assert.equal(a.pool.current,p);assert.equal(a.pool.visible,'A');assert.equal(a.S.program.kind,'game');assert.equal(a.S.pinned,'A');assert.equal(a.S.cooldown.size,0);
 });
-test('site recovery: homepage links explain why reconnect can return to a site menu',()=>{
- const a=embeddedGame(),field=a.el('streamInputs').querySelectorAll('input').find(i=>!i.dataset.backup);field.value='https://streamcorner.st/';a.el('saveStreams').onclick();
- assert.match(a.el('streamsStatus').textContent,/homepage.*menu/);assert.equal(a.saved.streams['IND-MIN'],field.value);
+test('site recovery: a failed homepage extraction preserves the explicit URL as a page fallback',async()=>{
+ const a=embeddedGame(),field=a.el('streamInputs').querySelectorAll('input').find(i=>!i.dataset.backup);field.value='https://streamcorner.st/';await a.el('saveStreams').onclick();
+ assert.equal(a.streamFinder.resolved.get(field.value).kind,'page');assert.equal(a.streamFinder.playable(field.value),field.value);assert.equal(a.saved.streams['IND-MIN'],field.value);
 });
 test('site recovery: duplicate and absent backups never create an automatic source-switch loop',()=>{
  const a=embeddedGame(),p=a.pool.current;a.saved.streamBackups={'IND-MIN':p.url};a.render();assert.equal(a.el('nextStream').hidden,true);a.el('nextStream').onclick();assert.equal(a.pool.current,p);
@@ -493,12 +493,12 @@ test('embed switching: selecting the same loaded game does not replace its frame
 });
 test('choosing a franchise cancels an older import of another league',async()=>{
  const pending=deferred(),a=app(()=>pending.promise);ready(a);a.saved.leagueId='111';a.saved.league={teams:[{id:'1',name:'Chosen team',players:[player]}]};a.el('leagueId').value='222';const importing=a.importLeague();
- a.el('franchise').onchange({target:{value:'1'}});pending.resolve(Response.json({leagueId:'222',ownedTeamId:'1',teams:[{id:'1',name:'Wrong team',players:[{name:'Joe Burrow',team:'CIN',position:'QB'}]}]}));await importing;
+ a.el('scoreTeam').onchange({target:{value:'1'}});pending.resolve(Response.json({leagueId:'222',ownedTeamId:'1',teams:[{id:'1',name:'Wrong team',players:[{name:'Joe Burrow',team:'CIN',position:'QB'}]}]}));await importing;
  assert.equal(a.saved.leagueId,'111');assert.equal(a.saved.teamName,'Chosen team');assert.equal(a.el('importLeague').disabled,false);
 });
 test('a team ID from another league cannot automatically select a different owner’s roster',async()=>{
  const a=app(async()=>Response.json({leagueId:'222',name:'New league',teams:[{id:'1',name:'Not my team',players:[{name:'Joe Burrow',team:'CIN',position:'QB'}]}]}));ready(a);a.saved.leagueId='111';a.saved.teamId='1';a.el('leagueId').value='222';await a.importLeague();
- assert.equal(a.saved.teamName,'My lineup');assert.equal(a.saved.teamId,'');assert.equal(a.saved.roster[0].team,'IND');assert.equal(a.el('franchise').focused,true);
+ assert.equal(a.saved.teamName,'My lineup');assert.equal(a.saved.teamId,'');assert.equal(a.saved.roster[0].team,'IND');assert.equal(a.el('scoreTeam').focused,true);
 });
 test('the newest league import wins when responses arrive in reverse order',async()=>{
  const first=deferred(),second=deferred();let calls=0;const a=app(()=>++calls===1?first.promise:second.promise);ready(a);
@@ -1057,7 +1057,7 @@ test('matchup picker changes followed roster and opponent while rejecting an obs
  a.saved.leagueId='123';a.saved.teamId='1';a.saved.league=league;a.fantasyFeed.data=league;a.render();
  assert.equal(a.el('opponentTitle').textContent,'Second team');assert.equal(a.el('opponentTotal').textContent,'30.00');
  const importing=a.importLeague({refresh:true,quiet:true});a.el('scoreTeam').onchange({target:{value:'2'}});
- assert.equal(a.saved.teamId,'2');assert.equal(a.saved.roster[0].name,'Justin Jefferson');assert.equal(a.el('fantasyTotal').textContent,'30.00');assert.equal(a.el('opponentTitle').textContent,'First team');assert.equal(a.el('franchise').value,'2');
+ assert.equal(a.saved.teamId,'2');assert.equal(a.saved.roster[0].name,'Justin Jefferson');assert.equal(a.el('fantasyTotal').textContent,'30.00');assert.equal(a.el('opponentTitle').textContent,'First team');assert.equal(a.el('scoreTeam').value,'2');
  pending.resolve(Response.json({...league,ownedTeamId:'1'}));await importing;assert.equal(a.saved.teamId,'2');assert.equal(a.saved.roster[0].name,'Justin Jefferson');
  assert.equal(JSON.parse(a.storage.get('fantasy-stream-v3')).teamId,'2');
 });
@@ -1085,7 +1085,7 @@ test('manual choice remains authoritative in RedZone mode until its natural brea
 
 test('fantasy connection: the team selector stays visible and ESPN setup is directly reachable',()=>{
  const a=app();a.render();assert.equal(a.el('scoreTeamPicker').hidden,false);assert.equal(a.el('scoreTeam').disabled,true);
- a.el('connectLeague').onclick();assert.equal(a.el('lineupDialog').open,true);assert.equal(a.el('leagueImport').open,true);assert.equal(a.el('leagueId').focused,true);
+ a.el('lineupButton').onclick();assert.equal(a.el('lineupDialog').open,true);assert.equal(a.el('leagueImport').open,true);assert.equal(a.el('manualEditor').open,true);
 });
 test('fantasy connection: saved players remain visible during loading and an expired-login response',async()=>{
  const pending=deferred(),a=app(()=>pending.promise,{scores:true});ready(a);a.saved.leagueId='123';a.saved.teamId='1';a.render();
@@ -1109,11 +1109,11 @@ test('fantasy connection: editing followed players preserves league selection an
 });
 test('fantasy connection: a successful import displays players and points without a second request',async()=>{
  let calls=0;const a=app(async()=>{calls++;return Response.json({leagueId:'123',name:'League',ownedTeamId:'1',teams:[{id:'1',name:'My team',players:[player]}],scoring:{week:8,teams:[{id:'1',players:[{...player,points:18.5}],points:18.5}]}});},{scores:true});
- a.el('connectLeague').onclick();a.el('leagueId').value='123';await a.importLeague();a.render();
+ a.el('lineupButton').onclick();a.el('leagueId').value='123';await a.importLeague();a.render();
  assert.equal(calls,1);assert.equal(a.el('fantasyTotal').textContent,'18.50');assert.match(a.el('fantasyPlayers').innerHTML,/Jonathan Taylor/);assert.equal(a.el('scoreTeam').value,'1');
 });
-test('embed fallback: opening the original page follows the selected source and hides for native video',()=>{
- const a=app(undefined,{media:true,embeds:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/watch/primary'};a.saved.streamBackups={'IND-MIN':'https://example.test/watch/backup'};a.selectGame('A');a.render();
+test('embed fallback: opening the original page follows the selected source and hides for native video',async()=>{
+ const a=app(undefined,{media:true,embeds:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/watch/primary'};a.saved.streamBackups={'IND-MIN':'https://example.test/watch/backup'};await Promise.all([...Object.values(a.saved.streams),...Object.values(a.saved.streamBackups)].map(u=>a.streamFinder.resolve(u)));a.selectGame('A');a.render();
  assert.equal(a.el('openStream').hidden,false);assert.equal(a.el('openStream').href,'https://example.test/watch/primary');assert.equal(a.el('embedHelp').hidden,false);
  a.el('nextStream').onclick();a.render();assert.equal(a.el('openStream').href,'https://example.test/watch/backup');
  a.pool.destroy();a.saved.streams={'IND-MIN':'https://example.test/live.mp4'};a.saved.streamBackups={};a.selectGame('A');a.render();assert.equal(a.el('openStream').hidden,true);assert.equal(a.el('embedHelp').hidden,true);
@@ -1136,6 +1136,22 @@ test('discovery: renewing the official embed token leaves a healthy fullscreen s
 test('discovery: switching to replay while lookup is pending cannot reopen live playback',async()=>{
  const pending=deferred(),a=app(()=>pending.promise,{media:true,embeds:true});discoveryReady(a);const lookup=a.refreshStreamLinks();a.S.archive=new archive.ReplayArchive(archiveData);a.setMode('replay');pending.resolve(discoveryResponse('/api/streams?sport=nfl'));await lookup;assert.equal(a.S.mode,'replay');assert.equal(a.S.playing,false);assert.equal(a.pool.visible,null);
 });
-test('lineup editor opens within the scoreboard and closes after saving without losing ESPN connection',()=>{
+test('team dialog opens from the ribbon and closes after saving without losing ESPN connection',()=>{
  const a=app();ready(a);a.saved.leagueId='123';a.saved.teamId='1';a.saved.league={teams:[{id:'1',name:'My ESPN team',players:[player]}]};a.el('lineupButton').onclick();assert.equal(a.el('lineupDialog').open,true);assert.equal(a.el('lineupButton')['aria-expanded'],'true');a.el('saveRoster').onclick();assert.equal(a.el('lineupDialog').open,false);assert.equal(a.el('lineupButton')['aria-expanded'],'false');assert.equal(a.saved.leagueId,'123');assert.equal(a.saved.teamId,'1');
+});
+
+test('custom save replaces the playing automatic source even when it remains available as a backup',async()=>{
+ const a=app(async u=>discoveryResponse(u),{media:true,embeds:true});discoveryReady(a);await a.refreshStreamLinks();a.selectGame('A');a.render();const old=a.pool.current;
+ const fields=a.el('streamInputs').querySelectorAll('input');fields.find(i=>!i.dataset.backup).value='https://custom.example/embed/live';
+ await a.el('saveStreams').onclick();a.step(a.time.now);
+ assert.equal(old.destroyed,true);assert.equal(a.pool.get('A').url,'https://custom.example/embed/live');assert.ok(a.streamFinder.options(a.S.games[0]).length);assert.equal(a.S.pinned,'A');
+ // Explicit automatic selection keeps the custom URL saved for later.
+ a.el('streamsPanel').onclick({target:{closest:()=>({dataset:{sourceGame:'A',sourceMode:'auto'}})}});a.step(a.time.now);
+ assert.equal(a.pool.get('A').url,'https://ntv.st/embed?t=published');assert.equal(a.saved.streams['IND-MIN'],'https://custom.example/embed/live');
+});
+test('a late custom page extraction respects Pause and a newer saved primary',async()=>{
+ const pending=deferred(),a=app(url=>String(url).includes('/resolve?')?pending.promise:Promise.resolve(Response.json({events:[]})),{media:true,embeds:true});ready(a);a.saved.streams={'IND-MIN':'https://custom.example/embed/old'};a.selectGame('A');a.render();
+ const field=a.el('streamInputs').querySelectorAll('input').find(i=>!i.dataset.backup);field.value='https://streamcorner.st/game';const older=a.el('saveStreams').onclick();const old=a.pool.current;
+ a.setPlaying(false);field.value='https://custom.example/embed/new';await a.el('saveStreams').onclick();pending.resolve(Response.json({page:'https://streamcorner.st/game',url:'https://provider.example/embed/stale'}));await older;
+ assert.equal(a.saved.streams['IND-MIN'],'https://custom.example/embed/new');assert.equal(a.S.playing,false);assert.equal(a.pool.visible,null);assert.equal(old.destroyed,true);
 });

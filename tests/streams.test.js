@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ntvCatalog,publicPlayerURL,embeddedPlayerFromHTML,streamsCatalogAPI,streamsResolveAPI} from '../server/streams.js';
+import {ntvCatalog,publicPlayerURL,embeddedPlayerFromHTML,streamsCatalogAPI,streamsResolveAPI,streamcornerCatalog} from '../server/streams.js';
 import {StreamFinder,matchStream,needsPlayerResolution} from '../web/stream-finder.js';
 import {safeVideo} from '../web/roster.js';
 import {normalizePreferences} from '../web/preferences.js';
@@ -17,8 +17,8 @@ test('catalog uses published source indexes and excludes continuous channels, ma
  assert.equal(entries.length,2);assert.deepEqual(entries[0].sources,entry.sources);assert.equal(entries[1].sport,'nba');assert.equal(ntvCatalog({nonLive:raw.live,all:raw.live}).length,1);assert.deepEqual(ntvCatalog(null),[]);
 });
 test('catalog fetch is restricted to public NTV metadata and does not forward private credentials',async()=>{
- let calls=0;const response=await streamsCatalogAPI(new Request('https://app.example/api/streams?sport=nfl',{headers:{Cookie:'private-espn',Authorization:'private'}}),async(url,options)=>{calls++;assert.equal(url,'https://ntv.st/api/get-matches?server=raptor&type=both');assert.equal(options.redirect,'manual');assert.deepEqual(Object.keys(options.headers),['Accept']);return Response.json(raw);});
- assert.equal(response.status,200);assert.equal((await response.json()).entries.length,1);assert.equal(calls,1);assert.equal(response.headers.get('Cache-Control'),'no-store');
+ let calls=0;const response=await streamsCatalogAPI(new Request('https://app.example/api/streams?sport=nfl',{headers:{Cookie:'private-espn',Authorization:'private'}}),async(url,options)=>{calls++;assert.ok(['https://ntv.st/api/get-matches?server=raptor&type=both','https://streamcorner.st/'].includes(url));assert.equal(options.redirect,'manual');assert.deepEqual(Object.keys(options.headers),['Accept']);return url==='https://streamcorner.st/'?new Response(''):Response.json(raw);});
+ assert.equal(response.status,200);assert.equal((await response.json()).entries.length,1);assert.equal(calls,2);assert.equal(response.headers.get('Cache-Control'),'no-store');
 });
 test('unsupported sports and methods never contact a provider',async()=>{
  const no=()=>{throw Error('unexpected fetch');};assert.equal((await streamsCatalogAPI(new Request('https://app.example/api/streams?sport=bad'),no)).status,400);assert.equal((await streamsCatalogAPI(new Request('https://app.example/api/streams?sport=nfl',{method:'POST'}),no)).status,405);assert.equal((await streamsResolveAPI(new Request('https://app.example/api/streams/resolve',{method:'POST'}),no)).status,405);
@@ -78,4 +78,46 @@ test('concurrent player resolutions share a request and a failed renewal retains
 });
 test('ESPN restoration preferences keep automatic discovery on unless explicitly disabled',()=>{
  for(const normalize of [normalizePreferences,normalizeSportPreferences]){assert.equal(normalize({}).autoDiscover,true);assert.equal(normalize({autoDiscover:false}).autoDiscover,false);assert.equal(normalize({autoDiscover:'false'}).autoDiscover,true);}
+});
+
+test('HTML5 video sources and published player configurations are extracted without executing markup',()=>{
+ const url='https://cdn.example/live.m3u8';
+ for(const html of [`<video controls><source src="${url}" type="application/x-mpegURL"></video>`,`<video src="${url}"></video>`,`<script>player.setup({file: '${url}'});</script>`,`<meta property="og:video" content="${url}">`])assert.equal(embeddedPlayerFromHTML(html,'https://streamcorner.st/game'),url);
+ assert.equal(embeddedPlayerFromHTML('<video src="https://cdn.example/a.mp4"></video><video src="https://cdn.example/b.mp4"></video>','https://streamcorner.st/game'),null);
+ assert.equal(embeddedPlayerFromHTML('<video src="javascript:bad()"></video><!-- <iframe src="https://ads.example/embed"></iframe> -->','https://streamcorner.st/game'),null);
+});
+test('generic custom webpages try cookie-free CORS extraction before page fallback',async()=>{
+ const page='https://sports.example/game',video='https://cdn.example/live.m3u8';let calls=0;
+ const f=new StreamFinder({fetcher:async(url,opts)=>{calls++;assert.equal(url,page);assert.equal(opts.mode,'cors');assert.equal(opts.credentials,'omit');assert.equal(opts.redirect,'error');return new Response(`<video src="${video}"></video>`);}});
+ assert.equal(f.playable(page),null);assert.equal(await f.resolve(page),video);assert.equal(f.original(video),page);assert.equal(f.resolved.get(page).kind,'video');assert.equal(calls,1);
+ const blocked=new StreamFinder({fetcher:async()=>{throw Error('CORS denied');}});assert.equal(await blocked.resolve(page),page);assert.equal(blocked.playable(page),page);assert.equal(blocked.resolved.get(page).kind,'page');
+});
+test('unresolved custom primary is never silently replaced by an automatic or backup link',async()=>{
+ const f=new StreamFinder({fetcher:finderFetch}),custom='https://streamcorner.st/custom';await f.refresh([game],'nfl');
+ assert.deepEqual(f.urls(game,[custom,embed]),[]);
+ f.fetcher=async()=>new Response('',{status:403});await f.resolve(custom);assert.equal(f.urls(game,[custom,embed])[0],custom);
+ assert.deepEqual(f.urls(game,[custom,embed],'auto'),[embed,embed+'2']);assert.equal(f.resolved.get(custom).kind,'page');
+});
+test('direct video and player embed URLs skip page extraction',async()=>{
+ let calls=0;const f=new StreamFinder({fetcher:async()=>{calls++;throw Error();}});
+ for(const url of ['https://cdn.example/a.m3u8','https://cdn.example/a.mp4','https://site.example/embed/1'])assert.equal(await f.resolve(url),url);assert.equal(calls,0);
+});
+test('a failed catalog cannot prevent custom page resolution',async()=>{
+ const f=new StreamFinder({fetcher:async url=>url.startsWith('/api/streams?')?new Response('',{status:502}):new Response('<video src="https://cdn.example/live.mp4"></video>')});
+ await f.refresh([game],'nfl',['https://sports.example/game']);assert.equal(f.playable('https://sports.example/game'),'https://cdn.example/live.mp4');
+});
+test('StreamCorner catalog accepts published timed events and ignores guessing and unrelated pages',()=>{
+ const item={'@type':'SportsEvent',name:entry.title,sport:'NFL',startDate:game.date,url:'/watch/colts-vikings'};
+ const html='<script type="application/ld+json">'+JSON.stringify({'@graph':[item,{...item,url:'/watch/old',startDate:'invalid'},{...item,url:'https://other.example/game'}]})+'</script>';
+ const result=streamcornerCatalog(html);assert.equal(result.length,1);assert.equal(result[0].sources[0],'https://streamcorner.st/watch/colts-vikings');assert.equal(result[0].provider,'StreamCorner');assert.deepEqual(streamcornerCatalog('<a href="/">NFL</a>'),[]);
+});
+test('NTV and StreamCorner remain separate exact-match options for the same game',async()=>{
+ const other={...entry,id:'sc',provider:'StreamCorner',sources:['https://streamcorner.st/embed/live']};
+ const f=new StreamFinder({fetcher:async url=>url.startsWith('/api/streams?')?Response.json({sport:'nfl',entries:[{...entry,provider:'NTV'},other]}):finderFetch(url)});
+ await f.refresh([game],'nfl');assert.equal(f.options(game).length,3);assert.deepEqual(f.urls(game,[],'StreamCorner'),other.sources);assert.deepEqual(f.urls(game,[],'NTV'),[embed,embed+'2']);
+});
+test('a provider outage does not discard a working independent catalog',async()=>{
+ const event={'@type':'SportsEvent',name:entry.title,sport:'NFL',startDate:game.date,url:'/watch/game'};
+ const response=await streamsCatalogAPI(new Request('https://app.example/api/streams?sport=nfl'),async url=>url.includes('ntv.st')?new Response('',{status:503}):new Response('<script type="application/ld+json">'+JSON.stringify(event)+'</script>'));
+ const data=await response.json();assert.equal(response.status,200);assert.equal(data.entries[0].provider,'StreamCorner');assert.equal(data.providers[0].available,false);
 });

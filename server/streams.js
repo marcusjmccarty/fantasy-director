@@ -1,11 +1,10 @@
+import {publicPlayerURL,embeddedPlayerFromHTML,decodeEmbedHTML} from '../web/stream-html.js';
+export {publicPlayerURL,embeddedPlayerFromHTML} from '../web/stream-html.js';
 // Public provider metadata only. No ESPN credentials, video proxying, or arbitrary upstream fetches.
 const STREAM_HOSTS=new Set(['ntv.st','streamcorner.st']);
 const STREAM_SERVERS=new Set(['raptor','falcon','phoenix','titan']);
 const streamCache=new Map(),streamPending=new Map();
 const streamJSON=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
-export function publicPlayerURL(value,base='https://ntv.st'){
- try{if(typeof value!=='string'||!value.trim()||value.length>4096)return null;const u=new URL(value,base),h=u.hostname.toLowerCase();if(u.protocol!=='https:'||u.username||u.password||u.port&&u.port!=='443'||!h.includes('.')||h.includes(':')||/^\d/.test(h)||/\.(local|localhost|internal|test|invalid)$/.test(h))return null;return u.href;}catch{return null;}
-}
 async function providerText(url,fetcher){
  // Following a provider redirect must never turn this into an open URL proxy.
  for(let hop=0;hop<3;hop++){
@@ -36,16 +35,13 @@ export function ntvCatalog(raw){
 }
 export async function streamsCatalogAPI(request,fetcher=fetch){
  if(request.method!=='GET')return streamJSON({error:'Use GET.'},405);const sport=new URL(request.url).searchParams.get('sport');if(!['nfl','nba','nhl','mlb'].includes(sport))return streamJSON({error:'Choose a supported sport.'},400);
- try{const entries=await cachedStream('ntv-catalog',fetcher,async()=>{const raw=JSON.parse(await providerText('https://ntv.st/api/get-matches?server=raptor&type=both',fetcher));if(!raw.success)throw new Error('Catalog unavailable.');return ntvCatalog(raw);});return streamJSON({sport,entries:entries.filter(e=>e.sport===sport),fetchedAt:Date.now()});}
- catch{return streamJSON({error:'Automatic stream lookup is unavailable. Your saved links still work.',entries:[]},502);}
-}
-const decodeEmbedHTML=s=>s.replace(/&amp;/gi,'&').replace(/&quot;/gi,'"').replace(/&#39;|&apos;/gi,"'").replace(/&#(?:x([\da-f]+)|(\d+));/gi,(_,hex,dec)=>String.fromCodePoint(Math.min(0x10ffff,parseInt(hex||dec,hex?16:10))));
-export function embeddedPlayerFromHTML(html,page){
- const candidates=[];for(const match of html.matchAll(/<iframe\b([^>]+)>/gi)){
-  const attrs=match[1],src=/(?:^|\s)src\s*=\s*(["'])(.*?)\1/i.exec(attrs)?.[2];if(!src||/\b(?:ad|advert|banner|captcha|chat|tracking)\b/i.test(attrs))continue;
-  const url=publicPlayerURL(decodeEmbedHTML(src),page);if(!url)continue;const strong=/(?:id|class|title)\s*=\s*["'][^"']*(?:player|stream|video)[^"']*["']/i.test(attrs)||/\/(?:embed|player)(?:\/|\?|$)/i.test(new URL(url).pathname);candidates.push({url,strong});
- }
- const strong=[...new Set(candidates.filter(c=>c.strong).map(c=>c.url))];return strong.length===1?strong[0]:null;
+ const results=await Promise.allSettled([
+  cachedStream('ntv-catalog',fetcher,async()=>{const raw=JSON.parse(await providerText('https://ntv.st/api/get-matches?server=raptor&type=both',fetcher));if(!raw.success)throw new Error('Catalog unavailable.');return ntvCatalog(raw);}),
+  cachedStream('streamcorner-catalog',fetcher,async()=>streamcornerCatalog(await providerText('https://streamcorner.st/',fetcher)))
+ ]);
+ const entries=results.flatMap(r=>r.status==='fulfilled'?r.value:[]).filter(e=>e.sport===sport);
+ const providers=results.map((r,i)=>({name:i?'StreamCorner':'NTV',available:r.status==='fulfilled',count:r.status==='fulfilled'?r.value.filter(e=>e.sport===sport).length:0}));
+ return streamJSON({sport,entries,providers,fetchedAt:Date.now(),...(results.every(r=>r.status==='rejected')?{error:'Automatic stream lookup is unavailable. Your saved links still work.'}:{})},results.every(r=>r.status==='rejected')?502:200);
 }
 export async function streamsResolveAPI(request,fetcher=fetch){
  if(request.method!=='GET')return streamJSON({error:'Use GET.'},405);const input=new URL(request.url).searchParams.get('url');let page;try{page=new URL(input);if(input.length>4096||!STREAM_HOSTS.has(page.hostname)||page.protocol!=='https:'||page.username||page.password||page.port&&page.port!=='443')throw new Error();}catch{return streamJSON({error:'Use an NTV or StreamCorner game link.'},400);}
@@ -60,4 +56,24 @@ export async function streamsResolveAPI(request,fetcher=fetch){
   const embed=embeddedPlayerFromHTML(await providerText(page.href,fetcher),page.href);if(!embed)throw new Error('No unambiguous published player.');return embed;
  });return streamJSON({url,page:page.href,provider:page.hostname==='ntv.st'?'NTV':'StreamCorner',resolvedAt:Date.now()});}
  catch{return streamJSON({error:'The provider did not expose an accessible player. Paste its iframe embed code or direct player URL instead.',page:page.href},502);}
+}
+
+// Read only explicitly published event URLs and times. Never invent game slugs.
+export function streamcornerCatalog(html){
+ const entries=[],seen=new Set();
+ const add=item=>{
+  const sport=String(item.sport||item.tournament||item.competition?.name||'').match(/\b(NFL|NBA|NHL|MLB)\b/i)?.[1]?.toLowerCase();
+  const title=String(item.name||item.title||''),url=publicPlayerURL(item.url,'https://streamcorner.st');
+  const raw=item.startDate??item.start??item.date,start=typeof raw==='number'?(raw<1e12?raw*1000:raw):Date.parse(raw);
+  if(!sport||!title||!Number.isFinite(start)||!url||new URL(url).hostname!=='streamcorner.st'||new URL(url).pathname==='/'||seen.has(url))return;
+  seen.add(url);entries.push({id:url,provider:'StreamCorner',sport,title:title.slice(0,200),start,sources:[url]});
+ };
+ const visit=(value,depth=0)=>{if(depth>12||!value||typeof value!=='object')return;if(Array.isArray(value)){for(const v of value.slice(0,500))visit(v,depth+1);return;}if(value['@type']==='SportsEvent'||value.startDate||value.start&&value.url)add(value);for(const key of ['@graph','itemListElement','item','events','matches','props','pageProps','data'])if(value[key])visit(value[key],depth+1);};
+ for(const m of html.matchAll(/<script\b[^>]*type\s*=\s*["']application\/(?:ld\+)?json["'][^>]*>([\s\S]*?)<\/script>/gi))try{visit(JSON.parse(m[1]));}catch{}
+ for(const m of html.matchAll(/<a\b([^>]+)>([\s\S]*?)<\/a>/gi)){
+  const attr=name=>new RegExp('\\b'+name+'\\s*=\\s*(["\'])(.*?)\\1','i').exec(m[1])?.[2];
+  const startDate=attr('data-start')||attr('data-date')||/datetime\s*=\s*["']([^"']+)/i.exec(m[2])?.[1];
+  if(startDate)add({url:decodeEmbedHTML(attr('href')||''),startDate,sport:attr('data-sport')||m[2].replace(/<[^>]+>/g,' '),name:decodeEmbedHTML((attr('data-title')||m[2].replace(/<[^>]+>/g,' ')).trim())});
+ }
+ return entries.slice(0,250);
 }
