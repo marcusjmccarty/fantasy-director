@@ -76,10 +76,11 @@ const flush=()=>new Promise(resolve=>setImmediate(resolve));
 const feedEvent=(id,abbr='IND',situation={})=>({id,competitions:[{status:{type:{state:'in'}},situation,competitors:[{homeAway:'away',team:{id:'11',abbreviation:abbr}},{homeAway:'home',team:{id:'16',abbreviation:'MIN'}}]}]});
 test('release: incomplete scoreboard responses cannot reopen a scoring commercial',()=>{
  const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.saved.delay=0;a.setPlaying(true);
- const push=(scores,id)=>{const event=feedEvent('A','IND',{possession:'11',down:1,lastPlay:{id,type:{text:'Rush'}}});if(scores)event.competitions[0].competitors.forEach((team,i)=>team.score=String(scores[i]));a.S.live.feed.push(live.liveGames({events:[event]}),1000);a.step(a.time.now+=250);};
- push([0,0],'before');assert.equal(a.pool.visible,'A');push([7,0],'td');assert.equal(a.pool.visible,null);
- push(null,'td');assert.equal(a.pool.visible,null,'missing scores are not an authoritative overturn');
- push([7,0],'next-drive');assert.equal(a.pool.visible,'A');
+ const push=(scores,id,at=1000)=>{const event=feedEvent('A','IND',{possession:'11',down:1,lastPlay:{id,type:{text:'Rush'}}});if(scores)event.competitions[0].competitors.forEach((team,i)=>team.score=String(scores[i]));a.S.live.feed.push(live.liveGames({events:[event]}),at);a.S.at=at;a.step(a.time.now+=250);};
+ push([0,0],'before');assert.equal(a.pool.visible,'A');push([7,0],'td');assert.equal(a.pool.visible,'A','the score stays on screen for the celebration');
+ push([7,0],'td',1030);assert.equal(a.pool.visible,null,'then the commercial');
+ push(null,'td',1035);assert.equal(a.pool.visible,null,'missing scores are not an authoritative overturn');
+ push([7,0],'next-drive',1040);assert.equal(a.pool.visible,'A');
 });
 test('release: slow summaries cannot delay scoreboard polling or commercial detection',async()=>{
  const summary=deferred();let requests=0;
@@ -342,7 +343,7 @@ test('embed safety: reload is unavailable for direct video and highlights',()=>{
  const p=a.pool.current;a.el('reloadStream').onclick();assert.equal(a.pool.current,p);assert.equal(p.wantPlay,true);
 });
 test('embed recovery: the real app reconnects a loaded but unobservable stream without losing the manual choice',()=>{
- const a=app(undefined,{media:true,embeds:true});ready(a);a.saved.streams={'IND-MIN':'https://ntv.st/watch/a'};a.selectGame('A');const p=a.pool.current;p.element.emit('load');
+ const a=app(undefined,{media:true,embeds:true});ready(a);a.saved.autoReconnect=true;a.saved.streams={'IND-MIN':'https://ntv.st/watch/a'};a.selectGame('A');const p=a.pool.current;p.element.emit('load');
  const choice=a.S.selection,lineup=JSON.stringify(a.saved),cuts=a.S.cuts;
  a.time.now=120999;a.step(a.time.now);assert.equal(p.element.navigations.length,1);
  a.time.now=121000;a.step(a.time.now);a.render();assert.equal(p.element.navigations.length,2);assert.match(a.el('pictureNote').textContent,/Refreshing stream connection/);
@@ -395,7 +396,7 @@ test('embed fullscreen: theater fallback remains open through failures and Escap
  a.time.now=246000;a.step(a.time.now);assert.equal(a.stage.classList.contains('theater'),false);assert.equal(a.S.playing,true);
 });
 test('embed fullscreen: legacy nested fullscreen gets a parent fallback before its document reloads',async()=>{
- const a=embeddedGame(),p=a.pool.current;a.page.fullscreenElement=p.element;a.emitPage('fullscreenchange');p.element.emit('load');
+ const a=embeddedGame(),p=a.pool.current;p.setAutoReconnect(true);a.page.fullscreenElement=p.element;a.emitPage('fullscreenchange');p.element.emit('load');
  a.frameEvents.onNavigate=()=>{assert.equal(a.stage.classList.contains('theater'),true,'fallback exists before the old document disappears');a.page.fullscreenElement=null;a.emitPage('fullscreenchange');};
  a.time.now=121000;a.step(a.time.now);assert.equal(a.stage.classList.contains('theater'),true);assert.equal(a.el('fullButton').textContent,'Exit full screen');
  a.frameEvents.onNavigate=null;await a.el('fullButton').onclick();a.time.now=136000;a.step(a.time.now);assert.equal(a.stage.classList.contains('theater'),false);assert.equal(a.S.playing,true);
@@ -996,8 +997,9 @@ test('a background player ad cannot hide a healthy game or visible highlight',()
 });
 test('a delayed live scoreboard increase ends a manual choice even when timeout metadata is missing',()=>{
  const a=app(undefined,{media:true}),{x,push}=manualStreams(a);a.selectGame('X');
- push({...x,score:[7,0],lastPlayId:'td'});a.step(1250);assert.equal(a.S.pinned,null);assert.equal(a.pool.visible,'A');assert.equal(a.excluded().has('X'),true);
- push({...x,score:[7,0],lastPlayId:'next-drive',possession:1});a.step(1500);assert.equal(a.excluded().has('X'),false);
+ push({...x,score:[7,0],lastPlayId:'td'});a.step(1250);assert.equal(a.S.pinned,'X','the score stays on screen for the celebration');assert.equal(a.pool.visible,'X');
+ a.S.at=1021;a.step(1500);assert.equal(a.S.pinned,null);assert.equal(a.pool.visible,'A');assert.equal(a.excluded().has('X'),true);
+ push({...x,score:[7,0],lastPlayId:'next-drive',possession:1});a.S.at=1022;a.step(1750);assert.equal(a.excluded().has('X'),false);
 });
 test('when the only replay is in a break, the channel skips to its next football play',()=>{
  const a=app(undefined,{media:true});replayReady(a);a.S.mode='replay';a.saved.highlights=false;a.useRoster([{name:'Bucky Irving',team:'TB',position:'RB'}],{teamName:'Bucs'});
@@ -1010,7 +1012,7 @@ test('when the only replay is in a break, the channel skips to its next football
 
 test('adding a backup stream does not erase a known scoring break',()=>{
  const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.selectGame('A');
- const scored={...game,score:[7,0],lastPlayId:'td'};a.S.live.feed.push([scored],970);a.step(1250);assert.equal(a.pool.visible,null);
+ const scored={...game,score:[7,0],lastPlayId:'td'};a.S.live.feed.push([scored],970);a.step(1250);assert.equal(a.pool.visible,'A','the celebration stays on screen');a.S.at=1021;a.step(1300);assert.equal(a.pool.visible,null);
  a.render();a.el('saveStreams').onclick();a.step(1500);assert.equal(a.excluded().has('A'),true);assert.equal(a.pool.visible,null);
 });
 test('seeking back to the scoring play uses the requested position while the player seek is pending',()=>{
@@ -1031,7 +1033,7 @@ test('scrubbing inside the provider discards future break evidence after the clo
 
 test('editing the lineup retains game-level break evidence and user-reported commercial timers',()=>{
  const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.selectGame('A');a.S.breaks.set('other',91000);
- a.S.live.feed.push([{...game,score:[7,0]}],970);a.step(1250);assert.equal(a.pool.visible,null);
+ a.S.live.feed.push([{...game,score:[7,0]}],970);a.step(1250);assert.equal(a.pool.visible,'A','the celebration stays on screen');a.S.at=1021;a.step(1300);assert.equal(a.pool.visible,null);
  a.useRoster([{name:'Daniel Jones',team:'IND',position:'QB'}],{teamName:'Updated'});a.step(1500);
  assert.equal(a.excluded().has('A'),true);assert.equal(a.excluded().has('other'),true);assert.equal(a.pool.visible,null);
 });

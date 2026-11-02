@@ -461,8 +461,8 @@ test('parseScoringPlay() marks returns, blocked kicks and takeaway touchdowns de
 });
 
 // ---- LiveFeed: the scoreboard seen through the stream's delay ---------------
-import {LiveFeed,SAFE_AFTER_PLAY,STALLED_AFTER} from '../web/live.js';
-const liveGame=(id,o={})=>({id,name:id,state:'in',phase:'live',possession:0,lastPlayId:'p1',teams:[{abbr:'IND'},{abbr:'MIN'}],...o});
+import {LiveFeed,SAFE_AFTER_PLAY,STALLED_AFTER,CELEBRATION,STOPPAGE_GRACE,STOPPAGE_MAX} from '../web/live.js';
+const liveGame=(id,o={})=>({id,name:id,state:'in',phase:'live',possession:0,down:1,distance:10,yardsToGoal:60,downDistance:'1st & 10',special:false,lastPlayId:'p1',period:2,clock:'10:00',score:[7,3],scoreKnown:true,teams:[{abbr:'IND'},{abbr:'MIN'}],...o});
 test('LiveFeed.view: shows the snapshot from `delay` seconds ago, the oldest one while the delay has not elapsed, and nothing before the first poll',()=>{
  const f=new LiveFeed();
  assert.deepEqual(f.view(100,30),[]);
@@ -475,19 +475,25 @@ test('LiveFeed.view: shows the snapshot from `delay` seconds ago, the oldest one
  assert.equal(f.view(141,0)[0].clock,'9:00');
  assert.equal(f.latest[0].clock,'9:00');
 });
-test('LiveFeed.view: a game that has not logged a play for SAFE_AFTER_PLAY seconds is treated as snapping (phase play) until STALLED_AFTER',()=>{
+test('LiveFeed.view: the first sighting of a game logs nothing, so nothing is protected until a play is actually logged',()=>{
  const f=new LiveFeed();
- f.push([liveGame('g',{lastPlayId:'p1'})],1000);
- for(let t=1005;t<=1200;t+=5)f.push([liveGame('g',{lastPlayId:'p1'})],t);
- assert.equal(f.view(1000+SAFE_AFTER_PLAY,0)[0].phase,'live','within the safe window after the first sighting');
+ for(let t=1000;t<=1200;t+=5)f.push([liveGame('g',{lastPlayId:'p1'})],t);
+ for(const t of [1000,1030,1100,1200]){const g=f.view(t,0)[0];assert.equal(g.phase,'live',`t=${t}`);assert.equal(g.sinceLogged,null);}
+});
+test('LiveFeed.view: after a logged play the game is cuttable for SAFE_AFTER_PLAY seconds, then snapping (phase play, synthesized) until STALLED_AFTER',()=>{
+ const f=new LiveFeed();
+ f.push([liveGame('g',{lastPlayId:'p1'})],995);
+ for(let t=1000;t<=1200;t+=5)f.push([liveGame('g',{lastPlayId:'p2'})],t);   // p2 logged at 1000
+ assert.equal(f.view(1000+SAFE_AFTER_PLAY,0)[0].phase,'live','within the safe window');
  const snapping=f.view(1000+SAFE_AFTER_PLAY+1,0)[0];
- assert.equal(snapping.phase,'play');assert.ok(snapping.playAge>0&&snapping.playAge<=1.01);assert.equal(snapping.playEndsIn,null);
+ assert.equal(snapping.phase,'play');assert.equal(snapping.synthesized,true);assert.ok(snapping.playAge>0&&snapping.playAge<=1.01);assert.equal(snapping.playEndsIn,null);
  assert.equal(f.view(1000+STALLED_AFTER,0)[0].phase,'play');
  assert.equal(f.view(1000+STALLED_AFTER+1,0)[0].phase,'live','a long silence is a stall, not a snap');
  assert.ok(f.view(1000+STALLED_AFTER+1,0)[0].sinceLogged>STALLED_AFTER);
 });
 test('LiveFeed.view: a new logged play reopens the safe window, measured in delayed time',()=>{
  const f=new LiveFeed();
+ f.push([liveGame('g',{lastPlayId:'p0'})],995);
  f.push([liveGame('g',{lastPlayId:'p1'})],1000);
  f.push([liveGame('g',{lastPlayId:'p1'})],1020);
  f.push([liveGame('g',{lastPlayId:'p2'})],1025);   // the whistle: ESPN logged play 2 at 1025
@@ -498,11 +504,65 @@ test('LiveFeed.view: a new logged play reopens the safe window, measured in dela
  assert.equal(f.view(1054,30)[0].phase,'play');
  assert.equal(f.view(1060,30)[0].phase,'live');
 });
-test('LiveFeed.view: breaks, finals, pregame and games without possession are passed through untouched',()=>{
+test('LiveFeed.view: a timeout ends when the clock runs down in the same period, even though ESPN still lists the timeout as the last play',()=>{
  const f=new LiveFeed();
- const games=[liveGame('a',{phase:'break',breakKind:'timeout'}),liveGame('b',{state:'post',phase:'final'}),liveGame('c',{state:'pre',phase:'pre'}),liveGame('d',{possession:-1})];
- f.push(games,0);
- for(const g of f.view(STALLED_AFTER-1,0)){assert.notEqual(g.phase,'play',g.id);assert.equal(g.sinceLogged,null);}
+ f.push([liveGame('g',{lastPlayId:'p1',clock:'4:20'})],0);
+ f.push([liveGame('g',{lastPlayId:'t1',phase:'break',breakKind:'timeout',clock:'4:12'})],5);   // timeout logged at 5
+ for(let t=10;t<=60;t+=5)f.push([liveGame('g',{lastPlayId:'t1',phase:'break',breakKind:'timeout',clock:'4:12'})],t);
+ assert.equal(f.view(60,0)[0].phase,'break','the clock has not moved');
+ f.push([liveGame('g',{lastPlayId:'t1',phase:'break',breakKind:'timeout',clock:'4:05'})],65);   // football: the clock ran
+ const back=f.view(65,0)[0];
+ assert.equal(back.phase,'play','football is back and the first play is in progress');assert.equal(back.breakKind,null);assert.equal(back.synthesized,true);assert.ok(back.playAge<=0.01);
+ f.push([liveGame('g',{lastPlayId:'t1',phase:'break',breakKind:'timeout',clock:'3:50'})],80);
+ assert.equal(f.view(80,0)[0].phase,'play');
+ f.push([liveGame('g',{lastPlayId:'p2',clock:'3:48'})],90);   // the play after the timeout is logged
+ assert.equal(f.view(90,0)[0].phase,'live');assert.equal(f.view(90,0)[0].sinceLogged,0);
+ // Seen through a delay the release happens at the same feed moment.
+ assert.equal(f.view(90,30)[0].phase,'break');assert.equal(f.view(95,30)[0].phase,'play');
+});
+test('LiveFeed.view: the quarter rollover (0:00 to 15:00 with End Period as the last play) is not football, but the first tick of the new quarter is',()=>{
+ const f=new LiveFeed();
+ f.push([liveGame('g',{lastPlayId:'p1',period:1,clock:'0:04'})],0);
+ f.push([liveGame('g',{lastPlayId:'e1',phase:'break',breakKind:'timeout',period:1,clock:'0:00'})],5);
+ f.push([liveGame('g',{lastPlayId:'e1',phase:'break',breakKind:'timeout',period:2,clock:'15:00'})],60);
+ assert.equal(f.view(60,0)[0].phase,'break','between quarters');
+ f.push([liveGame('g',{lastPlayId:'e1',phase:'break',breakKind:'timeout',period:2,clock:'14:55'})],120);
+ assert.equal(f.view(120,0)[0].phase,'play','the second quarter is under way');
+});
+test('LiveFeed.view: a stoppage with no clock movement and no new play is over after STOPPAGE_MAX',()=>{
+ const f=new LiveFeed();
+ f.push([liveGame('g',{lastPlayId:'p1'})],0);
+ for(let t=5;t<=STOPPAGE_MAX+20;t+=5)f.push([liveGame('g',{lastPlayId:'t1',phase:'break',breakKind:'timeout',clock:'2:00'})],t);
+ assert.equal(f.view(5+STOPPAGE_MAX,0)[0].phase,'break');
+ assert.equal(f.view(5+STOPPAGE_MAX+1,0)[0].phase,'live');
+});
+test('LiveFeed.view: a fresh score stays on screen for CELEBRATION seconds (no offense, not a break), then the score break begins',()=>{
+ const f=new LiveFeed();
+ f.push([liveGame('g',{lastPlayId:'p1',score:[7,3]})],0);
+ f.push([liveGame('g',{lastPlayId:'p1',score:[13,3]})],5);   // the scoreboard moved before the play was logged
+ f.push([liveGame('g',{lastPlayId:'td',phase:'break',breakKind:'score',score:[13,3]})],10);
+ for(let t=15;t<=60;t+=5)f.push([liveGame('g',{lastPlayId:'td',phase:'break',breakKind:'score',score:[14,3]})],t);
+ for(const t of [5,10,20,5+CELEBRATION-1]){const g=f.view(t,0)[0];assert.equal(g.phase,'live',`t=${t}`);assert.equal(g.celebrating,true);assert.equal(g.possession,-1);assert.equal(g.special,true);}
+ const after=f.view(5+CELEBRATION,0)[0];
+ assert.equal(after.phase,'break');assert.equal(after.breakKind,'score');assert.equal(after.celebrating,undefined);
+ // The extra point at 15 did not restart the celebration.
+ assert.equal(f.view(5+CELEBRATION+5,0)[0].phase,'break');
+});
+test('LiveFeed.view: a possession missing for less than STOPPAGE_GRACE keeps the last known situation instead of calling a stoppage',()=>{
+ const f=new LiveFeed();
+ f.push([liveGame('g',{lastPlayId:'p1',possession:1,down:2,distance:7,yardsToGoal:33,downDistance:'2nd & 7'})],0);
+ f.push([liveGame('g',{lastPlayId:'p1',possession:-1,phase:'break',breakKind:'stoppage',down:0})],5);
+ const kept=f.view(5,0)[0];
+ assert.equal(kept.phase,'live');assert.equal(kept.possession,1);assert.equal(kept.down,2);assert.equal(kept.yardsToGoal,33);assert.equal(kept.breakKind,null);
+ for(let t=10;t<=5+STOPPAGE_GRACE;t+=5)f.push([liveGame('g',{lastPlayId:'p1',possession:-1,phase:'break',breakKind:'stoppage',down:0})],t);
+ assert.equal(f.view(5+STOPPAGE_GRACE,0)[0].phase,'break','a real stoppage after the grace');
+ assert.equal(f.view(5+STOPPAGE_GRACE,0)[0].breakKind,'stoppage');
+});
+test('LiveFeed.view: halftime, finals and pregame pass through untouched',()=>{
+ const f=new LiveFeed();
+ const games=[liveGame('a',{phase:'break',breakKind:'halftime'}),liveGame('b',{state:'post',phase:'final'}),liveGame('c',{state:'pre',phase:'pre'})];
+ f.push(games,0);f.push(games,50);
+ for(const g of f.view(50,0)){assert.notEqual(g.phase,'play',g.id);assert.notEqual(g.phase,'live',g.id);}
 });
 test('LiveFeed.push: keeps about fifteen minutes of snapshots and the last eighty logged plays per game',()=>{
  const f=new LiveFeed();

@@ -43,7 +43,7 @@ export async function nflSourceAPI(request,catalog,fetcher=fetch,teamMap={}){
   const record={id:clip.id,url,type:'application/vnd.apple.mpegurl',duration:Number(asset.metadata?.event?.duration)||clip.duration||0,expiresAt:Date.now()+4*60*1000,provider:'NFL.com'};
   nflMediaCache.set(id,record);return record;
  })().finally(()=>nflMediaPending.delete(id)));
- try{return nflJSON(await nflMediaPending.get(id));}catch(error){return nflJSON({id,error:error.name==='TimeoutError'?'NFL took too long to respond.':error.message,retryable:true},502);}
+ try{return nflJSON(await nflMediaPending.get(id));}catch(error){return nflJSON({id,error:error.name==='TimeoutError'?'NFL took too long to respond.':error instanceof SyntaxError||error instanceof TypeError?'NFL returned an unexpected response.':error.message,retryable:true},502);}
 }
 let nflLiveCatalog,nflLivePending;
 const nflPageMetadata=new Map(),nflPageAttempts=new Map();

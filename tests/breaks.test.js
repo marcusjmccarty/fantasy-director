@@ -72,6 +72,15 @@ test('live score increases without timeout metadata block until fresh football r
  assert.equal(update(control,{...pat,lastPlayId:'kickoff'}).blocked.has('A'),true);
  assert.equal(update(control,{...pat,lastPlayId:'first-down',down:1,possession:1}).blocked.has('A'),false);
 });
+test('live: a game the feed marks celebrating is not blocked, and the score break begins once the celebration ends',()=>{
+ const control=new BreakControl(),available=new Set(['g']);
+ const live=(o={})=>({id:'g',state:'in',phase:'live',possession:0,down:1,score:[7,3],scoreKnown:true,lastPlayId:'p1',...o});
+ control.update({games:[live()],at:0,available});
+ const during=control.update({games:[live({score:[13,3],phase:'live',possession:-1,special:true,celebrating:true})],at:5,available});
+ assert.equal(during.blocked.has('g'),false,'the celebration stays on screen');
+ const after=control.update({games:[live({score:[14,3],phase:'break',breakKind:'score',lastPlayId:'td'})],at:30,available});
+ assert.equal(after.blocked.has('g'),true,'then the break');
+});
 test('joining on an explicit live scoring break waits through a stale normal snapshot',()=>{
  const control=new BreakControl(),scored={...live,phase:'break',breakKind:'score',score:[7,0],lastPlayId:'td'};
  assert.equal(update(control,scored).blocked.has('A'),true);

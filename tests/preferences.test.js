@@ -24,8 +24,8 @@ test('a duplicate starter is rejected instead of increasing ranking and scoring 
 test('direct video links with fragments retain their native player type',()=>{
  assert.equal(streamType('https://example.com/game.m3u8#live'),'application/vnd.apple.mpegurl');assert.equal(streamType('https://example.com/game.mp4#t=30'),'video/mp4');assert.equal(streamType('https://example.com/watch?id=123'),'embed/page');
 });
-test('automatic embed reconnect defaults on and preserves an explicit opt-out',()=>{
- assert.equal(normalizePreferences({}).autoReconnect,true);assert.equal(normalizePreferences({autoReconnect:'false'}).autoReconnect,true);assert.equal(normalizePreferences({autoReconnect:false}).autoReconnect,false);
+test('automatic embed reconnect defaults off and preserves an explicit opt-in',()=>{
+ assert.equal(normalizePreferences({}).autoReconnect,false);assert.equal(normalizePreferences({autoReconnect:true}).autoReconnect,true);assert.equal(normalizePreferences({autoReconnect:false}).autoReconnect,false);
 });
 test('backup links migrate independently, reject unsafe URLs and survive repeated preference normalization',()=>{
  const saved=normalizePreferences({streams:{'IND-MIN':'https://streamcorner.st/stream/test'},streamBackups:{'IND-MIN':'https://another.example/watch','DAL-NYG':'javascript:bad','bad-key':'https://example.test/live'}});

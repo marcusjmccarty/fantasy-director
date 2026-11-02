@@ -63,6 +63,13 @@ test('involvement: offensive starters sit out kickoffs, punts and conversion tri
  assert.deepEqual(involvement(game('A','DAL','NYG',{down:0,distance:0,yardsToGoal:2,special:true,playType:'Two Point Conversion'}),dal),[]);
  assert.deepEqual(involvement(game('A','DAL','NYG',{phase:'play',down:0,distance:0,yardsToGoal:65,special:true,playType:'Kickoff'}),dal),[],'kickoff in flight');
 });
+test('involvement: a synthesized live play phase on 4th down carries no play type, so it is a kick, a punt or a short-yardage go by field position alone',()=>{
+ const base={down:4,distance:7,yardsToGoal:30,phase:'play',synthesized:true,playType:'',special:false};
+ assert.deepEqual(roles(involvement(game('A','DAL','NYG',base),ROSTER)),['kicker'],'4th & 7 at the 30 with the play "live": a field-goal try, not a go');
+ assert.deepEqual(roles(involvement(game('A','DAL','NYG',{...base,yardsToGoal:60}),ROSTER)),[],'4th & 7 at the 60: a punt');
+ assert.deepEqual(roles(involvement(game('A','DAL','NYG',{...base,distance:1,yardsToGoal:60}),ROSTER)),['offense','offense'],'4th & 1: going for it');
+ assert.deepEqual(roles(involvement(game('A','DAL','NYG',{...base,synthesized:false}),ROSTER)),['kicker','offense','offense'],'an archived play phase with a real play type still means a go (and the kicker is in range)');
+});
 test('involvement: on 4th down the offense counts only when the team is clearly going for it',()=>{
  const fourth=o=>game('A','DAL','NYG',{down:4,...o});
  // 4th & 5 at the 30: a kick is coming, so the kicker is on and the receivers are off.
@@ -250,6 +257,14 @@ test('decide: never cuts away from a game your starter is in within RULES.preSna
  // A snap your starter is not part of does not hold the channel, nor does one in a break.
  assert.equal(decide(d,{games:[{...mine,possession:1},urgent],current:{kind:'game',id:'A'}}).id,'B');
  assert.equal(decide(d,{games:[{...mine,phase:'break'},urgent],current:{kind:'game',id:'A'}}).id,'B');
+});
+test('decide: a string from recentScore holds the current game with that reason (a score on the field in a live game)',()=>{
+ const d=new Director({debounce:0});
+ const mine=game('A','IND','KC',{phase:'live',possession:-1,special:true,celebrating:true});
+ const urgent=game('B','DAL','NYG',{yardsToGoal:5});
+ const held=decide(d,{games:[mine,urgent],current:{kind:'game',id:'A'},recentScore:g=>g.celebrating?'Score on the field':false});
+ assert.deepEqual([held.kind,held.id,held.reason],['game','A','Score on the field']);
+ assert.equal(decide(d,{games:[{...mine,celebrating:false},urgent],current:{kind:'game',id:'A'},recentScore:g=>g.celebrating?'Score on the field':false}).id,'B');
 });
 test('decide: after a cut, dwells for RULES.dwell seconds against a same-tier challenger',()=>{
  const d=new Director({debounce:0});

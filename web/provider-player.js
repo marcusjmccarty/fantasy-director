@@ -16,6 +16,7 @@ export class ProviderPlayer{
   this.element.allow='autoplay; fullscreen; picture-in-picture; encrypted-media';this.element.referrerPolicy='strict-origin-when-cross-origin';
   this.duration=Number(duration)>0?Number(duration):NaN;this.knownDuration=Number.isFinite(this.duration);this.lastTime=0;this.lastMessage=-Infinity;this.lastAdvance=-Infinity;this.advances=0;
   this.initialized=false;this.primed=false;this.inAd=false;this.timer=null;this.error=null;this.wantPlay=false;this.target=null;this.isMuted=true;this.seekedAt=-Infinity;this.seekStartedAt=null;this.seekLatency=3000;this.lastReport=-Infinity;this.kickedAt=-Infinity;this.audioLocked=false;this.audioWatch=null;
+  this.element.setAttribute?.('sandbox','allow-scripts allow-same-origin allow-forms allow-presentation allow-storage-access-by-user-activation');   // the player works; popups and top navigation do not
   this.element.src=providerURL(url);   // validated before anything is registered
   this.onMessage=event=>this.receive(event);events.addEventListener('message',this.onMessage);
  }

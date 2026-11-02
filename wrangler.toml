@@ -8,3 +8,10 @@ workers_dev = true
 
 # Public visitors import with their own ESPN cookies; shared server credentials
 # and caller-supplied identity headers are never used by this public Worker.
+
+# Abuse guard for the public API routes (ESPN and NFL proxies): per-IP limits
+# enforced by the Worker before any upstream request.
+[[ratelimits]]
+name = "API"
+namespace_id = "1001"
+simple = { limit = 120, period = 60 }

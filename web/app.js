@@ -19,7 +19,7 @@ const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const starterCount=n=>`${n} starter${n===1?'':'s'}`;
 const STORE='fantasy-stream-v3',ESPN='https://site.api.espn.com/apis/site/v2/sports/football/nfl/';
-const LOAD_LIMIT=20000,COOLDOWN=60000;
+const LOAD_LIMIT=20000,LIVE_LOAD_LIMIT=45000,COOLDOWN=60000,STALE_AFTER=45000;
 
 // ---------- saved preferences ----------
 let saved=normalizePreferences();
@@ -43,7 +43,7 @@ function persist(){try{localStorage.setItem(STORE,JSON.stringify(S.mode==='repla
 const S={scope:'game',center:null,range:null,mode:'live',archive:null,clips:[],liveClips:[],day:0,games:[],at:Date.now()/1000,lastAt:null,
  program:{kind:'idle'},pending:null,pinned:null,selection:null,highlight:null,decision:null,playing:false,started:false,
  fullscreenWanted:false,fullscreenRequest:0,
- streamChoices:new Map(),streamRotations:new Map(),
+ streamChoices:new Map(),deadStreams:new Map(),streamRotations:new Map(),
  cooldown:new Map(),ads:new Set(),breaks:new Map(),detectedBreaks:new Map(),sources:new Map(),syncs:new Map(),usedClips:new Map(),failedClips:new Map(),seekHold:false,cuts:0,
  lastStep:0,lastWarm:0,lastRender:0,live:{games:[],feed:new LiveFeed(),scores:new Map(),summaryPending:new Map(),fetched:0,error:'',generation:0},toastTimer:null,unmuteHint:false};
 const fantasyFeed=new FantasyScoreFeed();
@@ -84,7 +84,8 @@ function syncFor(game){
  if(!sync){sync=new RecordingSync(game,{types:S.archive.types,anchors:mergeAnchors(game.anchors||[],saved.marks[game.id]||[])});S.syncs.set(game.id,sync);}
  return sync;
 }
-function streamURLs(game){const key=gameKey(game);return [...new Set([saved.streams[key],saved.streamBackups[key]].filter(Boolean))];}
+const DEAD_STREAM=300000;   // ms a direct link that never showed footage is left alone
+function streamURLs(game){const key=gameKey(game),now=performance.now();return [...new Set([saved.streams[key],saved.streamBackups[key]].filter(url=>url&&!(S.deadStreams.get(url)>now)))];}
 function sourceFor(id){
  if(S.mode==='replay'){const g=archiveGame(id);return g?.embed?{url:g.embed,type:'provider/ok',duration:g.recordingDuration}:null;}
  const g=gameState(id),urls=g?streamURLs(g):[],choice=S.streamChoices.get(id),url=urls.includes(choice)?choice:urls[0];
@@ -147,7 +148,10 @@ function updateBreaks(){
  const visible=pool.visible,manual=visible&&S.breaks.get(visible)>performance.now();
  if(visible&&(state.blocked.has(visible)||S.ads.has(visible)||manual))suppressBreak(visible);
 }
-function recentScore(game,at){const t=S.mode==='live'?at-saved.delay:at;return (game.scores||[]).some(s=>t-s.at>=0&&t-s.at<RULES.scoreHold&&rosterCredit(s,game,roster()).length);}
+function recentScore(game,at){
+ if(game.celebrating)return 'Score on the field';   // the live feed keeps a fresh score on screen for the celebration
+ const t=S.mode==='live'?at-saved.delay:at;return (game.scores||[]).some(s=>t-s.at>=0&&t-s.at<RULES.scoreHold&&rosterCredit(s,game,roster()).length);
+}
 
 // ---------- the loop ----------
 function frame(now){
@@ -204,7 +208,10 @@ function step(now){
   const recording=archiveGame(current.id);
   if(recording)current.protected=!!protectedReplayPlay(recording,S.archive.types,syncFor(recording),pool.current?.currentTime,roster(),{includeDefense:saved.includeDefense,allAction:S.pinned===current.id});
  }
+ // A frozen scoreboard (ESPN outage) is no reason to change the picture: hold what is on screen until updates return.
+ const stale=S.mode==='live'&&S.live.fetched&&Date.now()-S.live.fetched>STALE_AFTER;
  const decision=selectionDecision(blocked,now,current.protected)||
+  (stale&&S.program.kind==='game'&&!blocked.has(S.program.id)?{kind:'game',id:S.program.id,reason:'Game updates paused · holding this game'}:null)||
   director.decide({games:S.games,roster:roster(),at:S.at,current,excluded:blocked,queue,includeDefense:saved.includeDefense,recentScore,backups:backupGames(),redzone:S.mode==='live'});
  S.decision=decision;
  if(decision.kind==='highlight'){S.pending=null;if(!S.highlight||S.highlight.done)startHighlight(decision.id);if(S.highlight&&!S.highlight.playing)updateHighlight(now);}
@@ -278,6 +285,9 @@ function cutTo(id,now){
  if(pool.ready(id,target(id)))return commit(id);
  if(now-S.pending.since>LOAD_LIMIT&&!(S.mode==='live'&&slot.player.live)){
   cool(id,'it did not start in time');
+ }else if(S.mode==='live'&&slot.player.live&&slot.player.kind!=='embed'&&S.pinned!==id&&now-S.pending.since>LIVE_LOAD_LIMIT){
+  // A direct live link that never yields footage: the backup first; otherwise the link (not the game) is set aside and the tracker shows the game.
+  if(!rotateStream(id)){const g=gameState(id);S.deadStreams.set(slot.url,now+DEAD_STREAM);S.streamChoices.delete(id);pool.close(id);S.pending=null;toast(`${g?.name||'Game'}: the stream never started · game tracker for the next few minutes. Reload stream retries it.`,'warn');render();}
  }else if(!pool.visible&&now-S.pending.since>8000){
   // Autoplay may be waiting on a click inside the provider's player.
   pool.show(id);S.program={kind:'game',id};S.unmuteHint=true;
@@ -711,6 +721,7 @@ $('skipBreak').onclick=skipBreak;
 $('reloadStream').onclick=()=>{
  if(S.mode!=='live'||S.program.kind!=='game'||S.highlight||!S.playing||typeof pool.current?.reload!=='function')return;
  if(pool.current.reload()){S.stall=null;S.lastAt=null;toast('Reloading this stream. If it stays blank, try another link in Game streams.');render();}
+ S.deadStreams.clear();
 };
 $('nextStream').onclick=()=>{if(!S.highlight)rotateStream(currentGameId(),true);};
 $('undoBreak').onclick=()=>{S.breaks.clear();director.reset();if(S.playing)step(performance.now());render();toast('The skipped game is available again.');};
@@ -790,7 +801,8 @@ for(const ev of ['fullscreenchange','webkitfullscreenchange'])document.addEventL
 });
 document.addEventListener('keydown',e=>{
  if(e.key==='Escape'){S.fullscreenWanted=false;S.fullscreenRequest++;const stage=document.querySelector('.stage');if(stage.classList.contains('theater')){stage.classList.remove('theater');render();$('fullButton').focus();}return;}
- if(e.target.closest('input,textarea,select,dialog,button,a,summary,#gamesPanel,#scores'))return;
+ if(e.target.closest('input,textarea,select,dialog,[contenteditable]'))return;
+ if(e.target.closest('button,a,summary,#gamesPanel,#scores')&&(e.key===' '||e.key==='Enter'))return;
  if(e.key===' '||e.key==='k'){e.preventDefault();if(S.started||S.archive)setPlaying(!S.playing);}
  else if((e.key==='ArrowLeft'||e.key==='ArrowRight')&&S.mode==='replay'){e.preventDefault();seekTo(S.at+(e.key==='ArrowRight'?1:-1)*(e.shiftKey?60:10));}
  else if(e.key==='m')$('muteButton').click();else if(e.key==='f')$('fullButton').click();
@@ -832,7 +844,7 @@ async function pollLive(generation){
   S.live.games=games;S.live.error='';S.live.fetched=Date.now();S.live.feed.push(games,Date.now()/1000);if($('streamsStatus').textContent==='Refreshing the schedule…')$('streamsStatus').textContent='Schedule updated.';
   const teams=rosterTeams(roster());
   const pending=S.live.summaryPending,capacity=Math.max(0,4-[...pending.values()].filter(request=>request.generation===generation).length);
-  summaries=Promise.allSettled(games.filter(g=>g.state!=='pre'&&g.teams.some(t=>teams.has(t.abbr))&&pending.get(g.id)?.generation!==generation&&Date.now()-(S.live.summaryAt?.[g.id]||0)>25000).sort((a,b)=>(S.live.summaryAt?.[a.id]||0)-(S.live.summaryAt?.[b.id]||0)).slice(0,capacity).map(async g=>{
+  summaries=Promise.allSettled(games.filter(g=>g.state!=='pre'&&g.teams.some(t=>teams.has(t.abbr))&&pending.get(g.id)?.generation!==generation&&Date.now()-(S.live.summaryAt?.[g.id]||0)>(g.state==='post'?600000:25000)).sort((a,b)=>(S.live.summaryAt?.[a.id]||0)-(S.live.summaryAt?.[b.id]||0)).slice(0,capacity).map(async g=>{
    // Space failed attempts too, so one unavailable group cannot starve later games.
    S.live.summaryAt={...S.live.summaryAt,[g.id]:Date.now()};
    const request={generation};pending.set(g.id,request);
@@ -902,13 +914,15 @@ async function importLeague({refresh=false,quiet=false}={}){
  const request=S.leagueRequest=(S.leagueRequest||0)+1,mode=S.mode;
  const leagueId=(refresh?saved.leagueId:$('leagueId').value).trim();
  if(!/^\d{1,12}$/.test(leagueId)){$('leagueStatus').textContent='Enter your numeric ESPN league ID.';return;}
- if(!refresh){saved.espn={swid:$('espnSwid').value.trim(),s2:$('espnS2').value.trim()};persist();}
- const cookies=saved.espn?.swid||saved.espn?.s2?{swid:saved.espn.swid,s2:saved.espn.s2}:{};
+ // Cookies typed for this import travel with the request; they are kept only once ESPN accepts them.
+ const entered=refresh?null:{swid:$('espnSwid').value.trim(),s2:$('espnS2').value.trim()},using=entered??saved.espn;
+ const cookies=using?.swid||using?.s2?{swid:using.swid,s2:using.s2}:{};
  $('importLeague').disabled=true;$('leagueStatus').textContent='Getting every franchise from ESPN…';
  try{
   const r=await fetch('/api/league',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leagueId,...(S.mode==='replay'?{week:S.archive.data.week,season:S.archive.data.season}:{}),...cookies}),signal:AbortSignal.timeout(15000)});
   if(!r.headers.get('Content-Type')?.includes('application/json'))throw new Error('The roster service is unavailable. Try again, or add your players below.');
   const data=await r.json();if(request!==S.leagueRequest||mode!==S.mode)return;if(!r.ok){if(data.code==='LEAGUE_PRIVATE'){$('cookieDetails').open=true;}throw new Error(data.error||'Could not import this league.');}
+  if(entered){saved.espn=entered;persist();}
   // Team IDs are local to a league: team "1" in a new league is not necessarily yours.
   const previousTeamId=saved.leagueId===leagueId?saved.teamId:'';
   if(S.mode==='live'&&saved.leagueId!==data.leagueId)S.replayLineup=null;

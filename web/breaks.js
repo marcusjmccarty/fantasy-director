@@ -57,16 +57,19 @@ export class BreakControl{
     // A scoreboard score can arrive without a dedicated timeout snapshot.
     // Wait for fresh action evidence, not an arbitrary wall-clock expiry.
     let hold=previous?.hold;
+    // A hold taken during the celebration has no baseline yet: the first snapshot after it is the break's starting situation.
+    if(hold&&hold.key===null&&!g.celebrating)hold={...hold,key,playId:g.lastPlayId||null};
     // Losing an ID is missing evidence, never evidence of a new play.
-    const fresh=hold&&(hold.playId?g.lastPlayId&&hold.playId!==g.lastPlayId:key!==hold.key);
+    const fresh=hold&&hold.key!==null&&(hold.playId?g.lastPlayId&&hold.playId!==g.lastPlayId:key!==hold.key);
     // A review can overturn the score without replacing its play ID. Retain
     // the pre-touchdown total through PAT updates; 7 -> 6 is not an overturn.
     const overturned=scoreKnown&&hold?.before?.length===score.length&&score.length>0&&score.every((n,i)=>Number(n)<=Number(hold.before[i]));
     if(hold&&!increased&&g.phase!=='break'&&(fresh||overturned)&&g.possession>=0&&g.down>0)hold=null;
     if(increased||g.phase==='break'&&g.breakKind==='score'){
-     hold={key,playId:g.lastPlayId||hold?.playId,before:hold?.before??(increased?[...previous.score]:null),kind:'score'};released.add(g.id);
+     hold=g.celebrating?{key:null,playId:null,before:hold?.before??(increased?[...previous.score]:null),kind:'score'}:{key,playId:g.lastPlayId||hold?.playId,before:hold?.before??(increased?[...previous.score]:null),kind:'score'};if(!g.celebrating)released.add(g.id);
     }
-    if(g.phase==='break'||hold){blocked.add(g.id);released.add(g.id);reasons.set(g.id,hold||{kind:g.breakKind||'stoppage'});}
+    // The feed keeps a fresh score on screen for the celebration; the break starts when it says so.
+    if((g.phase==='break'||hold)&&!g.celebrating){blocked.add(g.id);released.add(g.id);reasons.set(g.id,hold||{kind:g.breakKind||'stoppage'});}
     this.live.set(g.id,{score:scoreKnown?[...score]:previous?.score||[],hold});
    }
   }

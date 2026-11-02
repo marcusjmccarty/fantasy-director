@@ -1,6 +1,6 @@
 import {sameSite,ownCookies} from './api.js';
 // Only these ESPN services can be reached; callers cannot provide upstream URLs.
-export const SPORT_SERVICES={nba:{path:'basketball/nba',fantasy:'fba',bench:[8,9],positions:{1:'PG',2:'SG',3:'SF',4:'PF',5:'C'},slots:['PG','SG','SF','PF','C','G','F','UTIL','BE','IR']},nhl:{path:'hockey/nhl',fantasy:'fhl',bench:[6,7],positions:{1:'C',2:'LW',3:'RW',4:'D',5:'G'},slots:['C','LW','RW','D','G','UTIL','BE','IR']},mlb:{path:'baseball/mlb',fantasy:'flb',bench:[16,17],positions:{1:'SP',2:'C',3:'1B',4:'2B',5:'3B',6:'SS',7:'LF',8:'CF',9:'RF',10:'DH',11:'RP'},slots:['C','1B','2B','3B','SS','OF','2B/SS','1B/3B','LF','CF','RF','DH','UTIL','P','SP','RP','BE','IL']}};
+export const SPORT_SERVICES={nba:{path:'basketball/nba',fantasy:'fba',bench:[12,13],positions:{1:'PG',2:'SG',3:'SF',4:'PF',5:'C'},slots:{0:'PG',1:'SG',2:'SF',3:'PF',4:'C',5:'G',6:'F',7:'SG/SF',8:'G/F',9:'PF/C',10:'F/C',11:'UTIL',12:'BE',13:'IR',15:'Rookie'}},nhl:{path:'hockey/nhl',fantasy:'fhl',bench:[7,8],positions:{1:'C',2:'LW',3:'RW',4:'D',5:'G'},slots:{0:'C',1:'LW',2:'RW',3:'F',4:'D',5:'G',6:'UTIL',7:'BE',8:'IR',10:'SK'}},mlb:{path:'baseball/mlb',fantasy:'flb',bench:[16,17],positions:{1:'SP',2:'C',3:'1B',4:'2B',5:'3B',6:'SS',7:'LF',8:'CF',9:'RF',10:'DH',11:'RP'},slots:['C','1B','2B','3B','SS','OF','2B/SS','1B/3B','LF','CF','RF','DH','UTIL','P','SP','RP','BE','IL']}};
 const sportJSON=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
 const numeric=value=>typeof value==='number'&&Number.isFinite(value)?value:null;
 export function validSportDate(value){return /^\d{4}-\d{2}-\d{2}$/.test(value)&&Number.isFinite(Date.parse(value))&&new Date(value).toISOString().slice(0,10)===value;}
@@ -23,7 +23,7 @@ export function normalizeSportLeague(raw,sport,proTeams=[],swid=''){
   const side=scheduled.flatMap(m=>[m.home,m.away]).find(s=>String(s?.teamId)===String(team.id));
   const entries=side?.rosterForCurrentScoringPeriod?.entries??team.roster?.entries??[];
   const players=entries.map(entry=>{const p=entry.playerPoolEntry?.player||{},pro=teamNames.get(String(p.proTeamId));const slot=Number(entry.lineupSlotId);const stat=(p.stats||[]).find(s=>Number(s.scoringPeriodId)===period&&s.statSourceId===0&&s.statSplitTypeId===1);
-   return {id:String(p.id||''),name:p.fullName||'Empty slot',team:pro?.abbrev||'',teamId:String(p.proTeamId||''),position:config.positions[p.defaultPositionId]||'UTIL',slot:config.slots[slot]||'Reserve',active:slot>=0&&slot<config.bench[0],points:isPoints?numeric(stat?.appliedTotal):null,injury:p.injuryStatus&&p.injuryStatus!=='ACTIVE'?p.injuryStatus.replaceAll('_',' '):''};
+   return {id:String(p.id||''),name:p.fullName||'Empty slot',team:pro?.abbrev||'',teamId:String(p.proTeamId||''),position:config.positions[p.defaultPositionId]||'UTIL',slot:config.slots[slot]||'Reserve',active:slot>=0&&!config.bench.includes(slot),points:isPoints?numeric(stat?.appliedTotal):null,injury:p.injuryStatus&&p.injuryStatus!=='ACTIVE'?p.injuryStatus.replaceAll('_',' '):''};
   });
   return {id:String(team.id),name:team.name||[team.location,team.nickname].filter(Boolean).join(' ')||team.abbrev||'Team '+team.id,players};
  });

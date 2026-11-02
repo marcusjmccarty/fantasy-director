@@ -15,8 +15,9 @@ const OFFENSE=new Set(['QB','RB','WR','TE']);
 
 function fourthDownPlan(game){
  if(game.down!==4||game.yardsToGoal===null||game.yardsToGoal===undefined)return null;
- if(game.phase==='play'&&/Field Goal/i.test(game.playType||''))return 'kick';
- if(game.phase==='play'&&!game.special)return 'go';
+ // A live feed's play phase is inferred from timing and says nothing about what the play is.
+ if(game.phase==='play'&&!game.synthesized&&/Field Goal/i.test(game.playType||''))return 'kick';
+ if(game.phase==='play'&&!game.synthesized&&!game.special)return 'go';
  if(game.distance<=2)return 'go';
  return game.yardsToGoal<=KICK_RANGE?'kick':'punt';
 }
@@ -87,7 +88,8 @@ export class Director{
   // Never cut away from a live snap in a game you care about, nor in the seconds before one.
   if(cur&&cur.tier>0&&curGame.phase==='play'){this.challenger=null;return stay('Play in progress');}
   if(cur&&cur.tier>0&&curGame.phase==='live'&&curGame.nextSnapIn!==null&&curGame.nextSnapIn<=r.preSnap){this.challenger=null;return stay('Snap coming');}
-  if(curGame&&curGame.state==='in'&&recentScore(curGame,at)&&curGame.phase!=='break')return stay('Your player just scored');
+  const held=curGame&&curGame.state==='in'&&curGame.phase!=='break'?recentScore(curGame,at):false;
+  if(held)return stay(typeof held==='string'?held:'Your player just scored');
   if(queue.length&&!ranked.some(e=>e.critical)&&(!cur||cur.tier===0||curGame.phase!=='play'&&(at-queue[0].queuedAt>=r.highlightWait||!best)))
    return {kind:'highlight',id:queue[0].id,reason:'Replaying a score you missed'};
   if(!best){
