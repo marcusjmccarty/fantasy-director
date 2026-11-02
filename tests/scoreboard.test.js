@@ -129,3 +129,28 @@ test('scoreboard highlights possession activity for offense, defense and kickers
  const kick=board({...live,down:4,distance:8});assert.match(kick,/Field-goal opportunity/);assert.doesNotMatch(kick,/Team on offense/);
  for(const g of [{...live,phase:'break'},{...live,state:'post'},{...live,state:'pre'},{...live,possession:-1}])assert.doesNotMatch(board(g),/sb-active/);
 });
+
+// ---- head-to-head: one table, two lineups, slot by slot --------------------
+import {headToHead} from '../web/scoreboard.js';
+const p=(slot,name,points,active=false)=>({slot,name,team:'IND',status:'Final',active,points});
+test('headToHead pairs the k-th starter in each slot with the opponent’s k-th in the same slot, and lists unmatched opponents last',()=>{
+ const yours={players:[p('QB','My QB',20),p('RB','My RB1',10),p('RB','My RB2',5),p('K','My K',8)]};
+ const theirs={players:[p('RB','Their RB1',12),p('QB','Their QB',18),p('D/ST','Their DST',4),p('RB','Their RB2',7)]};
+ const rows=headToHead(yours,theirs).split('</tr>').filter(Boolean);
+ assert.equal(rows.length,5);
+ assert.match(rows[0],/My QB[\s\S]*Their QB/);assert.match(rows[1],/My RB1[\s\S]*Their RB1/);assert.match(rows[2],/My RB2[\s\S]*Their RB2/);
+ assert.match(rows[3],/My K[\s\S]*Empty/);assert.match(rows[4],/D\/ST[\s\S]*Their DST/);
+ assert.match(rows[0],/h2h-pts mine lead">20\.00/,'the higher score in a row leads');assert.doesNotMatch(rows[1],/mine lead/);
+});
+test('headToHead alone reads slot, name, points; escapes names; marks players on the field',()=>{
+ const rows=headToHead({players:[p('WR','<b>x</b>',null,true)]},null);
+ assert.match(rows,/^<tr><td class="h2h-slot">/);assert.match(rows,/&lt;b&gt;x&lt;\/b&gt;/);assert.doesNotMatch(rows,/<b>x<\/b>/);
+ assert.match(rows,/h2h-player on/);assert.match(rows,/player-live-dot/);assert.match(rows,/>—</);assert.doesNotMatch(rows,/theirs/);
+});
+test('fantasyBoard exposes structured players with plain-language status for the matchup table',()=>{
+ const data={scoring:{week:8,teams:[{id:'1',points:12,players:[{slot:'RB',name:'Jonathan Taylor',team:'IND',position:'RB',points:12}]}]}};
+ const live={id:'g',state:'in',phase:'live',possession:0,down:1,teams:[{abbr:'IND'},{abbr:'MIN'}]};
+ const board=fantasyBoard(data,'1',[live]);
+ assert.deepEqual(board.players,[{slot:'RB',name:'Jonathan Taylor',team:'IND',status:'On offense',active:true,points:12}]);
+ assert.equal(fantasyBoard(data,'1',[]).players[0].status,'No game');
+});

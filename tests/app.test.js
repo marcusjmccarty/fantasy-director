@@ -860,9 +860,9 @@ test('interface: the single lineup editor stays available without touching playb
  a.setPlaying(true);a.cutTo('A',1000);const video=a.pool.current;a.el('lineupButton').onclick();assert.equal(a.el('lineupDialog').open,true);assert.equal(a.pool.current,video);assert.equal(video.destroyed,undefined);
  assert.equal(a.el('setupSteps'),undefined);assert.equal(a.el('editLineup'),undefined);assert.equal(a.el('lineupSummary'),undefined);
 });
-test('interface: start watching folds stream settings and lineup remains available',()=>{
+test('interface: start watching leaves the streams dialog closed and lineup remains available',()=>{
  const a=app();ready(a);a.render();a.setPlaying(true);
- assert.equal(a.el('streamsDetails').open,false);a.el('lineupButton').onclick();assert.equal(a.el('lineupDialog').open,true);
+ assert.ok(!a.el('streamsDetails').open,'the streams dialog is not open');a.el('lineupButton').onclick();assert.equal(a.el('lineupDialog').open,true);
 });
 test('score center: filters and live score updates leave the active stream intact',()=>{
  const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/live.mp4'};a.setPlaying(true);a.cutTo('A',1000);

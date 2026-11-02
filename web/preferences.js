@@ -22,5 +22,8 @@ export function normalizePreferences(value={}){
  for(const [key,mode] of Object.entries(record(raw.streamModes)))if(/^[A-Z]{2,3}-[A-Z]{2,3}$/.test(key)&&['custom','auto','NTV','StreamCorner'].includes(mode))out.streamModes[key]=mode;
  for(const [id,marks] of Object.entries(record(raw.marks)))if(Array.isArray(marks))out.marks[id]=marks.filter(m=>m&&Number.isFinite(m.wall)&&Number.isFinite(m.media)&&m.media>=0).map(({wall,media})=>({wall,media}));
  out.espn={swid:text(raw.espn?.swid,'',40),s2:text(raw.espn?.s2,'',2048)};
+ // Version 2 turned website-player refresh off by default. An older save holds the old default, not a choice.
+ if(!(Number(raw.prefsVersion)>=2))out.autoReconnect=false;
+ out.prefsVersion=2;
  return out;
 }
