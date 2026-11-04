@@ -7,7 +7,7 @@ const starter=(id,points,slot=2)=>({lineupSlotId:slot,playerPoolEntry:{appliedSt
 const league=entries=>({scoringPeriodId:8,teams:[{id:1,roster:{entries}}]});
 test('fantasy totals apply ESPN league points to starters, excluding bench and IR',()=>{
  const data=fantasyScores(league([starter(1,22.34),starter(2,-1.2),starter(3,0),starter(4,80,20),starter(5,40,21)]));
- assert.equal(data.week,8);assert.equal(data.teams[0].points,21.14);assert.equal(data.teams[0].players.length,3);assert.equal(data.teams[0].complete,true);
+ assert.equal(data.week,8);assert.equal(data.teams[0].points,21.14);assert.equal(data.teams[0].players.length,5);assert.deepEqual(data.teams[0].players.map(p=>!!p.bench),[false,false,false,true,true]);assert.deepEqual(data.teams[0].players.slice(3).map(p=>p.slot),['BE','IR']);assert.equal(data.teams[0].complete,true);
 });
 test('actual weekly stats take priority over projections and season totals',()=>{
  const entry=starter(1,9);entry.playerPoolEntry.player.stats=[{scoringPeriodId:0,statSourceId:0,statSplitTypeId:0,appliedTotal:200},{scoringPeriodId:8,statSourceId:1,statSplitTypeId:1,appliedTotal:35},{scoringPeriodId:7,statSourceId:0,statSplitTypeId:1,appliedTotal:30},{scoringPeriodId:8,statSourceId:0,statSplitTypeId:1,appliedTotal:11.5}];
@@ -88,7 +88,7 @@ test('doubleheaders can select either actual scheduled opponent',()=>{
 });
 test('matchup roster uses scoring-period entries and sorts lineup slots with FLEX after TE',()=>{
  const raw=matchupLeague();raw.schedule[0].home.rosterForCurrentScoringPeriod={entries:[starter(8,3,17),starter(7,1,23),starter(6,2,6),starter(9,9,0),starter(10,50,20)]};
- const team=fantasyScores(raw).teams[0];assert.deepEqual(team.players.map(p=>p.slot),['QB','TE','FLEX','K']);assert.equal(team.points,15);
+ const team=fantasyScores(raw).teams[0];assert.deepEqual(team.players.map(p=>p.slot),['QB','TE','FLEX','K','BE']);assert.equal(team.points,15);
 });
 test('zero official matchup scores remain zero even if a starter snapshot is incomplete',()=>{
  const raw=matchupLeague();raw.schedule[0].home.totalPointsLive=0;
@@ -131,7 +131,7 @@ test('scoreboard highlights possession activity for offense, defense and kickers
 });
 
 // ---- head-to-head: one table, two lineups, slot by slot --------------------
-import {headToHead} from '../web/scoreboard.js';
+import {headToHead,benchList} from '../web/scoreboard.js';
 const p=(slot,name,points,active=false)=>({slot,name,team:'IND',status:'Final',active,points});
 test('headToHead pairs the k-th starter in each slot with the opponent’s k-th in the same slot, and lists unmatched opponents last',()=>{
  const yours={players:[p('QB','My QB',20),p('RB','My RB1',10),p('RB','My RB2',5),p('K','My K',8)]};
@@ -153,4 +153,12 @@ test('fantasyBoard exposes structured players with plain-language status for the
  const board=fantasyBoard(data,'1',[live]);
  assert.deepEqual(board.players,[{slot:'RB',name:'Jonathan Taylor',team:'IND',status:'On offense',active:true,points:12}]);
  assert.equal(fantasyBoard(data,'1',[]).players[0].status,'No game');
+});
+
+test('the matchup table lists starters only and the bench is a separate quiet list',()=>{
+ const p=(slot,name,points,bench)=>({slot,name,team:'KC',status:'Final',active:false,points,...(bench?{bench:true}:{})});
+ const yours={players:[p('BE','Bench Guy',30,true),p('QB','Starter Guy',10),p('IR','Hurt Guy',null,true)]},theirs={players:[p('QB','Their QB',5),p('BE','Their Bench',2,true)]};
+ const table=headToHead(yours,theirs);assert.match(table,/Starter Guy/);assert.doesNotMatch(table,/Bench Guy|Their Bench/);
+ const bench=benchList(yours,theirs);assert.match(bench,/Your bench/);assert.match(bench,/B\. Guy <b>30\.00<\/b>/);assert.match(bench,/class="ir"/);assert.match(bench,/Their bench/);
+ assert.doesNotMatch(benchList(yours,null),/Their bench/);assert.doesNotMatch(benchList(yours,theirs,{points:false}),/<b>/);assert.equal(benchList({players:[p('QB','Only',1)]},null),'');
 });

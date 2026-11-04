@@ -1087,7 +1087,7 @@ test('manual choice remains authoritative in RedZone mode until its natural brea
 
 test('fantasy connection: the team selector stays visible and ESPN setup is directly reachable',()=>{
  const a=app();a.render();assert.equal(a.el('scoreTeamPicker').hidden,false);assert.equal(a.el('scoreTeam').disabled,true);
- a.el('lineupButton').onclick();assert.equal(a.el('lineupDialog').open,true);assert.equal(a.el('leagueImport').open,true);assert.equal(a.el('manualEditor').open,true);
+ a.el('lineupButton').onclick();assert.equal(a.el('lineupDialog').open,true);assert.equal(a.el('leagueImport').open,true);assert.equal(a.el('lineupDialog').dataset.connected,'false');
 });
 test('fantasy connection: saved players remain visible during loading and an expired-login response',async()=>{
  const pending=deferred(),a=app(()=>pending.promise,{scores:true});ready(a);a.saved.leagueId='123';a.saved.teamId='1';a.render();
@@ -1156,4 +1156,19 @@ test('a late custom page extraction respects Pause and a newer saved primary',as
  const field=a.el('streamInputs').querySelectorAll('input').find(i=>!i.dataset.backup);field.value='https://streamcorner.st/game';const older=a.el('saveStreams').onclick();const old=a.pool.current;
  a.setPlaying(false);field.value='https://custom.example/embed/new';await a.el('saveStreams').onclick();pending.resolve(Response.json({page:'https://streamcorner.st/game',url:'https://provider.example/embed/stale'}));await older;
  assert.equal(a.saved.streams['IND-MIN'],'https://custom.example/embed/new');assert.equal(a.S.playing,false);assert.equal(a.pool.visible,null);assert.equal(old.destroyed,true);
+});
+
+test('the Live dot is red only while an NFL game is in progress',()=>{
+ const a=app();a.S.live.games=[];a.render();assert.equal(a.el('liveDot').classList.contains('on'),false);assert.match(a.el('liveMode').title,/Checking/);a.S.live.fetched=Date.now();a.render();assert.match(a.el('liveMode').title,/No NFL games/);
+ a.S.live.games=[{id:'X',state:'in',name:'A @ B',teams:[{abbr:'IND'},{abbr:'MIN'}],score:[0,0],detail:'Q1'}];a.S.games=a.S.live.games;a.render();assert.equal(a.el('liveDot').classList.contains('on'),true);assert.match(a.el('liveMode').title,/1 NFL game live/);
+});
+
+test('Done in Streams leaves untouched games alone: no mode change, no saved blanks, no toast',()=>{
+ const a=app();ready(a);a.render();a.saved.streamModes['IND-MIN']='NTV';
+ const blank=new Element();blank.tag='input';blank.dataset.key='IND-MIN';blank.value='';a.el('streamInputs').children=[blank];a.el('backupInputs').children=[];
+ a.el('saveStreams').onclick();assert.equal(a.saved.streamModes['IND-MIN'],'NTV');assert.equal(a.el('toast').hidden===false&&/Links saved/.test(a.el('toast').innerHTML),false);
+});
+test('Done in Fantasy team acts on a typed list or league ID instead of discarding it',()=>{
+ const a=app();a.el('lineupButton').onclick();a.el('manualRoster').value='Jonathan Taylor, IND, RB';let pasted=0;a.el('pasteRoster').click=()=>pasted++;a.el('saveRoster').onclick();assert.equal(pasted,1);assert.equal(a.el('lineupDialog').open,true);
+ a.el('manualRoster').value='';a.el('saveRoster').onclick();assert.equal(a.el('lineupDialog').open,false);
 });

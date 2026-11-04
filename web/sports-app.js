@@ -1,7 +1,7 @@
 import {StreamFinder} from './stream-finder.js';
 import {PlayerPool} from './players.js';
 import {safeVideo,streamType,teamColor,teamLogo} from './roster.js';
-import {headToHead} from './scoreboard.js';
+import {headToHead,benchList} from './scoreboard.js';
 import {SPORTS,escapeHTML as esc,localDate,normalizeSportGames,normalizeSportPreferences,chooseSportGame,sportMatchup} from './sports-data.js';
 const $=id=>document.getElementById(id),requested=new URLSearchParams(location.search).get('sport');
 const sport=Object.hasOwn(SPORTS,requested)?requested:'nba',config=SPORTS[sport],storageKey='fantasy-stream-'+sport+'-v1';
@@ -58,6 +58,8 @@ function renderGuide(){
  const followedIds=followed(),order={in:0,pre:1,hold:2,post:3};
  const games=S.games.filter(g=>!S.filter||g.teams.some(t=>followedIds.includes(t.id))).slice().sort((a,b)=>order[a.state]-order[b.state]||Date.parse(a.date)-Date.parse(b.date));
  const live=S.games.filter(g=>g.state==='in').length;
+ // The Live dot reports today's slate only; browsing another day keeps the last answer.
+ if(isToday()&&!S.gamesLoading&&!S.gamesError){$('liveDot').classList.toggle('on',live>0);$('liveDot').parentElement?.setAttribute?.('title',live?`${live} ${config.label} game${live===1?'':'s'} live now`:`No ${config.label} games live right now`);}
  $('gameCount').textContent=live?live+' live':S.games.length?S.games.length+' games':'';$('dayLabel').textContent=dayLabel();$('today').hidden=isToday();
  $('allGames').setAttribute('aria-pressed',String(!S.filter));$('myGames').setAttribute('aria-pressed',String(S.filter));
  put('games',games.map(g=>{
@@ -77,7 +79,8 @@ function renderGuide(){
  const open=S.games.filter(g=>g.state!=='post'),ready=open.filter(g=>urls(g).length).length;
  $('streamSummary').textContent=open.length?`${ready} of ${open.length} games ${isToday()?'today ':''}have a stream ready`:S.games.length?'Every game on this day is final':'No games on this day';
  $('streamsCount').textContent=ready?String(ready):'';
- put('savedStreams',S.games.map(g=>{const n=urls(g).length,links=saved.streams[g.key],own=!!(links?.primary||links?.backup);return `<div class="stream-row sport"><span class="stream-game"><b>${esc(g.teams.map(t=>t.name).join(' at '))}</b><small>${esc([gameTime(g),n?(own&&(links.mode||'custom')==='custom'?'Your link':'Stream ready')+(n>1?' · backup ready':''):g.state==='post'?'':'No stream yet'].filter(Boolean).join(' · '))}</small></span><span class="stream-actions">${g.state==='post'&&!own?'':`<button type="button" class="ghost" data-edit="${esc(g.id)}">${own?'Edit link':'Add link'}</button>`}<a href="${esc(gamecast(g))}" target="_blank" rel="noopener noreferrer">Gamecast ↗</a></span></div>`;}).join('')||'<p class="empty">Choose a day with scheduled games to add stream links.</p>');
+ const listed=S.games.filter(g=>g.state!=='post'||saved.streams[g.key]?.primary||saved.streams[g.key]?.backup).sort((a,b)=>order[a.state]-order[b.state]||Date.parse(a.date)-Date.parse(b.date));
+ put('savedStreams',listed.map(g=>{const n=urls(g).length,links=saved.streams[g.key],own=!!(links?.primary||links?.backup),state=n?(own&&(links.mode||'custom')==='custom'?'Your link':'Stream ready')+(n>1?' · backup ready':''):'No stream yet';return `<div class="stream-row sport"><div class="stream-game"><span class="stream-logos">${g.teams.map(t=>{const src=teamLogo(t,sport);return src?`<img src="${esc(src)}" alt="" width="20" height="20" loading="lazy" referrerpolicy="no-referrer">`:'';}).join('')}</span><span class="stream-name"><b>${esc(g.teams.map(t=>t.abbr).join(' @ '))}</b><small>${esc(gameTime(g))} · <span class="source-state${n?' ok':''}">${esc(state)}</span></small></span></div><span class="stream-actions"><a href="${esc(gamecast(g))}" target="_blank" rel="noopener noreferrer" title="Open ESPN Gamecast">Gamecast ↗</a><button type="button" class="ghost" data-edit="${esc(g.id)}">${n?'Change':'Add link'}</button></span></div>`;}).join('')||`<p class="empty">${S.games.length?'Every game on this day is final.':'Choose a day with games to add stream links.'}</p>`);
 }
 function selectGame(id,{manual=true,url=null}={}){
  const game=S.games.find(g=>g.id===id);if(!game)return;const source=url||urls(game)[0];if(!source){openStream(id);return;}
@@ -121,8 +124,8 @@ function fillStream(){const g=S.games.find(g=>g.id===$('streamGame').value),link
 $('streamGame').onchange=fillStream;$('closeStream').onclick=()=>$('streamDialog').close();
 function renderSourceOptions(g){
  if(!g)return;const links=saved.streams[g.key]||{},mode=links.mode||'custom',providers=[...new Set(streamFinder.options(g).map(x=>x.provider))];
- const choices=[...(links.primary?[['custom','My link']]:[]),['auto','Automatic'],...['NTV','StreamCorner'].map(p=>[p,p])];
- $('streamSourceOptions').innerHTML='<small>Play from</small>'+choices.map(([id,label])=>`<button type="button" data-source-mode="${esc(id)}" ${['NTV','StreamCorner'].includes(id)&&!providers.includes(id)?'disabled title="No exact match available yet"':''} aria-pressed="${(mode==='custom'&&!links.primary?'auto':mode)===id}">${esc(label)}</button>`).join('');
+ const choices=[['auto','Auto'],...['NTV','StreamCorner'].map(p=>[p,p]),...(links.primary?[['custom','My link']]:[])];
+ $('streamSourceOptions').innerHTML='<div class="seg" role="group" aria-label="Play this game from">'+choices.map(([id,label])=>`<button type="button" data-source-mode="${esc(id)}" ${['NTV','StreamCorner'].includes(id)&&!providers.includes(id)?'disabled title="No match on this site yet"':''} aria-pressed="${(mode==='custom'&&!links.primary?'auto':mode)===id}">${esc(label)}</button>`).join('')+'</div>';
 }
 async function applyStream(g,request){
  const links=saved.streams[g.key];if(!links)return;const old=pool.get(g.id),date=S.date;
@@ -146,10 +149,7 @@ $('refreshStreams').onclick=()=>{streamFinder.cancel();loadGames();};
 const stripStep=dir=>$('games').scrollBy?.({left:dir*Math.max(240,($('games').clientWidth||800)*.8),behavior:'smooth'});
 $('stripPrev').onclick=()=>stripStep(-1);$('stripNext').onclick=()=>stripStep(1);
 $('games').addEventListener?.('wheel',e=>{const list=$('games');if(Math.abs(e.deltaY)<=Math.abs(e.deltaX)||list.scrollWidth<=list.clientWidth)return;e.preventDefault();list.scrollLeft+=e.deltaY;},{passive:false});
-function showPanel(tab){const bench=tab==='bench';$('matchupTab').setAttribute('aria-selected',String(!bench));$('benchTab').setAttribute('aria-selected',String(bench));$('matchupTab').tabIndex=bench?-1:0;$('benchTab').tabIndex=bench?0:-1;$('matchupPanel').hidden=bench;$('benchPanel').hidden=!bench;}
-$('matchupTab').onclick=()=>showPanel('matchup');$('benchTab').onclick=()=>showPanel('bench');
-for(const id of ['matchupTab','benchTab'])$(id).onkeydown=e=>{if(e.key!=='ArrowLeft'&&e.key!=='ArrowRight')return;e.preventDefault();const next=id==='matchupTab'?'benchTab':'matchupTab';showPanel(next==='benchTab'?'bench':'matchup');$(next).focus();};
-$('headerScore').onclick=e=>{e.preventDefault();showPanel('matchup');$('scoreboardTitle').focus();};
+$('headerScore').onclick=e=>{e.preventDefault();$('scoreboardTitle').focus();};
 $('addFirstStream').onclick=()=>openStream();$('playButton').onclick=()=>setPlaying(!S.playing);$('reloadStream').onclick=()=>{if(S.playing)pool.current?.reload?.();};
 function rotateSource(id,manual=false){if(!S.playing||id!==S.current||!manual&&Date.now()<(S.rotations.get(id)||0))return;const g=currentGame(),links=urls(g),alternate=links.length>1?links[(links.indexOf(pool.get(id)?.url)+1)%links.length]:null;if(!g||!alternate)return;S.rotations.set(id,Date.now()+60000);selectGame(g.id,{url:alternate,manual:S.manual});}
 $('nextStream').onclick=()=>rotateSource(S.current,true);
@@ -163,17 +163,17 @@ async function loadGames(){
  catch(error){if(generation===S.gameGeneration){S.gamesError=true;S.gamesLoading=false;$('scheduleStatus').textContent=(S.games.length?'Showing last update · ':'Updates delayed · ')+'retrying';renderGuide();renderTransport();}}
  finally{clearTimeout(timeout);if(generation===S.gameGeneration){S.request=null;S.gameTimer=setTimeout(loadGames,S.games.some(g=>g.state==='in')?15000:60000);}}
 }
-function changeDate(value){if(!/^\d{4}-\d{2}-\d{2}$/.test(value)||!Number.isFinite(Date.parse(value)))return;streamFinder.cancel();S.date=value;$('gameDate').value=value;S.history=[];S.games=[];renderGuide();loadGames();}
+function changeDate(value){if(!/^\d{4}-\d{2}-\d{2}$/.test(value)||!Number.isFinite(Date.parse(value)))return;streamFinder.cancel();S.date=value;$('gameDate').value=value;S.history=[];S.games=[];S.gamesLoading=true;renderGuide();loadGames();}
 $('gameDate').onchange=event=>changeDate(event.target.value);$('gameDate').onclick=event=>{try{event.target.showPicker?.();}catch{}};
 for(const [id,offset] of [['previousDay',-1],['nextDay',1]])$(id).onclick=()=>{const date=new Date(S.date+'T12:00:00');date.setDate(date.getDate()+offset);changeDate(localDate(date));};
-$('today').onclick=()=>changeDate(localDate());$('refreshGames').onclick=loadGames;
+$('today').onclick=()=>changeDate(localDate());$('refreshGames').onclick=()=>{loadGames();if(saved.leagueId)loadLeague();};
 const defaultSeason=()=>sport==='mlb'?new Date().getFullYear():new Date().getFullYear()+(new Date().getMonth()>=6?1:0);
 function openLeague(){
  $('leagueId').value=saved.leagueId;$('swid').value=saved.swid;$('s2').value=saved.s2;$('leagueSeason').value=saved.leagueSeason||S.season||defaultSeason();$('leagueTitle').textContent='Fantasy team · '+config.label;$('leagueError').textContent='';
- $('leagueImport').open=!saved.leagueId||!!S.leagueError;renderFantasy();if(!$('leagueDialog').open)$('leagueDialog').showModal();
+ $('leagueImport').open=!saved.leagueId||!!S.leagueError;$('leagueDialog').dataset.connected=String(!!saved.leagueId);renderFantasy();if(!$('leagueDialog').open)$('leagueDialog').showModal();
 }
 for(const id of ['connectFirst','fantasyTeamButton','connectFromBoard','chooseTeam'])$(id).onclick=openLeague;
-$('refreshScoreboard').onclick=()=>{loadGames();if(saved.leagueId)loadLeague();else openLeague();};$('closeLeague').onclick=()=>$('leagueDialog').close();
+$('closeLeague').onclick=()=>$('leagueDialog').close();
 $('leagueForm').onsubmit=async event=>{event.preventDefault();
  const typed=$('leagueId').value.trim(),leagueId=/leagueId=(\d{1,12})/i.exec(typed)?.[1]||typed,season=Number(/seasonId=(\d{4})/i.exec(typed)?.[1]||$('leagueSeason').value),swid=$('swid').value.trim(),s2=$('s2').value.trim();
  if(!/^\d{1,12}$/.test(leagueId)){$('leagueImport').open=true;$('leagueError').textContent='Enter your league ID, or paste your league’s web address.';$('leagueId').focus?.();return;}
@@ -186,7 +186,7 @@ async function loadLeague(input=null){
  if(!input&&!saved.leagueId)return;const explicit=!!input;input||={leagueId:saved.leagueId,swid:saved.swid,s2:saved.s2,season:saved.leagueSeason||S.season||defaultSeason()};
  const generation=++S.leagueGeneration;clearTimeout(S.leagueTimer);S.leaguePending=true;$('importLeague').disabled=true;$('leagueError').textContent='';renderFantasy();
  try{const r=await fetch('/api/sports/league',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...input,sport}),signal:AbortSignal.timeout(30000),cache:'no-store'}),data=await r.json();if(generation!==S.leagueGeneration)return;if(!r.ok){if(r.status===401){$('leagueImport').open=true;$('privateLeague').open=true;}throw new Error(data.error||'Could not load this league.');}if(data.leagueId!==input.leagueId||data.sport!==sport||!Array.isArray(data.teams))throw new Error('Unexpected league response.');
-  const previous=saved.leagueId===input.leagueId?saved.teamId:'';S.league=data;S.leagueError='';S.leagueUpdated=Date.now();saved.leagueId=input.leagueId;saved.swid=input.swid;saved.s2=input.s2;saved.leagueSeason=input.season;saved.teamId=data.teams.find(t=>t.id===previous)?.id||data.teams.find(t=>t.id===data.ownedTeamId)?.id||'';persist();if(explicit){$('leagueImport').open=false;if(saved.teamId)$('leagueDialog').close();else $('scoreTeam').focus?.();}renderGuide();
+  const previous=saved.leagueId===input.leagueId?saved.teamId:'';S.league=data;S.leagueError='';S.leagueUpdated=Date.now();saved.leagueId=input.leagueId;saved.swid=input.swid;saved.s2=input.s2;saved.leagueSeason=input.season;saved.teamId=data.teams.find(t=>t.id===previous)?.id||data.teams.find(t=>t.id===data.ownedTeamId)?.id||'';persist();$('leagueDialog').dataset.connected='true';if(explicit){$('leagueImport').open=false;if(saved.teamId)$('leagueDialog').close();else $('scoreTeam').focus?.();}renderGuide();
  }catch(error){if(generation===S.leagueGeneration){S.leagueError=error.message;$('leagueError').textContent=error.message;}}
  finally{if(generation===S.leagueGeneration){S.leaguePending=false;$('importLeague').disabled=false;renderFantasy();if(saved.leagueId)S.leagueTimer=setTimeout(()=>loadLeague(),30000);}}
 }
@@ -200,12 +200,14 @@ function renderFantasy(){
  const league=S.league,match=sportMatchup(league,saved.teamId,S.matchId),points=!!league?.isPoints;$('scoreTeam').disabled=!league?.teams.length;
  put('scoreTeam','<option value="">'+(league?'Choose your team…':'Connect ESPN to choose a team')+'</option>'+(league?.teams||[]).map(t=>`<option value="${esc(t.id)}">${esc(t.name)}</option>`).join(''));$('scoreTeam').value=saved.teamId;
  $('retryFantasy').hidden=!S.leagueError;$('retryFantasy').disabled=S.leaguePending;
- $('leagueMeta').textContent=league?league.name+' · '+(points?'Points league':league.scoringType==='ROTO'?'Rotisserie league':'Category league'):saved.leagueId?'ESPN league '+saved.leagueId:'Connect your ESPN '+config.label+' league.';
+ const espn=league&&saved.teamId?`https://fantasy.espn.com/${config.fantasy}/team?leagueId=${encodeURIComponent(saved.leagueId)}&teamId=${encodeURIComponent(saved.teamId)}&seasonId=${encodeURIComponent(league.season)}`:'';
+ $('leagueMeta').textContent=league&&points&&league.scoringPeriod?'Day '+league.scoringPeriod:'';$('leagueMeta').title=league?league.name+' · '+(points?'player points are for scoring day '+league.scoringPeriod+'; totals are the whole ESPN matchup':league.scoringType==='ROTO'?'rotisserie league':'category league'):'';
  $('leagueState').textContent=league?'Connected · '+league.name:S.leaguePending?'Connecting to ESPN…':saved.leagueId?'League '+saved.leagueId+' · not loaded':'Not connected';
- $('leagueSummary').textContent=league?league.teams.length+' teams · '+league.season+' season':'Connect to show your lineup and matchup';$('leagueAction').textContent=league?'Change':'Connect';
+ put('leagueSummary',league?esc(league.teams.length+' teams · '+league.season+' season')+(espn?` · <a href="${esc(espn)}" target="_blank" rel="noopener noreferrer">Open on ESPN ↗</a>`:''):'Connect to show your lineup and matchup');$('leagueAction').textContent=league?'Change':'Connect';
  $('importLeague').textContent=league&&!S.leagueError?'Done':'Connect';
  $('fantasyStatus').textContent=S.leagueError?(S.leagueUpdated?'Last good update '+new Date(S.leagueUpdated).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+'. ':'')+S.leagueError:S.leaguePending&&!league?'Getting your league from ESPN…':!league?'Connect a league to see players and your matchup.':!saved.teamId?'Choose your team using Fantasy team in the top bar.':'Updated '+new Date(S.leagueUpdated).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+' · every 30 seconds';
- $('fantasyStatus').classList.toggle('sport-error',!!S.leagueError);
+ // Only say something when it needs attention; a healthy matchup speaks for itself.
+ $('fantasyStatus').hidden=!S.leagueError&&!(league&&!saved.teamId);$('fantasyStatus').classList.toggle('sport-error',!!S.leagueError);
  const matches=match?.matches||[];$('matchupPicker').hidden=matches.length<2;put('matchupSelect',matches.map(m=>{const other=m.home?.teamId===saved.teamId?m.away:m.home;return `<option value="${esc(m.id)}">${esc(league.teams.find(t=>t.id===other?.teamId)?.name||'Bye')}</option>`;}).join(''));$('matchupSelect').value=match?.matchId||'';
  let status='Your team vs. your opponent',state='';
  if(match){if(!match.opponent)status=league.scoringType==='ROTO'?'Season standings on ESPN':'No opponent this matchup';else if(points&&match.yourPoints!==null&&match.opponentPoints!==null){const diff=match.yourPoints-match.opponentPoints;state=diff>0?'ahead':diff<0?'behind':'tied';status=diff===0?'All square':(diff>0?'Ahead by ':'Behind by ')+fmt(Math.abs(diff));}else status=points?'Matchup points':'Category matchup';}
@@ -214,20 +216,16 @@ function renderFantasy(){
  $('placeholderTitle').textContent=!league?(S.leagueError?'Your league is unavailable':'Getting your league…'):'Choose a team to follow';
  $('placeholderText').textContent=!league?(S.leagueError||'Your lineup appears here in a moment.'):'Pick your franchise and its lineup appears here.';$('chooseTeam').hidden=!league&&!S.leagueError;
  // The scorebug: your total in gold, theirs in violet, a bar for the share.
- $('fantasyTitle').textContent=match?.yours?.name||'Your team';$('opponentTitle').textContent=match?(match.opponent?.name||'No opponent'):'Your opponent';
+ $('fantasyTitle').textContent=match?.yours?.name||'Your team';$('opponentTitle').textContent=match?(match.opponent?.name||'No opponent'):'Your opponent';$('fantasyTitle').title=$('fantasyTitle').textContent;$('opponentTitle').title=$('opponentTitle').textContent;
  $('fantasyTotal').textContent=points&&match?fmt(match.yourPoints):'—';$('opponentTotal').textContent=points&&match?.opponent?fmt(match.opponentPoints):'—';
  const mine=match?.yourPoints,theirs=match?.opponentPoints,share=points&&Number.isFinite(mine)&&Number.isFinite(theirs)&&mine+theirs>0?mine/(mine+theirs)*100:50;$('matchupBar').setAttribute('style','width:'+share.toFixed(1)+'%');
  const scored=points&&!!match?.opponent&&Number.isFinite(mine)&&Number.isFinite(theirs);
  $('headerScore').hidden=!scored;$('headerScore').dataset.state=state;$('headerScore').title=status;put('headerScore',scored?`<span>You</span><b>${brief(mine)}</b><i>–</i><b>${brief(theirs)}</b>`:'');
- // Starters slot by slot. The bench has its own tab.
- const row=p=>({slot:p.slot,name:p.name,team:p.team||'FA',status:playerStatus(p),active:playing(p),points:points?p.points:null});
- const starters=t=>t?{...t,players:t.players.filter(p=>p.active).map(row)}:null;
- put('fantasyPlayers',match?headToHead(starters(match.yours),starters(match.opponent)):'');
+ // Starters slot by slot, then the bench, which never counts.
+ const row=p=>({slot:p.slot,name:p.name,team:p.team||'FA',status:playerStatus(p),active:p.active&&playing(p),points:points?p.points:null,...(p.active?{}:{bench:true})});
+ const lineup=t=>t?{...t,players:t.players.map(row)}:null;
+ put('fantasyPlayers',match?headToHead(lineup(match.yours),lineup(match.opponent)):'');put('fantasyBench',match?benchList(lineup(match.yours),lineup(match.opponent),{points}):'');
  $('fantasyTable').hidden=!match;$('fantasyTable').classList.toggle('solo',!match?.opponent);$('fantasyTable').classList.toggle('nopoints',!points);
- const bench=(match?.yours?.players||[]).filter(p=>!p.active);$('benchCount').textContent=bench.length?String(bench.length):'';
- $('benchNote').textContent=!match?'Choose your team to see its bench.':bench.length?(points?'Bench points don’t count toward your matchup.':'Reserves and injured players.'):'Nobody on your bench.';
- put('bench',bench.map(p=>`<li><span class="h2h-slot"><span>${esc(p.slot)}</span></span><span class="bench-player${playing(p)?' on':''}"><b>${esc(p.name)}</b><small>${esc(p.team||'Free agent')} · ${esc(p.position)} · ${esc(playerStatus(p))}</small></span><span class="bench-pts">${points?esc(fmt(p.points)):''}</span></li>`).join(''));
- $('fantasyNote').hidden=!match;if(match){const href=`https://fantasy.espn.com/${config.fantasy}/team?leagueId=${encodeURIComponent(saved.leagueId)}&teamId=${encodeURIComponent(saved.teamId)}&seasonId=${encodeURIComponent(league.season)}`;$('fantasyNote').innerHTML=(points?'Player points are for scoring day '+esc(league.scoringPeriod)+'. Totals are the whole ESPN matchup.':'Category league: totals stay on ESPN rather than invented points.')+` <a href="${esc(href)}" target="_blank" rel="noopener noreferrer">Open on ESPN ↗</a>`;}
 }
 $('scoreTeam').onchange=event=>{if(!S.league?.teams.some(t=>t.id===event.target.value))return;saved.teamId=event.target.value;S.matchId='';persist();renderFantasy();renderGuide();};$('matchupSelect').onchange=event=>{S.matchId=event.target.value;renderFantasy();};$('retryFantasy').onclick=()=>{if(saved.leagueId)loadLeague();else openLeague();};
 async function refreshStreamLinks(){

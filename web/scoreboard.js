@@ -46,7 +46,7 @@ export function fantasyBoard(data,teamId,games=[]){
   const game=games.find(g=>g.teams.some(t=>t.abbr===alias(p.team)));
   const involved=game&&involvement(game,[p])[0];
   const status=involved?(involved.role==='defense'?'Defending':involved.role==='kicker'?'In FG range':'On offense'):game?(game.state==='pre'?kickoff(game):game.state==='post'?'Final':game.detail||'In progress'):'No game';
-  return {slot:p.slot||p.position,name:p.name,team:p.team,status,active:!!involved,points:p.points};
+  return {slot:p.slot||p.position,name:p.name,team:p.team,status,active:!!involved&&!p.bench,points:p.points,...(p.bench?{bench:true}:{})};
  });
  return {points:formatPoints(team.points),complete:team.complete,rows,players,week:data.scoring.week};
 }
@@ -75,20 +75,28 @@ export function fantasyMatchup(data,teamId,games=[],matchupId=null){
 // One table, two lineups: each of your starters faces the opponent's starter in
 // the same slot (the k-th RB against the k-th RB), the way a matchup is read.
 // Without an opponent the opponent columns are left empty (the table is "solo").
+// Phones show "J. Daniels"; team defenses and one-word names stay whole.
+const shortName=n=>{const words=String(n||'').trim().split(/\s+/);return words.length<2||/D\/ST$/i.test(n)?n:words[0][0]+'. '+words.slice(1).join(' ');};
 export function headToHead(yours,opponent){
- const mine=yours?.players||[],theirs=opponent?.players||[],used=new Set();
+ // Starters only; the bench is listed separately by benchList and never scores.
+ const mine=(yours?.players||[]).filter(p=>!p.bench),theirs=(opponent?.players||[]).filter(p=>!p.bench),used=new Set();
  const pairs=mine.map(p=>{const i=theirs.findIndex((q,k)=>!used.has(k)&&q.slot===p.slot);if(i>=0)used.add(i);return [p,i>=0?theirs[i]:null];});
  theirs.forEach((q,k)=>{if(!used.has(k))pairs.push([null,q]);});
  const number=v=>typeof v==='number'&&Number.isFinite(v);
- // Phones show "J. Daniels"; team defenses and one-word names stay whole.
- const short=n=>{const words=String(n||'').trim().split(/\s+/);return words.length<2||/D\/ST$/i.test(n)?n:words[0][0]+'. '+words.slice(1).join(' ');};
- const label=n=>`<span class="full">${escape(n)}</span><span class="short" aria-hidden="true">${escape(short(n))}</span>`;
+ const label=n=>`<span class="full">${escape(n)}</span><span class="short" aria-hidden="true">${escape(shortName(n))}</span>`;
  const name=(p,side)=>p?`<td class="h2h-name ${side}"><span class="h2h-player${p.active?' on':''}"><b>${label(p.name)}</b><small>${p.active?'<i class="player-live-dot" aria-hidden="true"></i>':''}${escape(p.team)} · ${escape(p.status)}</small></span></td>`:`<td class="h2h-name ${side} empty"><span class="h2h-player"><b>${opponent?'Empty':''}</b></span></td>`;
  const points=(p,other,side)=>{const v=p?.points,lead=number(v)&&number(other?.points)&&v>other.points;return `<td class="h2h-pts ${side}${lead?' lead':''}${number(v)&&v<0?' sb-negative':''}">${p?formatPoints(v):''}</td>`;};
  const slot=(a,b)=>`<td class="h2h-slot"><span>${escape(a?.slot||b?.slot||'')}</span></td>`;
  // Alone, the list reads slot, name, points.
  if(!opponent)return pairs.map(([a])=>`<tr>${slot(a)}${name(a,'mine')}${points(a,null,'mine')}</tr>`).join('');
  return pairs.map(([a,b])=>`<tr>${name(a,'mine')}${points(a,b,'mine')}${slot(a,b)}${points(b,a,'theirs')}${name(b,'theirs')}</tr>`).join('');
+}
+
+// Each side's bench (and IR) as one compact wrapped line, under the starters.
+// Bench points never count toward the matchup, so they are shown quietly.
+export function benchList(yours,opponent,{points=true}={}){
+ const side=(team,cls)=>{const list=(team?.players||[]).filter(p=>p.bench);return list.length?`<div class="mu-bench-side ${cls}"><span class="mu-label">${cls==='mine'?'Your bench':'Their bench'}</span><ul>${list.map(p=>`<li${p.slot==='IR'?' class="ir"':''} title="${escape(p.name+' · '+[p.team,p.status].filter(Boolean).join(' · ')+(p.slot==='IR'?' · injured reserve':''))}">${escape(shortName(p.name))}${points?` <b>${formatPoints(p.points)}</b>`:''}${p.slot==='IR'?' <i>IR</i>':''}</li>`).join('')}</ul></div>`:'';};
+ return side(yours,'mine')+(opponent?side(opponent,'theirs'):'');
 }
 
 // Score updates have no access to the player, director, roster or saved state.

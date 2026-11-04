@@ -3,7 +3,7 @@
 <a class="skip-link" href="#room">Skip to your channel</a>
 <header class="bar"><div class="bar-inner">
  <a href="/" class="brand" aria-label="Fantasy Stream home"><span class="brand-dot" aria-hidden="true"></span><span class="brand-name">Fantasy<b>Stream</b></span></a>
- <nav class="modes" aria-label="Viewing mode"><button aria-pressed="true"><span class="mode-dot" aria-hidden="true"></span>Live</button><a href="/?mode=replay" title="NFL replay library">Replay</a></nav>
+ <nav class="modes" aria-label="Viewing mode"><button aria-pressed="true"><span class="mode-dot" id="liveDot" aria-hidden="true"></span>Live</button><a href="/?mode=replay" title="NFL replay library">Replay</a></nav>
  <nav class="sport-nav" aria-label="Sport"><a href="/">NFL</a><a href="/sports.html?sport=nba" data-sport="nba">NBA</a><a href="/sports.html?sport=nhl" data-sport="nhl">NHL</a><a href="/sports.html?sport=mlb" data-sport="mlb">MLB</a></nav>
  <div class="bar-actions">
   <a class="header-score" id="headerScore" href="#scoreboardTitle" hidden aria-label="Your matchup"></a>
@@ -23,7 +23,7 @@
     <span class="day-pick"><span id="dayLabel" aria-hidden="true">Today</span><input type="date" id="gameDate" aria-label="Game date" title="Browse another day’s schedule"></span>
     <button id="nextDay" class="day-step" aria-label="Next day" title="Next day">›</button>
    </div>
-   <span class="sb-update"><span id="scheduleStatus" role="status">Getting today’s games…</span> <button id="today" class="link" hidden>Back to today</button><button id="refreshGames" class="link" aria-label="Refresh games" title="Refresh games">Refresh</button></span>
+   <button type="button" class="sb-refresh" id="refreshGames" title="Refresh games and your matchup"><span id="scheduleStatus" role="status">Getting today’s games…</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.5 8A6 6 0 1 0 16 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M16 3.5V8h-4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button><button id="today" class="link back-today" hidden>Back to today</button>
   </div>
   <div class="strip-scroller">
    <button class="strip-arrow prev" id="stripPrev" aria-label="Earlier games" tabindex="-1">‹</button>
@@ -65,75 +65,68 @@
   </div>
  </section>
 
- <aside class="rail" aria-label="Your matchup and bench">
-  <div class="rail-tabs" role="tablist" aria-label="Side panel">
-   <button id="matchupTab" role="tab" aria-selected="true" aria-controls="matchupPanel">Matchup</button>
-   <button id="benchTab" role="tab" aria-selected="false" aria-controls="benchPanel" tabindex="-1">Bench <span class="count" id="benchCount"></span></button>
-  </div>
-  <section id="matchupPanel" class="rail-panel" role="tabpanel" aria-labelledby="matchupTab">
+ <aside class="rail" aria-label="Your matchup">
+  <section id="matchupPanel" class="rail-panel" aria-labelledby="scoreboardTitle">
    <div class="score-center" id="scoreboard" data-connect="true">
-    <div class="mu-head">
-     <div><h2 id="scoreboardTitle" tabindex="-1">Your matchup</h2><p id="leagueMeta">Connect your ESPN league.</p></div>
-     <div class="mu-tools"><button id="retryFantasy" hidden>Retry</button><button id="refreshScoreboard" class="icon-button" aria-label="Refresh scores" title="Refresh scores"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.5 8A6 6 0 1 0 16 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M16 3.5V8h-4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button></div>
-    </div>
+    <h2 id="scoreboardTitle" class="sr-only" tabindex="-1">Your matchup</h2>
     <div class="mu-duel">
      <div class="mu-side mine"><span class="mu-label">You</span><strong id="fantasyTotal">—</strong><h3 id="fantasyTitle">Your team</h3></div>
-     <div class="mu-vs" aria-hidden="true">vs</div>
+     <div class="mu-vs"><span aria-hidden="true">vs</span><small id="leagueMeta"></small></div>
      <div class="mu-side theirs"><span class="mu-label">Opponent</span><strong id="opponentTotal">—</strong><h3 id="opponentTitle">Your opponent</h3></div>
     </div>
     <div class="mu-track" aria-hidden="true"><i id="matchupBar"></i></div>
-    <p class="mu-status"><b id="matchupStatus">Your team vs. your opponent</b><span class="mu-fine" id="fantasyStatus" role="status">League scoring, directly from ESPN.</span></p>
+    <p class="sr-only" id="matchupStatus">Your team vs. your opponent</p>
+    <div class="mu-alert-row"><p class="mu-alert" id="fantasyStatus" role="status" hidden>League scoring, directly from ESPN.</p><button id="retryFantasy" class="link" hidden>Retry</button></div>
     <label id="matchupPicker" class="mu-picker" hidden>Matchup<select id="matchupSelect" aria-label="Choose matchup"></select></label>
     <div class="mu-connect"><p>Connect your ESPN league once. Your lineup, your opponent and every point update here while you watch.</p><button id="connectFromBoard" class="primary">Connect ESPN</button></div>
     <table class="h2h" id="fantasyTable" hidden><caption class="sr-only">Starters slot by slot</caption><thead><tr><th scope="col" class="h2h-name mine">You</th><th scope="col" class="h2h-pts mine">Pts</th><th scope="col" class="h2h-slot"><span class="sr-only">Slot</span></th><th scope="col" class="h2h-pts theirs">Pts</th><th scope="col" class="h2h-name theirs">Opp</th></tr></thead><tbody id="fantasyPlayers"></tbody></table>
-    <p class="mu-fine mu-note" id="fantasyNote" hidden></p>
+    <div class="mu-bench" id="fantasyBench"></div>
     <div class="mu-placeholder"><b id="placeholderTitle">Choose a team to follow</b><span id="placeholderText">Pick your franchise and its lineup appears here.</span><button id="chooseTeam" class="ghost">Choose your team</button></div>
    </div>
   </section>
-  <section id="benchPanel" class="rail-panel" role="tabpanel" aria-labelledby="benchTab" hidden><h2 class="sr-only">Your bench</h2><p class="panel-note" id="benchNote"></p><ul class="bench" id="bench"></ul></section>
  </aside>
 </main>
 
 <dialog id="streamsDetails" class="streams-dialog" aria-labelledby="streamsTitle"><div class="dialog-shell">
- <div class="dialog-head"><div><h2 id="streamsTitle" tabindex="-1">Streams</h2><p class="dialog-sub" id="streamSummary">Add a stream for any game</p></div><button type="button" id="closeStreams" class="icon-button" aria-label="Close streams">✕</button></div>
+ <div class="dialog-head"><div><h2 id="streamsTitle" tabindex="-1">Streams</h2><p class="dialog-sub" id="streamSummary">Add a stream for any game</p></div><button type="button" id="refreshStreams" class="icon-button" aria-label="Search for streams again" title="Search for streams again"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.5 8A6 6 0 1 0 16 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M16 3.5V8h-4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button><button type="button" id="closeStreams" class="icon-button" aria-label="Close streams">✕</button></div>
  <section class="dialog-body">
-  <p class="lead">Games find a stream automatically. Add your own link to use it instead. Links are saved for each game in this browser.</p>
-  <p id="discoveryStatus" class="discovery-status" role="status"></p>
+  <p id="discoveryStatus" class="sr-only" role="status"></p>
   <div class="stream-group" id="savedStreams"></div>
-  <details class="plain stream-help"><summary>A stream won’t play?</summary><p>Fantasy Stream doesn’t supply broadcasts; it plays links you can already watch. Direct video and .m3u8 links work best. Some sites block playing inside another page: use Open stream under the player, or choose another source for that game. Website players may need one Play click after a game change.</p></details>
+  <details class="plain stream-help"><summary>A stream won’t play?</summary><p>Fantasy Stream doesn’t supply broadcasts; it plays links you can already watch. Direct video and .m3u8 links work best. If a site blocks playing here, use Open stream under the player or pick another source.</p></details>
  </section>
- <div class="dialog-actions"><button type="button" id="refreshStreams" class="ghost">Find streams again</button><button type="button" id="doneStreams" class="primary">Done</button></div>
+ <div class="dialog-actions"><button type="button" id="doneStreams" class="primary">Done</button></div>
 </div></dialog>
 
 <dialog id="streamDialog" aria-labelledby="streamTitle"><form id="streamForm">
- <div class="dialog-head"><div><h2 id="streamTitle">Stream for this game</h2><p class="dialog-sub">Your link plays first. Automatic links stay available.</p></div><button type="button" id="closeStream" class="icon-button" aria-label="Close stream setup">✕</button></div>
+ <div class="dialog-head"><div><h2 id="streamTitle">Stream for this game</h2></div><button type="button" id="closeStream" class="icon-button" aria-label="Close stream setup">✕</button></div>
  <section class="dialog-body">
   <label>Game<select id="streamGame" required></select></label>
   <div class="stream-source-options" id="streamSourceOptions"></div>
-  <label>Stream link<input id="streamURL" type="text" placeholder="Player URL or iframe embed code" autocomplete="off" spellcheck="false"></label>
-  <label>Backup link <span class="muted">Optional</span><input id="backupURL" type="text" placeholder="Player URL or iframe embed code" autocomplete="off" spellcheck="false"></label>
-  <p class="muted small">We try to pull the video or player out of a page before showing the whole page.</p>
+  <label>Your link <span class="muted">optional, plays first</span><input id="streamURL" type="text" placeholder="Player URL, iframe code or .m3u8" autocomplete="off" spellcheck="false"></label>
+  <label>Backup link <span class="muted">optional</span><input id="backupURL" type="text" placeholder="Player URL, iframe code or .m3u8" autocomplete="off" spellcheck="false"></label>
   <p id="streamError" class="error" role="alert"></p>
  </section>
- <div class="dialog-actions"><button type="submit" class="primary">Save stream</button></div>
+ <div class="dialog-actions"><button type="submit" class="primary">Save</button></div>
 </form></dialog>
 
 <dialog class="team-dialog" id="leagueDialog" aria-labelledby="leagueTitle"><form id="leagueForm">
- <div class="dialog-head"><div><h2 id="leagueTitle">Fantasy team</h2><p class="dialog-sub" id="leagueState">Not connected</p></div><button type="button" id="closeLeague" class="icon-button" aria-label="Close fantasy team">✕</button></div>
+ <div class="dialog-head"><div><h2 id="leagueTitle">Fantasy team</h2></div><button type="button" id="closeLeague" class="icon-button" aria-label="Close fantasy team">✕</button></div>
  <section class="dialog-body">
-  <div class="team-picker"><label id="scoreTeamPicker" for="scoreTeam">Your team</label><select id="scoreTeam" aria-label="Your fantasy team" disabled><option>Connect ESPN to choose a team</option></select></div>
-  <details id="leagueImport" class="connect-card">
-   <summary><span class="connect-badge" aria-hidden="true">ESPN</span><span class="connect-text"><b>ESPN league</b><small id="leagueSummary">Connect to show your lineup and matchup</small></span><span class="connect-action" id="leagueAction">Connect</span></summary>
-   <div class="connect-form">
-    <label for="leagueId">League ID or league link</label>
-    <div class="inline"><input id="leagueId" autocomplete="off" spellcheck="false" placeholder="12345678, or paste your league’s web address"><input id="leagueSeason" class="season" type="number" min="2018" max="2035" aria-label="Season" title="Season"></div>
-    <p class="muted small" id="leagueHelp">It’s the number after <code>leagueId=</code> in your league’s web address. This never changes your ESPN lineup.</p>
-    <details id="privateLeague" class="plain"><summary>Private league?</summary>
-     <p class="muted small">ESPN only shows private leagues to a signed-in browser. On espn.com, open developer tools → Application → Cookies and copy these two values. They stay in this browser and are sent only to ESPN.</p>
-     <div class="cookie-grid"><label>SWID<input id="swid" type="password" autocomplete="off" spellcheck="false" placeholder="{XXXXXXXX-…}"></label><label>espn_s2<input id="s2" type="password" autocomplete="off" spellcheck="false" placeholder="AEB…"></label></div>
-    </details>
-   </div>
-  </details>
+  <div class="team-picker"><label id="scoreTeamPicker" for="scoreTeam">Your team</label><select id="scoreTeam" aria-label="Your fantasy team" disabled><option>Connect ESPN to choose a team</option></select><p class="muted small" id="leagueSummary"></p></div>
+  <div class="team-rows">
+   <details id="leagueImport" class="team-row">
+    <summary><span class="connect-badge" aria-hidden="true">ESPN</span><span class="connect-text"><b>ESPN league</b><small id="leagueState">Not connected</small></span><span class="connect-action" id="leagueAction">Connect</span></summary>
+    <div class="connect-form">
+     <label for="leagueId">League ID or league link</label>
+     <div class="inline"><input id="leagueId" autocomplete="off" spellcheck="false" placeholder="12345678, or paste your league’s web address"><input id="leagueSeason" class="season" type="number" min="2018" max="2035" aria-label="Season" title="Season"></div>
+     <p class="muted small" id="leagueHelp">It’s the number after <code>leagueId=</code> in your league’s web address. This never changes your ESPN lineup.</p>
+     <details id="privateLeague" class="plain"><summary>Private league?</summary>
+      <p class="muted small">ESPN only shows private leagues to a signed-in browser. On espn.com, open developer tools → Application → Cookies and copy these two values. They stay in this browser and are sent only to ESPN.</p>
+      <div class="cookie-grid"><label>SWID<input id="swid" type="password" autocomplete="off" spellcheck="false" placeholder="{XXXXXXXX-…}"></label><label>espn_s2<input id="s2" type="password" autocomplete="off" spellcheck="false" placeholder="AEB…"></label></div>
+     </details>
+    </div>
+   </details>
+  </div>
   <p id="leagueError" class="error" role="alert"></p>
  </section>
  <div class="dialog-actions"><button type="submit" id="importLeague" class="primary">Connect</button></div>

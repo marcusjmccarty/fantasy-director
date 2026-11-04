@@ -5,14 +5,14 @@ import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 import * as data from '../web/sports-data.js';
 import {safeVideo,streamType,teamColor,teamLogo} from '../web/roster.js';
-import {headToHead} from '../web/scoreboard.js';
+import {headToHead,benchList} from '../web/scoreboard.js';
 const html=readFileSync(new URL('../web/sports.html',import.meta.url),'utf8');
 const source=readFileSync(new URL('../web/sports-app.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').split("for(const a of document.querySelectorAll('[data-sport]'))")[0];
 class Element{constructor(){this.dataset={};this.value='';this.textContent='';this.innerHTML='';const classes=new Set();this.classList={add:n=>classes.add(n),remove:n=>classes.delete(n),contains:n=>classes.has(n),toggle:(n,v)=>v?classes.add(n):classes.delete(n)};}setAttribute(n,v){this[n]=v;}showModal(){this.open=true;}close(){this.open=false;}}
 class Pool{constructor(host,options){this.options=options;this.slots=new Map();this.opened=0;this.visible=null;this.muted=false;}open(id,source){this.opened++;const player={kind:source.type==='embed/page'?'embed':'native',element:new Element(),wantPlay:false,reloads:0,reload(){this.reloads++;},checkHealth(options){this.health=options;}};this.slots.set(id,{url:source.url,source,player});}get(id){return this.slots.get(id);}get current(){return this.get(this.visible)?.player;}setMuted(v){this.muted=v;}setRunning(on){this.running=on;for(const slot of this.slots.values())slot.player.wantPlay=on;}show(id){this.visible=id;this.current.wantPlay=this.running;}close(id){this.slots.delete(id);if(this.visible===id)this.visible=null;}destroy(){this.slots.clear();this.visible=null;}retryAudio(){}}
 function app(fetcher,{sport='nba',stored={}}={}){const elements=new Map([...html.matchAll(/id="([^"]+)"/g)].map(m=>[m[1],new Element()])),stage=new Element(),events=new Map(),storage=new Map(Object.entries(stored)),timers=new Map();let timer=0;
  const document={getElementById:id=>{assert.ok(elements.has(id),id);return elements.get(id);},querySelector:()=>stage,addEventListener:(n,fn)=>events.set(n,fn),visibilityState:'visible'};
- const ctx={StreamFinder,...data,esc:data.escapeHTML,safeVideo,streamType,teamColor,teamLogo,headToHead,PlayerPool:Pool,document,location:{search:'?sport='+sport},URLSearchParams,AbortController,AbortSignal,Response,Date,console,fetch:fetcher,window:{addEventListener(){}},navigator:{onLine:true},localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},setTimeout:(fn,ms)=>{timers.set(++timer,{fn,ms});return timer;},clearTimeout:id=>timers.delete(id)};
+ const ctx={StreamFinder,...data,esc:data.escapeHTML,safeVideo,streamType,teamColor,teamLogo,headToHead,benchList,PlayerPool:Pool,document,location:{search:'?sport='+sport},URLSearchParams,AbortController,AbortSignal,Response,Date,console,fetch:fetcher,window:{addEventListener(){}},navigator:{onLine:true},localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},setTimeout:(fn,ms)=>{timers.set(++timer,{fn,ms});return timer;},clearTimeout:id=>timers.delete(id)};
  vm.createContext(ctx);vm.runInContext(source+'\nglobalThis.app={S,pool,streamFinder,refreshStreamLinks,loadGames,loadLeague,renderGuide,renderFantasy,renderTransport,selectGame,setPlaying,direct,changeDate,rotateSource,tick,get saved(){return saved;}};',ctx);return {...ctx.app,el:id=>elements.get(id),stage,document,events,storage,timers};}
 const event=(id='1')=>({id,date:'2026-11-01T22:00Z',shortName:'ATL @ BOS',competitions:[{status:{type:{state:'in',name:'STATUS_IN_PROGRESS',shortDetail:'3rd 2:00'}},competitors:[{homeAway:'away',team:{id:'1',abbreviation:'ATL',displayName:'Atlanta'},score:'80'},{homeAway:'home',team:{id:'2',abbreviation:'BOS',displayName:'Boston'},score:'81'}]}]});
 const games=(sport='nba',date=data.localDate())=>({sport,date,season:2027,events:[event()]});
@@ -46,10 +46,10 @@ test('every sport renders tiles with team colors, logos, a stream chip and the d
   assert.match(html,/--away:#e03a3e/);assert.match(html,new RegExp('teamlogos/'+sport+'/500/atl.png'));assert.match(html,/>Hawks</);assert.match(html,/data-add-stream="1"/);assert.match(html,/TNT/);
   assert.equal(a.el('dayLabel').textContent,'Today');assert.equal(a.el('today').hidden,true);a.changeDate('2026-01-02');assert.notEqual(a.el('dayLabel').textContent,'Today');assert.equal(a.el('today').hidden,false);}
 });
-test('the matchup rail fills from ESPN, keeps the bench apart and labels the header score',async()=>{
+test('the matchup rail fills from ESPN, lists the bench under the starters and labels the header score',async()=>{
  const data=league();data.teams[0].players.push({id:'3',name:'Bench guy',team:'NYK',teamId:'18',active:false,slot:'BE',position:'C',points:4});
  const a=app(async url=>Response.json(url.startsWith('/api/sports?')?games():data));await a.loadGames();a.renderFantasy();assert.equal(a.el('scoreboard').dataset.connect,'true');
- await a.loadLeague(input);assert.equal(a.el('scoreboard').dataset.connect,'false');assert.equal(a.el('scoreboard').dataset.state,'behind');assert.doesNotMatch(a.el('fantasyPlayers').innerHTML,/Bench guy/);assert.match(a.el('bench').innerHTML,/Bench guy/);assert.equal(a.el('benchCount').textContent,'1');
+ await a.loadLeague(input);assert.equal(a.el('scoreboard').dataset.connect,'false');assert.equal(a.el('scoreboard').dataset.state,'behind');assert.match(a.el('fantasyPlayers').innerHTML,/Starter one/);assert.doesNotMatch(a.el('fantasyPlayers').innerHTML,/Bench guy/);assert.match(a.el('fantasyBench').innerHTML,/B\. guy <b>4\.00<\/b>/);assert.equal(a.el('fantasyStatus').hidden,true);
  assert.equal(a.el('headerScore').hidden,false);assert.match(a.el('headerScore').innerHTML,/<b>50<\/b>.*<b>60<\/b>/);assert.match(a.el('fantasyPlayers').innerHTML,/player-live-dot/);
 });
 test('the league form accepts a pasted league link and Done closes without reloading',async()=>{
@@ -57,4 +57,14 @@ test('the league form accepts a pasted league link and Done closes without reloa
  a.el('leagueId').value='https://fantasy.espn.com/basketball/league?leagueId=123&seasonId=2027';a.el('leagueSeason').value='2027';await a.el('leagueForm').onsubmit({preventDefault(){}});assert.equal(a.saved.leagueId,'123');assert.equal(calls,1);
  a.el('leagueDialog').showModal();await a.el('leagueForm').onsubmit({preventDefault(){}});assert.equal(calls,1);assert.equal(a.el('leagueDialog').open,false);
  a.el('leagueId').value='not a league';await a.el('leagueForm').onsubmit({preventDefault(){}});assert.match(a.el('leagueError').textContent,/league ID/);
+});
+
+test('the Live dot is red only while a game in this league is in progress',async()=>{
+ const a=app(async()=>Response.json(games()));await a.loadGames();assert.equal(a.el('liveDot').classList.contains('on'),true);
+ const final=games();final.events[0].competitions[0].status.type={state:'post',name:'STATUS_FINAL',shortDetail:'Final'};const b=app(async()=>Response.json(final));await b.loadGames();assert.equal(b.el('liveDot').classList.contains('on'),false);
+});
+
+test('browsing another day or a failed feed cannot claim no games are live',async()=>{
+ let fail=false;const a=app(async()=>fail?Response.json({error:'x'},{status:502}):Response.json(games()));await a.loadGames();assert.equal(a.el('liveDot').classList.contains('on'),true);
+ fail=true;await a.loadGames();assert.equal(a.el('liveDot').classList.contains('on'),true);
 });

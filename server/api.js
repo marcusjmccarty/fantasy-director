@@ -38,21 +38,22 @@ export function fantasyScores(raw){
  const scheduled=period?(raw.schedule||[]).filter(m=>Number(m.matchupPeriodId)===Number(period)):[];
  const side=s=>s?.teamId!=null?{teamId:String(s.teamId),points:points(s.totalPointsLive)??points(s.totalPoints)}:null;
  const matchups=scheduled.map(m=>({id:String(m.id),home:side(m.home),away:side(m.away)}));
- const slots={0:'QB',2:'RB',4:'WR',6:'TE',7:'OP',16:'D/ST',17:'K',23:'FLEX'};
- const order=[0,2,4,6,23,7,16,17];
+ const slots={0:'QB',2:'RB',4:'WR',6:'TE',7:'OP',16:'D/ST',17:'K',20:'BE',21:'IR',23:'FLEX'};
+ const order=[0,2,4,6,23,7,16,17,20,21];
  return {week,matchupWeeks:period?periods[period]:[],matchups,teams:(raw.teams||[]).map(t=>{
   const matchupSide=scheduled.flatMap(m=>[m.home,m.away]).find(s=>String(s?.teamId)===String(t.id));
-  const entries=(matchupSide?.rosterForCurrentScoringPeriod?.entries??t.roster?.entries??[]).filter(e=>![20,21].includes(Number(e.lineupSlotId))).slice().sort((a,b)=>(order.indexOf(Number(a.lineupSlotId))<0?99:order.indexOf(Number(a.lineupSlotId)))-(order.indexOf(Number(b.lineupSlotId))<0?99:order.indexOf(Number(b.lineupSlotId))));
+  const entries=(matchupSide?.rosterForCurrentScoringPeriod?.entries??t.roster?.entries??[]).slice().sort((a,b)=>(order.indexOf(Number(a.lineupSlotId))<0?99:order.indexOf(Number(a.lineupSlotId)))-(order.indexOf(Number(b.lineupSlotId))<0?99:order.indexOf(Number(b.lineupSlotId))));
   const players=entries.map(e=>{
    const pool=e.playerPoolEntry||{},p=pool.player||{};
    const actual=week>0?(p.stats||[]).find(s=>s.scoringPeriodId===week&&s.statSourceId===0&&s.statSplitTypeId===1):null;
    // appliedStatTotal on the pool entry may span several weeks, even when
    // scoringPeriodId is requested. Only the dated actual stat is authoritative.
    const value=points(actual?.appliedTotal);
-   return {id:String(p.id||''),name:p.fullName||'Empty slot',team:TEAM[p.proTeamId]||'',position:POS[p.defaultPositionId]||'FLEX',slot:slots[e.lineupSlotId]||POS[p.defaultPositionId]||'FLEX',points:value};
+   return {id:String(p.id||''),name:p.fullName||'Empty slot',team:TEAM[p.proTeamId]||'',position:POS[p.defaultPositionId]||'FLEX',slot:slots[e.lineupSlotId]||POS[p.defaultPositionId]||'FLEX',points:value,...([20,21].includes(Number(e.lineupSlotId))?{bench:true}:{})};
   });
-  const complete=players.length>0&&players.every(p=>p.points!==null);
-  return {id:String(t.id),players,complete,points:complete?Math.round(players.reduce((sum,p)=>sum+p.points,0)*100)/100:null};
+  // Bench and IR are listed for reference only; they never count.
+  const starters=players.filter(p=>!p.bench),complete=starters.length>0&&starters.every(p=>p.points!==null);
+  return {id:String(t.id),players,complete,points:complete?Math.round(starters.reduce((sum,p)=>sum+p.points,0)*100)/100:null};
  })};
 }
 export async function leagueAPI(request,env={},fetcher=fetch){
