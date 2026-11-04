@@ -45,7 +45,9 @@ export function fantasyBoard(data,teamId,games=[]){
  const players=team.players.map(p=>{
   const game=games.find(g=>g.teams.some(t=>t.abbr===alias(p.team)));
   const involved=game&&involvement(game,[p])[0];
-  const status=involved?(involved.role==='defense'?'Defending':involved.role==='kicker'?'In FG range':'On offense'):game?(game.state==='pre'?kickoff(game):game.state==='post'?'Final':game.detail||'In progress'):'No game';
+  const side=game?game.teams.findIndex(t=>t.abbr===alias(p.team)):-1,other=side>=0?game.teams[1-side]:null;
+  const line=!game?'No game':game.state==='pre'?kickoff(game):`${side===0?'@':'vs'} ${other?.abbr||''} ${game.score?.[side]??0}-${game.score?.[1-side]??0} · ${game.state==='post'?'Final':game.detail||'In progress'}`;
+  const status=involved?(involved.role==='defense'?'Defending':involved.role==='kicker'?'In FG range':'On offense')+' · '+line:line;
   return {slot:p.slot||p.position,name:p.name,team:p.team,status,active:!!involved&&!p.bench,points:p.points,...(p.bench?{bench:true}:{})};
  });
  return {points:formatPoints(team.points),complete:team.complete,rows,players,week:data.scoring.week};

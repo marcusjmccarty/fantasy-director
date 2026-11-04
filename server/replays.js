@@ -2,7 +2,8 @@
 // the replay sites the owner chose, and the embedded players their game pages
 // carry. Public pages only, on an allowlist; no video is proxied or decoded.
 import {publicPlayerURL,decodeEmbedHTML} from '../web/stream-html.js';
-const REPLAY_SITES={nba:{host:'basketballreplays.net',home:'https://basketballreplays.net/'},mlb:{host:'mlblive.net',home:'https://mlblive.net/'}};
+const REPLAY_SITES={nba:{host:'basketballreplays.net',home:'https://basketballreplays.net/',pages:['https://basketballreplays.net/','https://basketballreplays.net/?page2','https://basketballreplays.net/?page3']},mlb:{host:'mlblive.net',home:'https://mlblive.net/',pages:['https://mlblive.net/','https://mlblive.net/?page2','https://mlblive.net/?page3']}};
+const NFL_REPLAY_HOST='nfl-video.com',NFL_REPLAY_PAGES=['https://nfl-video.com/2026','https://nfl-video.com/2026?page2','https://nfl-video.com/2026?page3','https://nfl-video.com/2026?page4','https://nfl-video.com/2026?page5','https://nfl-video.com/2026?page6'];
 const MONTHS=['january','february','march','april','may','june','july','august','september','october','november','december'];
 const replayCache=new Map(),replayPending=new Map();
 const replayJSON=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
@@ -40,7 +41,7 @@ export function parseReplayListing(html,sport){
   const context=text.split(' - ').slice(1,-1).filter(part=>!/full game replay/i.test(part)).join(' · ');
   seen.add(url);games.push({id:slug.slice(0,120),sport,away:teams[1].trim().slice(0,60),home:teams[2].trim().slice(0,60),title:text.slice(0,160),context:context.slice(0,80),date:date.toISOString(),page:url});
  }
- return games.sort((a,b)=>Date.parse(b.date)-Date.parse(a.date)||a.id.localeCompare(b.id)).slice(0,60);
+ return games.sort((a,b)=>Date.parse(b.date)-Date.parse(a.date)||a.id.localeCompare(b.id)).slice(0,160);
 }
 // The players a game page embeds: ok.ru first (it can be driven), then any other player frame.
 export function parseReplayPlayers(html,page){
@@ -60,7 +61,7 @@ export async function replayCatalogAPI(request,fetcher=fetch){
  const sport=new URL(request.url).searchParams.get('sport');
  if(sport==='nhl')return replayJSON({sport,games:[],note:'No replay source for the NHL yet.'});
  const site=REPLAY_SITES[sport];if(!site)return replayJSON({error:'Choose a supported sport.'},400);
- try{const games=await cachedReplay('replays:'+sport,fetcher,900000,async()=>parseReplayListing(await replayText(site.home,site.host,fetcher),sport));return replayJSON({sport,games,fetchedAt:Date.now()});}
+ try{const games=await cachedReplay('replays:'+sport,fetcher,900000,async()=>{const pages=await Promise.allSettled(site.pages.map(url=>replayText(url,site.host,fetcher)));const html=pages.filter(p=>p.status==='fulfilled').map(p=>p.value).join('\n');if(!html)throw new Error(pages[0].reason?.message||'unavailable');return parseReplayListing(html,sport);});return replayJSON({sport,games,fetchedAt:Date.now()});}
  catch(error){return replayJSON({sport,games:[],error:'Replays are unavailable right now. '+(error.message||'')},502);}
 }
 export async function replayResolveAPI(request,fetcher=fetch){
@@ -69,4 +70,43 @@ export async function replayResolveAPI(request,fetcher=fetch){
  try{page=new URL(input);if(input.length>2048||page.protocol!=='https:'||!Object.values(REPLAY_SITES).some(s=>s.host===page.hostname))throw new Error();}catch{return replayJSON({error:'Use a replay page from a supported site.'},400);}
  try{const sources=await cachedReplay('replay-page:'+page.href,fetcher,1800000,async()=>parseReplayPlayers(await replayText(page.href,page.hostname,fetcher),page.href));if(!sources.length)return replayJSON({page:page.href,sources:[],error:'That page has no player we can embed.'},404);return replayJSON({page:page.href,sources,resolvedAt:Date.now()});}
  catch(error){return replayJSON({page:page.href,sources:[],error:'Could not read that replay page. '+(error.message||'')},502);}
+}
+
+// NFL full-game replays for one week: the listing names the game pages, each
+// game page links a Watch page, and that page embeds the ok.ru player.
+export function parseNFLReplayListing(html,week){
+ const out=[],seen=new Set(),want=String(week).padStart(2,'0');
+ for(const m of html.matchAll(/href="(?:https:\/\/nfl-video\.com)?(\/([a-z0-9-]+)-vs-([a-z0-9-]+)-full-game-replay-nfl-week-(\d{2})-[a-z0-9-]+)"/gi)){
+  const [,path,away,home,w]=m;if(w!==want||seen.has(path))continue;seen.add(path);
+  out.push({slug:path.slice(1),away,home,page:'https://nfl-video.com'+path});
+ }
+ return out;
+}
+export function parseWatchLinks(html){
+ const block=/id="video-player"[\s\S]{0,8000}/.exec(html)?.[0]||'';
+ const links=[];for(const m of block.matchAll(/<a\b[^>]*href="(https:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)){const text=m[2].replace(/<[^>]+>/g,' ').trim();if(/watch/i.test(text))links.push(decodeEmbedHTML(m[1]));}
+ return links.filter(u=>{try{const h=new URL(u).hostname;return h!==NFL_REPLAY_HOST&&!/\.(local|test|internal)$/.test(h);}catch{return false;}}).slice(0,3);
+}
+export const okEmbedIn=html=>{const m=/ok\.ru\/videoembed\/(\d{6,20})/.exec(html||'');return m?`https://ok.ru/videoembed/${m[1]}`:'';};
+export async function nflReplayWeekAPI(request,fetcher=fetch){
+ if(request.method!=='GET')return replayJSON({error:'Use GET.'},405);
+ const week=Number(new URL(request.url).searchParams.get('week'));
+ if(!Number.isInteger(week)||week<1||week>18)return replayJSON({error:'Choose a week.'},400);
+ try{
+  const games=await cachedReplay('nfl-week:'+week,fetcher,43200000,async()=>{
+   let found=[];
+   // Later listing pages are a bonus: one that fails ends the walk with what the earlier pages gave.
+   for(const url of NFL_REPLAY_PAGES){let html;try{html=await replayText(url,NFL_REPLAY_HOST,fetcher);}catch(error){if(url===NFL_REPLAY_PAGES[0])throw error;break;}found=found.concat(parseNFLReplayListing(html,week));const weeks=[...html.matchAll(/nfl-week-(\d{2})-/g)].map(m=>Number(m[1]));if(weeks.length&&Math.min(...weeks)<week)break;}
+   const unique=[...new Map(found.map(g=>[g.slug,g])).values()].slice(0,18),out=[];
+   for(let i=0;i<unique.length;i+=4)await Promise.all(unique.slice(i,i+4).map(async g=>{
+    let embed='';
+    try{const page=await replayText(g.page,NFL_REPLAY_HOST,fetcher);embed=okEmbedIn(page);
+     if(!embed)for(const link of parseWatchLinks(page)){try{const u=new URL(link);const r=await fetcher(u.href,{redirect:'manual',signal:AbortSignal.timeout(10000),headers:{Accept:'text/html'}});if(!r.ok)continue;const text=(await r.text()).slice(0,400000);embed=okEmbedIn(text);if(embed)break;}catch{}}
+    }catch{}
+    out.push({...g,embed});
+   }));
+   return out;
+  });
+  return replayJSON({week,games,fetchedAt:Date.now()});
+ }catch(error){return replayJSON({week,games:[],error:'The replay listing is unavailable right now. '+(error.message||'')},502);}
 }

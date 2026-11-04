@@ -149,9 +149,10 @@ test('headToHead alone reads slot, name, points; escapes names; marks players on
 });
 test('fantasyBoard exposes structured players with plain-language status for the matchup table',()=>{
  const data={scoring:{week:8,teams:[{id:'1',points:12,players:[{slot:'RB',name:'Jonathan Taylor',team:'IND',position:'RB',points:12}]}]}};
- const live={id:'g',state:'in',phase:'live',possession:0,down:1,teams:[{abbr:'IND'},{abbr:'MIN'}]};
+ const live={id:'g',state:'in',phase:'live',possession:0,down:1,detail:'Q2 4:10',score:[10,7],teams:[{abbr:'IND'},{abbr:'MIN'}]};
  const board=fantasyBoard(data,'1',[live]);
- assert.deepEqual(board.players,[{slot:'RB',name:'Jonathan Taylor',team:'IND',status:'On offense',active:true,points:12}]);
+ assert.deepEqual(board.players,[{slot:'RB',name:'Jonathan Taylor',team:'IND',status:'On offense · @ MIN 10-7 · Q2 4:10',active:true,points:12}]);
+ assert.equal(fantasyBoard(data,'1',[{...live,state:'post',possession:-1,detail:'Final'}]).players[0].status,'@ MIN 10-7 · Final');
  assert.equal(fantasyBoard(data,'1',[]).players[0].status,'No game');
 });
 

@@ -43,7 +43,7 @@ const lineupSnapshot=()=>Object.fromEntries(['roster','teamName','teamId','leagu
 function persist(){try{localStorage.setItem(STORE,JSON.stringify(S.mode==='replay'&&S.liveLineup?{...saved,...S.liveLineup}:saved));S.storageError=false;}catch{S.storageError=true;}}
 
 // ---------- state ----------
-const S={scope:'game',center:null,range:null,mode:'live',archive:null,archives:new Map(),archiveKey:'week7',latestArchive:{status:'idle',error:''},week7Clips:[],clips:[],liveClips:[],day:0,games:[],at:Date.now()/1000,lastAt:null,
+const S={scope:'game',center:null,range:null,mode:'live',archive:null,archives:new Map(),archiveKey:'w7',weeks:{season:0,latest:0,current:0,loading:0,failed:null},pastWeeks:[],pastLoading:false,week7Clips:[],clips:[],liveClips:[],day:0,games:[],at:Date.now()/1000,lastAt:null,
  program:{kind:'idle'},pending:null,pinned:null,selection:null,highlight:null,decision:null,playing:false,started:false,
  fullscreenWanted:false,fullscreenRequest:0,
  streamChoices:new Map(),deadStreams:new Map(),streamRotations:new Map(),
@@ -646,7 +646,7 @@ function nextKickoff(){
 }
 // The game card says where its picture comes from, and is the shortcut to change it.
 function streamChip(g){
- if(S.mode==='replay')return S.archiveKey==='latest'&&!archiveGame(g.id)?.embed?`<button type="button" class="g-stream none" data-add-stream="${esc(g.id)}" title="Add the replay video for ${esc(g.name)}">+ Replay video</button>`:'';
+ if(S.mode==='replay')return !S.archive?.data.calibrated&&!archiveGame(g.id)?.embed?`<button type="button" class="g-stream none" data-add-stream="${esc(g.id)}" title="Add the replay video for ${esc(g.name)}">+ Replay video</button>`:'';
  if(g.state==='post')return '';
  const key=gameKey(g),urls=streamURLs(g);
  if(!urls.length)return `<button type="button" class="g-stream none" data-add-stream="${esc(g.id)}" title="Add a stream for ${esc(g.name)}">+ Stream</button>`;
@@ -686,7 +686,10 @@ function renderRail(){
   const cta=watching?'On screen':S.pending?.id===g.id?'Opening…':blocked.has(g.id)?tag[0]==='BREAK'?'On break':'Unavailable':g.state==='post'&&!selectable?'Final':selectable?(picture(g.id)==='data'?'Tracker':'Watch'):'Later';
   return `<li class="tile${watching?' watching':''}${S.pinned===g.id?' pinned':''}${selectable?'':' off'}${ours(g)?' mine':''}" style="--away:${teamColor(g.teams[0])};--home:${teamColor(g.teams[1])}"><button class="game" data-game="${esc(g.id)}" aria-pressed="${S.pinned===g.id}" aria-label="${esc(g.name+'. '+action)}" ${selectable?'':'disabled'}><span class="g-status"><span class="tag ${tag[1]}">${tag[0]}</span><span class="g-when">${esc(g.detail||'')}</span></span><span class="g-matchup">${rows}</span>${drive}</button><div class="g-footer"><span class="g-names">${names||'<span>Other game</span>'}</span>${streamChip(g)}<span class="g-cta">${cta}</span></div></li>`;
  }).join('');
- put('games',items||(S.mode==='live'&&!S.live.games.length?'<li class="empty">Loading the NFL schedule…</li>':'<li class="empty">None of your starters play in this window.</li>'));
+ const past=S.mode==='live'?S.pastWeeks.map(w=>`<li class="week-label" aria-hidden="true">Week ${w.week}</li>`+w.games.map(g=>pastTile(g,w.week)).join('')).join(''):'';
+ const thisWeek=past&&items&&S.weeks.current?`<li class="week-label" aria-hidden="true">Week ${S.weeks.current}</li>`:'';
+ put('games',past+thisWeek+(items||(S.mode==='live'&&!S.live.games.length?'<li class="empty">Loading the NFL schedule…</li>':'<li class="empty">None of your starters play in this window.</li>')));
+ if(past&&items&&!S.stripScrolled){const first=$('games').querySelector?.('.tile:not(.past)');if(first?.offsetLeft!==undefined){$('games').scrollLeft=Math.max(0,first.offsetLeft-48);S.stripScrolled=true;}}
  const liveNow=S.mode==='live'?S.live.games.filter(g=>g.state==='in').length:0,known=S.mode==='live'&&S.live.fetched&&!S.live.error;$('liveDot').classList.toggle('on',liveNow>0);$('liveMode').title=liveNow?`${liveNow} NFL game${liveNow===1?'':'s'} live now`:known?'No NFL games live right now':S.mode==='replay'?'Switch to live games':S.live.error?'Live game updates unavailable':'Checking for live NFL games…';
  $('gamesNote').textContent=S.pinned?'Your choice':`${listed.filter(g=>g.state==='in').length} in play`;
  // Keep the game on screen in view in the strip.
@@ -821,7 +824,9 @@ $('timeline').oninput=e=>{
 $('timeline').onchange=e=>{S.scrubbing=false;$('scrubTip').hidden=true;seekTo(Number(e.target.value));};
 $('timeline').onblur=()=>{S.scrubbing=false;$('scrubTip').hidden=true;};
 $('daySelect').onchange=e=>setDay(Number(e.target.value));
-$('weekSelect').onchange=e=>switchArchive(e.target.value);
+// The Options popover closes on a click anywhere else.
+document.addEventListener('pointerdown',e=>{const d=document.querySelector('.replay-settings');if(d?.open&&!e.target?.closest?.('.replay-settings'))d.open=false;});
+$('weekSelect').onchange=e=>{const week=Number(String(e.target.value).replace(/^w/,''));if(week)void selectWeek(week);};
 $('speed').onchange=e=>{clock.tick(performance.now());clock.rate=Number(e.target.value);};
 $('muteButton').onclick=()=>{saved.muted=!saved.muted;S.audioAsked=0;pool.setMuted(saved.muted);persist();render();};
 $('unmute').onclick=()=>{S.audioAsked=(S.audioAsked||0)+1;pool.retryAudio();render();};
@@ -845,6 +850,7 @@ $('resumeAuto').onclick=()=>{S.pinned=null;S.selection=null;director.reset();ren
 $('games').onclick=e=>{
  const add=e.target.closest('[data-add-stream]');if(add?.dataset?.addStream){e.preventDefault?.();openStreams(add.dataset.addStream);return;}
  const b=e.target.closest('[data-game]');if(!b)return;const id=b.dataset.game,g=gameState(id);
+ if(b.dataset.pastWeek){void openPastReplay(Number(b.dataset.pastWeek),id);return;}
  if(!g||b.disabled||excluded().has(id))return;
  if(S.pinned===id){S.pinned=null;S.selection=null;director.reset();render();return;}
  selectGame(id);$('watchTitle').scrollIntoView?.({block:'start'});$('watchTitle').focus({preventScroll:true});
@@ -1059,51 +1065,119 @@ $('lineupForm').onsubmit=e=>{e.preventDefault();$('saveRoster').click();};
 function chatRoom(){if(!S.chat)return;const league=saved.leagueId?saved.league:null;S.chat.setRoom(chatRoomFor('nfl',saved.leagueId),saved.leagueId?`${league?.name||'Your league'} chat`:'NFL lounge');}
 // ---------- replay weeks: the calibrated Week 7 and the latest completed week from ESPN ----------
 function applyReplayLinks(data){for(const g of data.games){if(g.id in saved.replayLinks)g.embed=saved.replayLinks[g.id];if(saved.replayDurations[g.id]){g.recordingDuration=saved.replayDurations[g.id];g.durationGuessed=false;}}}
+// Every completed week of the season is a replay. Week 7 ships calibrated; the
+// others are built from ESPN's play-by-play the first time you choose them, and
+// their videos come from the replay listing (or a link you paste).
+const weekKey=week=>'w'+week;
 function switchArchive(key,{quiet=false}={}){
  const data=S.archives.get(key);if(!data||key===S.archiveKey)return;
- if(key==='latest')applyReplayLinks(data);
+ if(!data.calibrated)applyReplayLinks(data);
  if(S.mode==='replay'&&S.started)setPlaying(false);
- S.archiveKey=key;S.archive=new ReplayArchive(data);S.syncs.clear();S.clips=key==='week7'?S.week7Clips:[];S.replayAt=null;
+ S.archiveKey=key;S.archive=new ReplayArchive(data);S.syncs.clear();S.clips=data.calibrated?S.week7Clips:[];S.replayAt=null;
  $('daySelect').innerHTML=S.archive.sessions.map((s,i)=>`<option value="${i}">${esc(s.label)}</option>`).join('');
  const sunday=Math.max(0,S.archive.sessions.findIndex(s=>s.label.startsWith('Sunday')));
  if(S.mode==='replay')setDay(sunday);else{S.day=sunday;clock.end=day().end;clock.seek(firstAction(day())??day().start,performance.now());$('daySelect').value=String(sunday);}
  S.streamSignature=null;renderWeekOptions();if(!quiet)render();
 }
 function renderWeekOptions(){
- const seven=S.archives.get('week7'),latest=S.archives.get('latest'),state=S.latestArchive;
- const options=[];
- if(latest)options.push(['latest',`Week ${latest.week} · latest`]);
- else if(state.status==='loading')options.push(['pending','Latest week · loading…']);
- else if(state.status==='error')options.push(['pending','Latest week · unavailable']);
- if(seven)options.push(['week7',`Week ${seven.week} · calibrated`]);
- put('weekSelect',options.map(([v,l])=>`<option value="${v}"${v==='pending'?' disabled':''}>${esc(l)}</option>`).join(''));$('weekSelect').value=S.archiveKey;$('weekSelect').title=state.status==='error'?state.error:'';
+ const latest=S.weeks.latest,options=[];
+ for(let n=Math.max(latest,S.archives.has(weekKey(7))?7:0);n>=1;n--){
+  const data=S.archives.get(weekKey(n)),loading=S.weeks.loading===n,failed=S.weeks.failed?.[n];
+  options.push([weekKey(n),`Week ${n}${n===latest?' · latest':''}${data?.calibrated?' · calibrated':loading?' · loading…':failed?' · unavailable':''}`]);
+ }
+ if(!options.length)options.push([S.archiveKey,`Week ${S.archive?.data.week||7}`]);
+ put('weekSelect',options.map(([v,l])=>`<option value="${v}">${esc(l)}</option>`).join(''));$('weekSelect').value=S.archiveKey;$('weekSelect').title=S.weeks.failed?.[S.weeks.loading]||'';
 }
-async function loadLatestArchive(){
- if(S.latestArchive.status==='loading'||S.latestArchive.status==='ready')return;S.latestArchive={status:'loading',error:''};renderWeekOptions();
+// The listing's videos for a week, by the teams in each game's address.
+const teamSlug=name=>String(name||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
+function applyWeekVideos(data,videos){
+ for(const g of data.games){
+  if(g.embed)continue;const away=teamSlug(g.teams[0].name),home=teamSlug(g.teams[1].name);
+  const hit=videos.find(v=>v.embed&&(v.away===away&&v.home===home||v.away===home&&v.home===away));
+  if(hit){g.embed=hit.embed;g.page=hit.page;}
+ }
+}
+// One load per week at a time; a second caller (a past tile clicked while the week list is still loading) waits for the same result.
+const weekLoads=new Map();
+function loadWeekArchive(week){
+ const key=weekKey(week);if(S.archives.has(key))return Promise.resolve(S.archives.get(key));
+ if(weekLoads.has(week))return weekLoads.get(week);
+ const task=fetchWeekArchive(week).finally(()=>weekLoads.delete(week));weekLoads.set(week,task);return task;
+}
+async function fetchWeekArchive(week){
+ const key=weekKey(week);S.weeks.loading=week;renderWeekOptions();
  try{
-  const current=await espn('scoreboard',AbortSignal.timeout(10000));const week=latestCompletedWeek(current),season=Number(current.season?.year)||new Date().getFullYear();
-  if(!week)throw new Error('No completed week yet this season.');
-  const seven=S.archives.get('week7');if(seven&&week===seven.week&&season===seven.season){S.latestArchive={status:'same',error:''};renderWeekOptions();return;}
-  const cacheKey=`fantasy-stream-archive-${season}-w${week}`;let data=null;try{data=JSON.parse(localStorage.getItem(cacheKey)||'null');}catch{}
+  const season=S.weeks.season,cacheKey=`fantasy-stream-archive-${season}-w${week}`;let data=null;
+  try{data=JSON.parse(localStorage.getItem(cacheKey)||'null');}catch{}
   if(!data||data.version!==2||!data.games?.length){
    const board=await espn(`scoreboard?dates=${season}&seasontype=2&week=${week}`,AbortSignal.timeout(10000));
    const events=(board.events||[]).filter(e=>e.competitions?.[0]?.status?.type?.completed),entries=[];
    for(let i=0;i<events.length;i+=4)await Promise.all(events.slice(i,i+4).map(async e=>{try{const raw=await espn('summary?event='+encodeURIComponent(e.id),AbortSignal.timeout(12000));entries.push({raw,meta:{id:String(e.id),name:e.shortName||e.name,date:e.date}});}catch{}}));
    data=buildArchive(entries,{season,week,title:`Week ${week}`});
    if(!data.games.length)throw new Error('ESPN has no play-by-play for that week yet.');
-   // One cached week at a time: older weeks would eat the storage every page needs for its own settings.
-   try{for(const key of Object.keys(localStorage))if(/^fantasy-stream-archive-/.test(key)&&key!==cacheKey)localStorage.removeItem(key);localStorage.setItem(cacheKey,JSON.stringify(data));}catch{}
+   // Only the latest week stays cached: older weeks would eat the storage every page needs for its own settings.
+   if(week===S.weeks.latest)try{for(const k of Object.keys(localStorage))if(/^fantasy-stream-archive-/.test(k)&&k!==cacheKey)localStorage.removeItem(k);localStorage.setItem(cacheKey,JSON.stringify(data));}catch{}
   }
-  S.archives.set('latest',data);S.latestArchive={status:'ready',error:'',week,season};
-  if(!S.started||S.mode!=='replay')switchArchive('latest',{quiet:S.mode!=='replay'});else renderWeekOptions();
- }catch(error){S.latestArchive={status:'error',error:error.message};renderWeekOptions();}
+  try{const r=await fetch('/api/nfl-replays?week='+week,{cache:'no-store',signal:AbortSignal.timeout(90000)});const found=await r.json();if(Array.isArray(found.games))applyWeekVideos(data,found.games);}catch{}
+  S.archives.set(key,data);delete S.weeks.failed?.[week];return data;
+ }catch(error){S.weeks.failed={...(S.weeks.failed||{}),[week]:error.message};return null;}
+ finally{if(S.weeks.loading===week)S.weeks.loading=0;renderWeekOptions();}
+}
+async function selectWeek(week){
+ const data=await loadWeekArchive(week);
+ if(data)switchArchive(weekKey(week),{quiet:S.mode!=='replay'});else render();
+}
+async function loadWeekList(){
+ try{
+  const current=await espn('scoreboard',AbortSignal.timeout(10000));const latest=latestCompletedWeek(current),season=Number(current.season?.year)||new Date().getFullYear();
+  S.weeks={...S.weeks,season,latest,current:Number(current.week?.number)||0};renderWeekOptions();
+  void loadPastWeeks();
+  if(latest&&!S.archives.has(weekKey(latest)))await selectWeek(latest);
+ }catch(error){S.weeks.failed={...(S.weeks.failed||{}),0:error.message};renderWeekOptions();}
+}
+// Earlier weeks' finals for the strip, oldest first, so the season reads left to right up to this week.
+// One small record per game; the season's set is cached so a reload costs ESPN nothing.
+const WEEKS_STORE=season=>`fantasy-stream-weeks-${season}`;
+const pastGame=g=>({id:g.id,name:g.name,date:g.date,detail:g.detail,teams:g.teams.map(t=>({id:t.id,abbreviation:t.abbreviation,abbr:t.abbr,name:t.name,color:t.color,score:t.score}))});
+async function loadPastWeeks(){
+ const {season,current}=S.weeks;if(!season||current<2||S.pastLoading)return;S.pastLoading=true;
+ let store={season,weeks:{}};try{const hit=JSON.parse(localStorage.getItem(WEEKS_STORE(season))||'null');if(hit?.season===season&&hit.weeks)store=hit;}catch{}
+ const show=()=>{S.pastWeeks=Object.keys(store.weeks).map(Number).filter(w=>w<current).sort((a,b)=>a-b).map(week=>({week,games:store.weeks[week]}));render();};
+ if(Object.keys(store.weeks).length)show();
+ const missing=[];for(let w=1;w<current;w++)if(!store.weeks[w])missing.push(w);
+ try{
+  for(let i=0;i<missing.length;i+=3)await Promise.all(missing.slice(i,i+3).map(async week=>{
+   try{const board=await espn(`scoreboard?dates=${season}&seasontype=2&week=${week}`,AbortSignal.timeout(10000));const games=liveGames(board).filter(g=>g.state==='post');if(games.length)store.weeks[week]=games.sort((a,b)=>Date.parse(a.date)-Date.parse(b.date)).map(pastGame);}catch{}
+  }));
+  show();try{for(const k of Object.keys(localStorage))if(/^fantasy-stream-weeks-/.test(k)&&k!==WEEKS_STORE(season))localStorage.removeItem(k);localStorage.setItem(WEEKS_STORE(season),JSON.stringify(store));}catch{}
+ }finally{S.pastLoading=false;}
+}
+function pastTile(g,week){
+ const known=g.teams.every(t=>Number.isFinite(Number(t.score))),diff=known?Number(g.teams[0].score)-Number(g.teams[1].score):0,nick=t=>{const words=String(t.name||'').trim().split(/\s+/);return words.length>1?words.at(-1):t.name||t.abbr;};
+ const rows=g.teams.map((t,i)=>{const logo=teamLogo(t),lead=known&&(i===0?diff>0:diff<0),trail=known&&(i===0?diff<0:diff>0);return `<span class="g-team${lead?' lead':''}${trail?' trail':''}"><span class="team-logo">${logo?`<img src="${esc(logo)}" alt="" width="22" height="22" loading="lazy" referrerpolicy="no-referrer">`:''}</span><span class="team-code">${esc(t.abbr)}</span><span class="team-name">${esc(nick(t))}</span><b class="team-score">${known?esc(t.score):'—'}</b></span>`;}).join('');
+ const mine=rosterIn(g),names=mine.map(p=>`<span>${esc(p.name)}</span>`).join(''),when=g.date?new Date(g.date).toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'}):'';
+ return `<li class="tile past${mine.length?' mine':''}" style="--away:${teamColor(g.teams[0])};--home:${teamColor(g.teams[1])}"><button class="game" data-game="${esc(g.id)}" data-past-week="${week}" aria-label="${esc(g.name+'. Week '+week+' final. Watch the replay')}"><span class="g-status"><span class="tag final">FINAL</span><span class="g-when">${esc(when)}</span></span><span class="g-matchup">${rows}</span><span class="g-drive quiet"><span>Week ${week} · ${esc(g.detail||'Final')}</span></span><span class="g-bar idle" aria-hidden="true"></span></button><div class="g-footer"><span class="g-names">${names||'<span>Other game</span>'}</span><span class="g-cta">Replay</span></div></li>`;
+}
+// A past tile opens that week's replay at the game's kickoff.
+async function openPastReplay(week,id){
+ const button=$('games').querySelector?.(`[data-game="${CSS.escape?CSS.escape(id):id}"]`);if(button)button.disabled=true;
+ try{
+  if(S.mode!=='replay'){if(!S.archive){toast('The replay is unavailable. Live games still work.','warn');return;}await setMode('replay');}
+  const data=await loadWeekArchive(week);
+  if(!data){toast(`Week ${week}'s replay is unavailable right now.`,'warn');return;}
+  switchArchive(weekKey(week),{quiet:true});
+  const game=archiveGame(id),index=S.archive.sessions.findIndex(s=>s.gameIds.includes(id));
+  if(!game||index<0){toast('That game has no replay yet.','warn');render();return;}
+  if(index!==S.day)setDay(index);
+  selectGame(id);$('watchTitle').scrollIntoView?.({block:'start'});
+ }finally{if(button)button.disabled=false;}
 }
 function renderSetup(){
  $('storageNotice').hidden=!S.storageError;
  const ready=S.live.games.filter(g=>g.state!=='post'&&streamURLs(g).length).length,upcoming=S.live.games.filter(g=>g.state!=='post').length;
- const latestGames=S.mode==='replay'&&S.archiveKey==='latest'?(S.archive?.games||[]):null;
+ const latestGames=S.mode==='replay'&&!S.archive?.data.calibrated?(S.archive?.games||[]):null;
  $('streamSummary').textContent=latestGames?`${latestGames.filter(g=>g.embed).length} of ${latestGames.length} games have a replay video`:S.mode==='replay'?'Replay videos are already included':upcoming?`${ready} of ${upcoming} games today have a stream ready`:'No games left today';
- const latestReplay=S.mode==='replay'&&S.archiveKey==='latest';
+ const latestReplay=S.mode==='replay'&&!S.archive?.data.calibrated;
  $('streamsCount').textContent=S.mode==='live'&&ready?String(ready):'';$('streamsButton').hidden=!(S.mode==='live'||latestReplay);$('streamsButton').title=latestReplay?'Replay videos for this week':'';
 }
 function renderScoreboard(){
@@ -1156,7 +1230,7 @@ function renderStreams(){
  // Only games still to watch, live first then by kickoff.
  const watchable=S.live.games.filter(g=>g.state!=='post').sort((a,b)=>(a.state==='in'?0:1)-(b.state==='in'?0:1)||(Date.parse(a.date)||0)-(Date.parse(b.date)||0));
  const games=S.mode==='live'&&hasLineup()?watchable.filter(g=>hasRoster(g,roster())):[],others=S.mode==='live'?watchable.filter(g=>!hasLineup()||!hasRoster(g,roster())):[];
- const latest=S.mode==='replay'&&S.archiveKey==='latest'?(S.archive?.games||[]).map(g=>[g.id,g.name,g.date,g.embed||'']):null;
+ const latest=S.mode==='replay'&&!S.archive?.data.calibrated?(S.archive?.games||[]).map(g=>[g.id,g.name,g.date,g.embed||'']):null;
  const signature=JSON.stringify([S.mode,S.archiveKey,hasLineup(),S.live.games.length>0,games.map(g=>[g.id,gameKey(g)]),others.map(g=>[g.id,gameKey(g)]),latest]);if(signature===S.streamSignature)return;S.streamSignature=signature;
  const drafts=S.streamDrafts??=new Map();for(const i of streamFields())drafts.set(i.dataset.key+(i.dataset.backup==='true'?':backup':''),i.value);
  $('streamsModeNote').textContent=latest?'':S.mode==='replay'?'Switch to Live to set up streams for today’s games.':!S.live.games.length?'Waiting for the NFL schedule.':!watchable.length?'Every game in this slate is final.':'';$('allStreamsTitle').textContent=games.length?'Other games':'Today’s games';
@@ -1260,7 +1334,7 @@ function saveReplayLinks(){
   input.removeAttribute('aria-invalid');if((saved.replayLinks[id]||'')===link)continue;changed++;
   // A different video has a different length: forget what the old one taught us.
   if(link)saved.replayLinks[id]=link;else delete saved.replayLinks[id];delete saved.replayDurations[id];
-  for(const data of [S.archives.get('latest')?.games||[],S.archive?.games||[]])for(const g of data)if(g.id===id){g.embed=link;g.recordingDuration=0;g.durationGuessed=false;}
+  for(const data of [...[...S.archives.values()].filter(a=>!a.calibrated).map(a=>a.games),S.archive?.games||[]])for(const g of data)if(g.id===id){g.embed=link;g.recordingDuration=0;g.durationGuessed=false;}
   S.syncs.delete(id);pool.close(id);if(S.program.kind==='game'&&S.program.id===id){S.program={kind:'standby'};S.pending=null;}
  }
  persist();$('streamsError').textContent='';$('streamsDetails').close?.();if(changed)toast(changed===1?'Replay video saved.':changed+' replay videos saved.');S.streamSignature=null;resetBreaks();render();
@@ -1304,7 +1378,7 @@ async function init(){
  S.chat=mountChat({$,sport:'nfl',getName:()=>saved.chatName,setName:name=>{saved.chatName=name;persist();},defaultName:()=>hasLineup()?saved.teamName:'',isOpen:()=>!$('chatPanel').hidden,origin:window.location?.origin||''});S.chat.suggestName();chatRoom();
  try{
   const [archive,clips]=await Promise.all([fetch('/week7.json',{signal:AbortSignal.timeout(15000)}).then(r=>{if(!r.ok)throw new Error('The replay archive is unavailable. Reload to try again.');return r.json();}),fetch('/nfl-highlights.json',{signal:AbortSignal.timeout(15000)}).then(r=>r.ok?r.json():{clips:[]}).catch(()=>({clips:[]}))]);
-  S.archives.set('week7',archive);S.week7Clips=clips.clips||[];S.archiveKey='';switchArchive('week7',{quiet:true});void loadLatestArchive();
+  archive.calibrated=true;S.archives.set(weekKey(archive.week||7),archive);S.week7Clips=clips.clips||[];S.archiveKey='';switchArchive(weekKey(archive.week||7),{quiet:true});void loadWeekList();
   render();
  if(window.location&&new URLSearchParams(window.location.search).get('mode')==='replay')setMode('replay');
  openFromHash();

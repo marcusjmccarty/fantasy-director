@@ -15,11 +15,9 @@
 
 <section class="games-strip" aria-label="Game guide">
  <div class="strip-inner">
-  <div class="strip-head">
-   <h2 id="gamesHead" tabindex="-1">Games <span class="tab-note" id="gameCount"></span></h2>
-   <p class="strip-day" id="dayLabel"></p>
-   <button type="button" class="sb-refresh" id="refreshGames" title="Refresh games and your matchup"><span id="scheduleStatus" role="status">Getting today’s games…</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.5 8A6 6 0 1 0 16 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M16 3.5V8h-4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-  </div>
+  <h2 id="gamesHead" class="sr-only" tabindex="-1">Games <span id="gameCount"></span></h2>
+  <p class="strip-day" id="dayLabel"></p>
+  <button type="button" class="strip-refresh" id="refreshGames" title="Refresh games and your matchup"><span class="sr-only" id="scheduleStatus" role="status">Getting today’s games…</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.5 8A6 6 0 1 0 16 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M16 3.5V8h-4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
   <div class="strip-scroller">
    <button class="strip-arrow prev" id="stripPrev" aria-label="Earlier games" tabindex="-1">‹</button>
    <ol class="games" id="games" aria-label="Choose a game"><li class="empty">Loading games…</li></ol>
