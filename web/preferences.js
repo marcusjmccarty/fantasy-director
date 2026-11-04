@@ -6,11 +6,12 @@ const players=value=>parseRoster(formatRoster(value));
 // Persisted browser data can come from an older release or an interrupted save.
 // Validate each preference independently so one damaged field cannot break startup.
 export function normalizePreferences(value={}){
- const raw=record(value),out={roster:SAMPLE.map(p=>({...p})),teamName:'Sample lineup',teamId:'',leagueId:'',league:null,streams:{},streamBackups:{},streamModes:{},marks:{},muted:false,includeDefense:true,highlights:true,dataOnly:false,autoReconnect:false,autoDiscover:true,delay:30,espn:{swid:'',s2:''},lineupReady:false};
+ const raw=record(value),out={roster:SAMPLE.map(p=>({...p})),teamName:'Sample lineup',teamId:'',leagueId:'',league:null,streams:{},streamBackups:{},streamModes:{},marks:{},muted:false,includeDefense:true,highlights:true,dataOnly:false,autoReconnect:false,autoDiscover:true,delay:30,espn:{swid:'',s2:''},lineupReady:false,chatName:'',replayLinks:{},replayDurations:{}};
  let validRoster=false;try{out.roster=players(raw.roster);validRoster=true;}catch{}
  if(validRoster){out.teamName=text(raw.teamName,'Sample lineup');out.lineupReady=typeof raw.lineupReady==='boolean'?raw.lineupReady:out.teamName!=='Sample lineup';}
  for(const key of ['muted','includeDefense','highlights','dataOnly','autoReconnect','autoDiscover'])if(typeof raw[key]==='boolean')out[key]=raw[key];
  if(typeof raw.delay==='number'&&Number.isFinite(raw.delay))out.delay=Math.max(0,Math.min(600,raw.delay));
+ if(typeof raw.chatName==='string')out.chatName=raw.chatName.replace(/[\u0000-\u001f\u007f<>]/g,'').trim().slice(0,24);
  out.leagueId=/^\d{1,12}$/.test(raw.leagueId)?String(raw.leagueId):'';
  out.teamId=/^\d+$/.test(raw.teamId)?String(raw.teamId):'';
  const league=record(raw.league);
@@ -20,6 +21,8 @@ export function normalizePreferences(value={}){
  }
  for(const field of ['streams','streamBackups'])for(const [key,url] of Object.entries(record(raw[field])))try{if(/^[A-Z]{2,3}-[A-Z]{2,3}$/.test(key)&&typeof url==='string')out[field][key]=safeVideo(url);}catch{}
  for(const [key,mode] of Object.entries(record(raw.streamModes)))if(/^[A-Z]{2,3}-[A-Z]{2,3}$/.test(key)&&['custom','auto','NTV','StreamCorner'].includes(mode))out.streamModes[key]=mode;
+ for(const [id,url] of Object.entries(record(raw.replayLinks)))if(/^\d{1,12}$/.test(id)&&/^https:\/\/ok\.ru\/videoembed\/\d{1,20}$/.test(String(url)))out.replayLinks[id]=String(url);
+ for(const [id,seconds] of Object.entries(record(raw.replayDurations)))if(/^\d{1,12}$/.test(id)&&Number.isFinite(Number(seconds))&&Number(seconds)>600&&Number(seconds)<36000)out.replayDurations[id]=Math.round(Number(seconds));
  for(const [id,marks] of Object.entries(record(raw.marks)))if(Array.isArray(marks))out.marks[id]=marks.filter(m=>m&&Number.isFinite(m.wall)&&Number.isFinite(m.media)&&m.media>=0).map(({wall,media})=>({wall,media}));
  out.espn={swid:text(raw.espn?.swid,'',40),s2:text(raw.espn?.s2,'',2048)};
  // Version 2 turned website-player refresh off by default. An older save holds the old default, not a choice.

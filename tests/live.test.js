@@ -488,8 +488,8 @@ test('LiveFeed.view: after a logged play the game is cuttable for SAFE_AFTER_PLA
  const snapping=f.view(1000+SAFE_AFTER_PLAY+1,0)[0];
  assert.equal(snapping.phase,'play');assert.equal(snapping.synthesized,true);assert.ok(snapping.playAge>0&&snapping.playAge<=1.01);assert.equal(snapping.playEndsIn,null);
  assert.equal(f.view(1000+STALLED_AFTER,0)[0].phase,'play');
- assert.equal(f.view(1000+STALLED_AFTER+1,0)[0].phase,'live','a long silence is a stall, not a snap');
- assert.ok(f.view(1000+STALLED_AFTER+1,0)[0].sinceLogged>STALLED_AFTER);
+ const stalled=f.view(1000+STALLED_AFTER+1,0)[0];assert.equal(stalled.phase,'break','a long silence is a stoppage (injury, review), not a snap');assert.equal(stalled.breakKind,'stoppage');
+ assert.ok(stalled.sinceLogged>STALLED_AFTER);
 });
 test('LiveFeed.view: a new logged play reopens the safe window, measured in delayed time',()=>{
  const f=new LiveFeed();
@@ -574,4 +574,16 @@ test('liveGames carries the last play id so a feed can tell when the whistle has
  const g=drive({possession:'11',text:'MIN 35',lastPlay:lastPlay('Rush',{id:'4012345'})});
  assert.equal(g.lastPlayId,'4012345');
  assert.equal(drive({possession:'11',text:'MIN 35'}).lastPlayId,'');
+});
+
+test('LiveFeed.view: a kickoff or punt is a break until the clock moves for the first snap',()=>{
+ const f=new LiveFeed();
+ f.push([liveGame('g',{lastPlayId:'drive',down:3,clock:'8:10'})],995);
+ for(let t=1000;t<=1100;t+=5)f.push([liveGame('g',{lastPlayId:'kick',kick:true,playType:'Kickoff',down:1,clock:'8:05'})],t);   // kickoff logged at 1000
+ const during=f.view(1030,0)[0];assert.equal(during.phase,'break');assert.equal(during.breakKind,'kickoff');assert.equal(during.kick,true);
+ for(let t=1105;t<=1130;t+=5)f.push([liveGame('g',{lastPlayId:'kick',kick:true,playType:'Kickoff',down:1,clock:t>=1115?'7:58':'8:05'})],t);   // the clock runs: the first snap is on
+ const snapping=f.view(1120,0)[0];assert.equal(snapping.phase,'play');assert.equal(snapping.synthesized,true);
+ const g=new LiveFeed();for(let t=1000;t<=1100;t+=5)g.push([liveGame('g',{lastPlayId:t>1000?'punt':'drive',kick:t>1000,playType:t>1000?'Punt':'Rush',down:1})],t);
+ assert.equal(g.view(1060,0)[0].breakKind,'punt');
+ assert.equal(g.view(1005+STOPPAGE_MAX+1,0)[0].phase,'live','a kick with no clock evidence for three minutes is football again');
 });

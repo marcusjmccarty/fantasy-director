@@ -3,7 +3,7 @@
 <a class="skip-link" href="#room">Skip to your channel</a>
 <header class="bar"><div class="bar-inner">
  <a href="/" class="brand" aria-label="Fantasy Stream home"><span class="brand-dot" aria-hidden="true"></span><span class="brand-name">Fantasy<b>Stream</b></span></a>
- <nav class="modes" aria-label="Viewing mode"><button aria-pressed="true"><span class="mode-dot" id="liveDot" aria-hidden="true"></span>Live</button><a href="/?mode=replay" title="NFL replay library">Replay</a></nav>
+ <nav class="modes" aria-label="Viewing mode"><button id="liveMode" aria-pressed="true"><span class="mode-dot" id="liveDot" aria-hidden="true"></span>Live</button><button id="replayMode" aria-pressed="false">Replay</button></nav>
  <nav class="sport-nav" aria-label="Sport"><a href="/">NFL</a><a href="/sports.html?sport=nba" data-sport="nba">NBA</a><a href="/sports.html?sport=nhl" data-sport="nhl">NHL</a><a href="/sports.html?sport=mlb" data-sport="mlb">MLB</a></nav>
  <div class="bar-actions">
   <a class="header-score" id="headerScore" href="#scoreboardTitle" hidden aria-label="Your matchup"></a>
@@ -17,13 +17,8 @@
  <div class="strip-inner">
   <div class="strip-head">
    <h2 id="gamesHead" tabindex="-1">Games <span class="tab-note" id="gameCount"></span></h2>
-   <div class="seg sb-filters" role="group" aria-label="Games to show"><button id="allGames" aria-pressed="true">All</button><button id="myGames" aria-pressed="false">Mine</button></div>
-   <div class="day-nav" role="group" aria-label="Schedule date">
-    <button id="previousDay" class="day-step" aria-label="Previous day" title="Previous day">‹</button>
-    <span class="day-pick"><span id="dayLabel" aria-hidden="true">Today</span><input type="date" id="gameDate" aria-label="Game date" title="Browse another day’s schedule"></span>
-    <button id="nextDay" class="day-step" aria-label="Next day" title="Next day">›</button>
-   </div>
-   <button type="button" class="sb-refresh" id="refreshGames" title="Refresh games and your matchup"><span id="scheduleStatus" role="status">Getting today’s games…</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.5 8A6 6 0 1 0 16 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M16 3.5V8h-4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button><button id="today" class="link back-today" hidden>Back to today</button>
+   <p class="strip-day" id="dayLabel"></p>
+   <button type="button" class="sb-refresh" id="refreshGames" title="Refresh games and your matchup"><span id="scheduleStatus" role="status">Getting today’s games…</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.5 8A6 6 0 1 0 16 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M16 3.5V8h-4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
   </div>
   <div class="strip-scroller">
    <button class="strip-arrow prev" id="stripPrev" aria-label="Earlier games" tabindex="-1">‹</button>
@@ -59,15 +54,20 @@
    </div>
    <div class="direction-controls">
     <div class="status-line"><span id="autoChip" class="chip on">Automatic</span><span id="watchStatus">Add a stream to begin. No broadcast is supplied.</span></div>
-    <div class="channel-actions"><button id="autoMode" aria-pressed="true">Auto · On</button></div>
+    <div class="channel-actions"><button id="autoMode" aria-pressed="true">Auto · On</button><button id="leaveClip" hidden>Back to the game</button><button id="nextReplaySource" hidden>Try another player</button></div>
     <div class="channel-meta"><span class="channel-mode" id="channelMode">LIVE</span><span id="pictureNote"></span><a id="gamecastLink" class="meta-link" href="#" target="_blank" rel="noopener noreferrer" hidden>Gamecast ↗</a></div>
    </div>
   </div>
  </section>
 
- <aside class="rail" aria-label="Your matchup">
-  <section id="matchupPanel" class="rail-panel" aria-labelledby="scoreboardTitle">
-   <div class="score-center" id="scoreboard" data-connect="true">
+ <aside class="rail" aria-label="Your matchup, highlights and chat">
+  <div class="rail-tabs" role="tablist" aria-label="Side panel">
+   <button id="matchupTab" role="tab" aria-selected="true" aria-controls="matchupPanel">Matchup</button>
+   <button id="highlightsTab" role="tab" aria-selected="false" aria-controls="highlightsPanel" tabindex="-1">Highlights <span class="count" id="highlightCount"></span></button>
+   <button id="chatTab" role="tab" aria-selected="false" aria-controls="chatPanel" tabindex="-1">Chat <span class="count chat-count" id="chatCount"></span></button>
+  </div>
+  <section id="matchupPanel" class="rail-panel" role="tabpanel" aria-labelledby="matchupTab">
+   <div class="score-center mu-fold" id="scoreboard" data-connect="true">
     <h2 id="scoreboardTitle" class="sr-only" tabindex="-1">Your matchup</h2>
     <div class="mu-duel">
      <div class="mu-side mine"><span class="mu-label">You</span><strong id="fantasyTotal">—</strong><h3 id="fantasyTitle">Your team</h3></div>
@@ -79,10 +79,21 @@
     <div class="mu-alert-row"><p class="mu-alert" id="fantasyStatus" role="status" hidden>League scoring, directly from ESPN.</p><button id="retryFantasy" class="link" hidden>Retry</button></div>
     <label id="matchupPicker" class="mu-picker" hidden>Matchup<select id="matchupSelect" aria-label="Choose matchup"></select></label>
     <div class="mu-connect"><p>Connect your ESPN league once. Your lineup, your opponent and every point update here while you watch.</p><button id="connectFromBoard" class="primary">Connect ESPN</button></div>
-    <table class="h2h" id="fantasyTable" hidden><caption class="sr-only">Starters slot by slot</caption><thead><tr><th scope="col" class="h2h-name mine">You</th><th scope="col" class="h2h-pts mine">Pts</th><th scope="col" class="h2h-slot"><span class="sr-only">Slot</span></th><th scope="col" class="h2h-pts theirs">Pts</th><th scope="col" class="h2h-name theirs">Opp</th></tr></thead><tbody id="fantasyPlayers"></tbody></table>
-    <div class="mu-bench" id="fantasyBench"></div>
+    <div class="h2h-fill"><table class="h2h" id="fantasyTable" hidden><caption class="sr-only">Starters slot by slot</caption><colgroup id="fantasyCols"></colgroup><thead><tr><th scope="col" class="h2h-name mine">You</th><th scope="col" class="h2h-pts mine">Pts</th><th scope="col" class="h2h-slot"><span class="sr-only">Slot</span></th><th scope="col" class="h2h-pts theirs">Pts</th><th scope="col" class="h2h-name theirs">Opp</th></tr></thead><tbody id="fantasyPlayers"></tbody></table></div>
     <div class="mu-placeholder"><b id="placeholderTitle">Choose a team to follow</b><span id="placeholderText">Pick your franchise and its lineup appears here.</span><button id="chooseTeam" class="ghost">Choose your team</button></div>
    </div>
+   <table class="h2h bench" id="benchTable" hidden><caption class="sr-only">Bench and injured reserve</caption><colgroup id="benchCols"></colgroup><tbody id="fantasyBench"></tbody></table>
+  </section>
+  <section id="highlightsPanel" class="rail-panel" role="tabpanel" aria-labelledby="highlightsTab" hidden><h2 class="sr-only">Highlights</h2><p class="panel-note" id="highlightsNote"></p><ul class="scores" id="highlights" aria-label="Highlights from your players’ games"></ul></section>
+  <section id="chatPanel" class="rail-panel chat-panel" role="tabpanel" aria-labelledby="chatTab" hidden>
+   <div class="chat-head"><div class="chat-room"><b id="chatRoomName">Chat</b><small id="chatPresence"></small></div><button type="button" id="chatNameButton" class="link">Set your name</button></div>
+   <ol class="chat-log" id="chatLog" aria-live="polite" aria-relevant="additions"></ol>
+   <p class="chat-state" id="chatState" role="status" hidden></p>
+   <form class="chat-form" id="chatForm">
+    <div class="chat-name-row" id="chatNameRow" hidden><label for="chatName" class="sr-only">Your name</label><input id="chatName" maxlength="24" placeholder="Your name in the room" autocomplete="nickname"><button type="button" id="chatNameSave" class="primary">Save</button></div>
+    <div class="chat-quick" id="chatQuick"><button type="button" data-say="🔥">🔥</button><button type="button" data-say="😤">😤</button><button type="button" data-say="😂">😂</button><button type="button" data-say="🙏">🙏</button><button type="button" data-say="Let’s go!">Let’s go!</button></div>
+    <div class="chat-row"><label for="chatInput" class="sr-only">Message</label><input id="chatInput" maxlength="400" placeholder="Say something to the room…" autocomplete="off"><button type="submit" id="chatSend" class="primary">Send</button></div>
+   </form>
   </section>
  </aside>
 </main>
@@ -110,23 +121,15 @@
 </form></dialog>
 
 <dialog class="team-dialog" id="leagueDialog" aria-labelledby="leagueTitle"><form id="leagueForm">
- <div class="dialog-head"><div><h2 id="leagueTitle">Fantasy team</h2></div><button type="button" id="closeLeague" class="icon-button" aria-label="Close fantasy team">✕</button></div>
+ <div class="dialog-head"><div><h2 id="leagueTitle">Fantasy team</h2><p class="dialog-sub" id="leagueSummary" role="status"></p></div><button type="button" id="closeLeague" class="icon-button" aria-label="Close fantasy team">✕</button></div>
  <section class="dialog-body">
-  <div class="team-picker"><label id="scoreTeamPicker" for="scoreTeam">Your team</label><select id="scoreTeam" aria-label="Your fantasy team" disabled><option>Connect ESPN to choose a team</option></select><p class="muted small" id="leagueSummary"></p></div>
-  <div class="team-rows">
-   <details id="leagueImport" class="team-row">
-    <summary><span class="connect-badge" aria-hidden="true">ESPN</span><span class="connect-text"><b>ESPN league</b><small id="leagueState">Not connected</small></span><span class="connect-action" id="leagueAction">Connect</span></summary>
-    <div class="connect-form">
-     <label for="leagueId">League ID or league link</label>
-     <div class="inline"><input id="leagueId" autocomplete="off" spellcheck="false" placeholder="12345678, or paste your league’s web address"><input id="leagueSeason" class="season" type="number" min="2018" max="2035" aria-label="Season" title="Season"></div>
-     <p class="muted small" id="leagueHelp">It’s the number after <code>leagueId=</code> in your league’s web address. This never changes your ESPN lineup.</p>
-     <details id="privateLeague" class="plain"><summary>Private league?</summary>
-      <p class="muted small">ESPN only shows private leagues to a signed-in browser. On espn.com, open developer tools → Application → Cookies and copy these two values. They stay in this browser and are sent only to ESPN.</p>
-      <div class="cookie-grid"><label>SWID<input id="swid" type="password" autocomplete="off" spellcheck="false" placeholder="{XXXXXXXX-…}"></label><label>espn_s2<input id="s2" type="password" autocomplete="off" spellcheck="false" placeholder="AEB…"></label></div>
-     </details>
-    </div>
-   </details>
-  </div>
+  <div class="league-line"><span class="connect-badge" aria-hidden="true">ESPN</span><span class="connect-text"><b id="leagueState">Not connected</b><small id="leagueHelp">League ID, season, SWID and espn_s2. That’s all.</small></span><button type="button" id="leagueAction" class="link">Change</button></div>
+  <details id="leagueImport" class="connect-fields"><summary class="sr-only">ESPN connection</summary>
+   <div class="inline"><label class="grow">League ID <span class="muted">or paste your league link</span><input id="leagueId" autocomplete="off" spellcheck="false" inputmode="numeric" placeholder="12345678"></label><label class="season-field">Season<input id="leagueSeason" class="season" type="number" min="2018" max="2035" aria-label="Season"></label></div>
+   <div class="cookie-grid"><label>SWID<input id="swid" type="password" autocomplete="off" spellcheck="false" placeholder="{XXXXXXXX-…}"></label><label>espn_s2<input id="s2" type="password" autocomplete="off" spellcheck="false" placeholder="AEB…"></label></div>
+   <p class="muted small">Public leagues need only the ID. A private league also needs SWID and espn_s2 from your ESPN cookies (on espn.com: developer tools → Application → Cookies). They stay in this browser and go only to ESPN. Nothing here changes your ESPN lineup.</p>
+  </details>
+  <div class="team-picker"><label id="scoreTeamPicker" for="scoreTeam">Your team</label><select id="scoreTeam" aria-label="Your fantasy team" disabled><option>Connect ESPN to choose a team</option></select></div>
   <p id="leagueError" class="error" role="alert"></p>
  </section>
  <div class="dialog-actions"><button type="submit" id="importLeague" class="primary">Connect</button></div>
@@ -136,7 +139,7 @@
  <div class="dialog-head"><div><h2 id="settingsTitle">Settings</h2></div><button type="button" id="closeSettings" class="icon-button" aria-label="Close settings">✕</button></div>
  <section class="dialog-body">
   <label class="setting-row"><span><b>Find streams automatically</b><small>Matches each game on NTV and StreamCorner. Your own links always come first.</small></span><input type="checkbox" class="switch" id="autoDiscover" checked></label>
-  <label class="setting-row"><span><b>Refresh website players</b><small>Reloads an embedded site every 2 minutes. Turn off if a healthy stream gets interrupted.</small></span><input type="checkbox" class="switch" id="autoReconnect" checked></label>
+  <label class="setting-row"><span><b>Reload website players every 2 minutes</b><small>Off is right for almost everyone: every reload costs a click inside the player. Only for a site that silently freezes.</small></span><input type="checkbox" class="switch" id="autoReconnect"></label>
   <div class="setting-row"><label for="delay"><b>Stream delay</b><small>Seconds your stream runs behind live, so automatic switching lines up with your video.</small></label><input id="delay" type="number" min="0" max="600" step="5" value="30"></div>
   <p class="muted small keys"><kbd>Space</kbd> play or pause · <kbd>M</kbd> sound · <kbd>F</kbd> full screen</p>
   <details class="rules plain"><summary>How automatic switching works</summary><ul><li>Follows the teams of your active fantasy players, live games first.</li><li>Switches only at a reported break (timeout, intermission, end of an inning) or when a game ends.</li><li>Pick a game yourself and the channel stays there until the next break.</li><li>Exact substitutions and provider ads can’t be seen from here.</li></ul></details>

@@ -64,7 +64,9 @@ export class Director{
  reset(){this.lastCut=-Infinity;this.challenger=null;}
  committed(at){this.lastCut=at;this.challenger=null;}
  // current: {kind:'game'|'highlight'|'standby', id}
- decide({games,roster,at,current={},excluded=new Set(),queue=[],includeDefense=true,recentScore=()=>false,backups=new Set(),redzone=false}){
+ // stayThrough: the picture on screen cannot be paused and resumed (a website player), so a break
+ // is not worth leaving for a filler; only a game with one of the viewer's starters on the field takes over.
+ decide({games,roster,at,current={},excluded=new Set(),queue=[],includeDefense=true,recentScore=()=>false,backups=new Set(),redzone=false,stayThrough=false}){
   const r=this.rules,ranked=rank(games,roster,{excluded,includeDefense,currentId:current.id}),best=ranked[0];
   const curGame=current.kind==='game'?games.find(g=>g.id===current.id&&!excluded.has(g.id)&&hasRoster(g,roster)):null;
   const cur=curGame?(ranked.find(e=>e.game.id===curGame.id)||{game:curGame,players:[],...rate(curGame,[])}):null;
@@ -93,6 +95,7 @@ export class Director{
   if(queue.length&&!ranked.some(e=>e.critical)&&(!cur||cur.tier===0||curGame.phase!=='play'&&(at-queue[0].queuedAt>=r.highlightWait||!best)))
    return {kind:'highlight',id:queue[0].id,reason:'Replaying a score you missed'};
   if(!best){
+   if(stayThrough&&curGame&&curGame.state==='in'){this.challenger=null;return stay(curGame.phase==='break'?'Break · staying with this stream':'Your players are off the field');}
    if(redzone){
     const filler=this.redzoneChoice({games,at,current,excluded,backups});
     if(filler)return filler;

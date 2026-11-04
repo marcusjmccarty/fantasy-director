@@ -32,7 +32,7 @@ export function liveGames(raw,nowSeconds=Date.now()/1000){
    else if(possession<0){phase='break';breakKind='stoppage';}
   }
   return {id:String(e.id),name:e.shortName||e.name||'NFL game',kind:'live',teams,state,phase,breakKind,score:teams.map(t=>t.score),scoreKnown,
-   possession,down,distance:Number(s.distance||0),yardsToGoal:ytg,special:down<=0||/kickoff|punt/i.test(lastType)&&down<=0,
+   possession,down,distance:Number(s.distance||0),yardsToGoal:ytg,special:down<=0,kick:/kickoff|punt/i.test(lastType),
    period:Number(status.period||0),clock:status.displayClock||'',detail:type.shortDetail||'',downDistance:s.shortDownDistanceText||'',
    lastPlay:last.text||'',lastPlayId,playType:lastType,nextSnapIn:null,date:e.date,season:Number(raw.season?.year||e.season?.year)||null,week:Number(raw.week?.number||e.week?.number)||null,scores:[],fetchedAt:nowSeconds};
  }).filter(g=>g.teams.length===2);
@@ -90,6 +90,14 @@ export class LiveFeed{
    // A fresh score is still on screen: the celebration, the replay, the try. Nobody's offense is on the field, and it is not a break yet.
    const score=before(this.scored,g.id);
    if(score&&t-score.at<CELEBRATION)return {...out,phase:'live',breakKind:null,celebrating:true,possession:-1,special:true};
+   // A kickoff or punt is the last play logged: the broadcast is in its break
+   // (the one after a score comes twice) until the clock moves for the first snap.
+   if(g.kick&&logged?.playId===g.lastPlayId){
+    const resumed=before(this.resumed,g.id);
+    if(resumed&&resumed.playId===g.lastPlayId&&resumed.at>logged.at){const age=t-resumed.at;return age<=STALLED_AFTER?{...out,phase:'play',breakKind:null,playAge:age,playEndsIn:null,synthesized:true}:{...out,phase:'live',breakKind:null};}
+    if(since!==null&&since>STOPPAGE_MAX)return {...out,phase:'live',breakKind:null};
+    return {...out,phase:'break',breakKind:/kickoff/i.test(g.playType||'')?'kickoff':'punt'};
+   }
    if(g.phase==='break'&&g.breakKind==='timeout'){
     const resumed=before(this.resumed,g.id),stoppedAt=logged?.playId===g.lastPlayId?logged.at:null;
     if(resumed&&resumed.playId===g.lastPlayId&&(stoppedAt===null||resumed.at>stoppedAt)){
@@ -110,6 +118,12 @@ export class LiveFeed{
    const recent=(this.logged.get(g.id)||[]).filter(x=>x.at<=t).slice(-3),gaps=recent.slice(1).map((x,i)=>x.at-recent[i].at),cadence=gaps.length?Math.min(...gaps):Infinity;
    const safe=cadence<TEMPO?Math.max(5,cadence-8):SAFE_AFTER_PLAY;
    if(since!==null&&since>safe&&since<=STALLED_AFTER)return {...out,phase:'play',playAge:since-safe,playEndsIn:null,synthesized:true,safeWindow:safe};
+   // Nothing logged for longer than a play clock and the clock has not moved: an injury, a review, a measurement. A break, not football.
+   if(since!==null&&since>STALLED_AFTER){
+    const resumed=before(this.resumed,g.id);
+    if(resumed&&resumed.at>logged.at&&t-resumed.at<=STALLED_AFTER)return {...out,phase:'play',breakKind:null,playAge:t-resumed.at,playEndsIn:null,synthesized:true,safeWindow:safe};
+    if(!(resumed&&resumed.at>logged.at))return {...out,phase:'break',breakKind:'stoppage',safeWindow:safe};
+   }
    return {...out,safeWindow:safe};
   });
  }

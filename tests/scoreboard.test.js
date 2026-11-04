@@ -131,7 +131,7 @@ test('scoreboard highlights possession activity for offense, defense and kickers
 });
 
 // ---- head-to-head: one table, two lineups, slot by slot --------------------
-import {headToHead,benchList} from '../web/scoreboard.js';
+import {headToHead,benchRows,matchupColumns} from '../web/scoreboard.js';
 const p=(slot,name,points,active=false)=>({slot,name,team:'IND',status:'Final',active,points});
 test('headToHead pairs the k-th starter in each slot with the opponent’s k-th in the same slot, and lists unmatched opponents last',()=>{
  const yours={players:[p('QB','My QB',20),p('RB','My RB1',10),p('RB','My RB2',5),p('K','My K',8)]};
@@ -155,10 +155,11 @@ test('fantasyBoard exposes structured players with plain-language status for the
  assert.equal(fantasyBoard(data,'1',[]).players[0].status,'No game');
 });
 
-test('the matchup table lists starters only and the bench is a separate quiet list',()=>{
+test('the matchup table lists starters only; the bench follows in the same columns after a divider',()=>{
  const p=(slot,name,points,bench)=>({slot,name,team:'KC',status:'Final',active:false,points,...(bench?{bench:true}:{})});
  const yours={players:[p('BE','Bench Guy',30,true),p('QB','Starter Guy',10),p('IR','Hurt Guy',null,true)]},theirs={players:[p('QB','Their QB',5),p('BE','Their Bench',2,true)]};
  const table=headToHead(yours,theirs);assert.match(table,/Starter Guy/);assert.doesNotMatch(table,/Bench Guy|Their Bench/);
- const bench=benchList(yours,theirs);assert.match(bench,/Your bench/);assert.match(bench,/B\. Guy <b>30\.00<\/b>/);assert.match(bench,/class="ir"/);assert.match(bench,/Their bench/);
- assert.doesNotMatch(benchList(yours,null),/Their bench/);assert.doesNotMatch(benchList(yours,theirs,{points:false}),/<b>/);assert.equal(benchList({players:[p('QB','Only',1)]},null),'');
+ const bench=benchRows(yours,theirs);assert.match(bench,/^<tr class="h2h-divider"><td colspan="5">/);assert.equal((bench.match(/<tr class="bench">/g)||[]).length,2);assert.match(bench,/Bench Guy/);assert.match(bench,/Their Bench/);assert.match(bench,/Hurt Guy/);
+ assert.match(benchRows(yours,null),/colspan="3"/);assert.equal(benchRows({players:[p('QB','Only',1)]},null),'');
+ assert.equal((matchupColumns(true).match(/<col/g)||[]).length,5);assert.equal((matchupColumns(false).match(/<col/g)||[]).length,3);
 });

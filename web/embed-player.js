@@ -6,13 +6,16 @@
 // A loaded page is NOT proof of moving video. Periodic reconnect is an explicit
 // fallback for that blind spot, separate from page-loading recovery. Loading
 // retries back off, but never abandon a stream the viewer still wants playing.
-const RECONNECT_EVERY=120000,LOAD_WINDOWS=[15000,20000,30000,60000],NETWORK_RETRY_GAP=10000;
+// A page with ads and nested frames can take a long time to fire `load`; a
+// healthy picture is never interrupted over that. After a few attempts the
+// viewer gets the Reload and Open stream buttons instead of a loop.
+const RECONNECT_EVERY=120000,LOAD_WINDOWS=[45000,60000,90000],MAX_LOAD_RETRIES=3,NETWORK_RETRY_GAP=10000,OFFLINE_SETTLE=5000,INTERACTION_TRUST=600000;
 export class EmbedPlayer{
  constructor(url,{now=()=>performance.now(),createFrame=()=>document.createElement('iframe'),autoReconnect=true}={}){
   this.kind='embed';this.url=url;this.now=now;this.listeners=new Map();this.inAd=false;this.error=null;this.wantPlay=false;this.target=null;
   this.primed=true;this.advances=2;this.loadedAt=null;this.audioLocked=false;this.isMuted=true;this.duration=NaN;this.visible=false;
   this.destroyed=false;
-  this.autoReconnect=!!autoReconnect;this.loadStartedAt=null;this.nextReconnectAt=null;this.loadRetries=0;this.lastReconnectAt=-Infinity;this.suspendedAt=null;this.offline=false;this.recoveryMessage='';
+  this.autoReconnect=!!autoReconnect;this.loadStartedAt=null;this.nextReconnectAt=null;this.loadRetries=0;this.lastReconnectAt=-Infinity;this.suspendedAt=null;this.offline=false;this.offlineSince=null;this.recoveryMessage='';this.everLoaded=false;this.interactedAt=null;this.gaveUp=false;
   this.createFrame=createFrame;this.element=this.newFrame();
  }
  newFrame(){
@@ -28,7 +31,7 @@ export class EmbedPlayer{
   // Our button uses the stable outer stage; nested fullscreen can end when its
   // document reconnects, so the app preserves a stage fallback before reload.
   f.allow="autoplay *; fullscreen *; picture-in-picture *; encrypted-media *";f.allowFullscreen=true;f.referrerPolicy='strict-origin-when-cross-origin';
-  f.addEventListener('load',()=>{if(!this.destroyed&&f===this.element&&this.visible&&this.wantPlay&&this.loadStartedAt!==null&&f.src===this.url){this.loadedAt=this.now();this.loadRetries=0;}});
+  f.addEventListener('load',()=>{if(!this.destroyed&&f===this.element&&this.visible&&this.wantPlay&&this.loadStartedAt!==null&&f.src&&f.src!=='about:blank'){this.loadedAt=this.now();this.loadRetries=0;this.everLoaded=true;this.gaveUp=false;}});
   return f;
  }
  replaceFrame(url){
@@ -56,9 +59,11 @@ export class EmbedPlayer{
  // A cross-origin page can display an error or navigate inside its own frame
  // without telling us. Reload just that document; preserve the channel state.
  reload(){if(this.destroyed||!this.visible||!this.wantPlay)return false;this.resetRecovery();this.navigate('Reloading stream…');return true;}
- resetRecovery(){this.loadedAt=null;this.loadStartedAt=null;this.nextReconnectAt=null;this.loadRetries=0;this.suspendedAt=null;this.offline=false;this.recoveryMessage='';}
+ resetRecovery(){this.loadedAt=null;this.loadStartedAt=null;this.nextReconnectAt=null;this.loadRetries=0;this.suspendedAt=null;this.offline=false;this.offlineSince=null;this.recoveryMessage='';this.interactedAt=null;this.gaveUp=false;}
+ // The viewer clicked inside the page: it is alive, whatever its load event said.
+ noteInteraction(){if(this.destroyed||!this.visible)return;this.interactedAt=this.now();this.loadedAt??=this.now();this.loadRetries=0;this.gaveUp=false;this.recoveryMessage='';}
  navigate(message='',detail={}){
-  const now=this.now();this.loadedAt=null;this.loadStartedAt=now;this.lastReconnectAt=now;this.nextReconnectAt=this.autoReconnect?now+RECONNECT_EVERY:null;this.recoveryMessage=message;
+  const now=this.now();this.loadedAt=null;this.gaveUp=false;this.interactedAt=null;this.loadStartedAt=now;this.lastReconnectAt=now;this.nextReconnectAt=this.autoReconnect?now+RECONNECT_EVERY:null;this.recoveryMessage=message;
   if(message)this.emit('reconnect',detail);
   if(!this.destroyed&&this.visible&&this.wantPlay)this.replaceFrame(this.url);
  }
@@ -66,16 +71,19 @@ export class EmbedPlayer{
   if(this.autoReconnect===!!value)return;
   this.autoReconnect=!!value;this.nextReconnectAt=this.autoReconnect&&this.visible&&this.wantPlay?this.now()+RECONNECT_EVERY:null;
  }
- get reconnecting(){return !!this.recoveryMessage&&this.loadedAt===null&&!this.error;}
+ get reconnecting(){return !!this.recoveryMessage&&(this.loadedAt===null||this.gaveUp)&&!this.error;}
  // Called only for the on-screen game by the app loop. No background timers
  // can reload an old frame after a switch, Pause, highlight, or destruction.
  checkHealth({online=true,foreground=true}={}){
   if(this.destroyed||this.error||!this.visible||!this.wantPlay||this.loadStartedAt===null)return;
   const now=this.now();
-  if(!online||!foreground){this.suspendedAt??=now;if(!online)this.offline=true;return;}
+  if(!online||!foreground){this.suspendedAt??=now;if(!online){this.offlineSince??=now;if(now-this.offlineSince>=OFFLINE_SETTLE)this.offline=true;}return;}
+  this.offlineSince=null;
   if(this.suspendedAt!==null){
    const elapsed=now-this.suspendedAt;this.loadStartedAt+=elapsed;if(this.nextReconnectAt!==null)this.nextReconnectAt+=elapsed;this.suspendedAt=null;
   }
+  // A click inside the page proves it is alive: nothing automatic touches it for a while.
+  if(this.interactedAt!==null&&now-this.interactedAt<INTERACTION_TRUST&&!this.offline)return;
   if(this.offline){
    // A flapping connection cannot produce a rapid reload loop.
    if(now-this.lastReconnectAt<NETWORK_RETRY_GAP)return;
@@ -83,7 +91,8 @@ export class EmbedPlayer{
   }
   if(this.loadedAt===null){
    if(now-this.loadStartedAt<LOAD_WINDOWS[Math.min(this.loadRetries,LOAD_WINDOWS.length-1)])return;
-   this.loadRetries++;this.navigate(`Still reconnecting · attempt ${this.loadRetries}. Pause to stop.`,{reason:'load',attempt:this.loadRetries,failover:this.loadRetries>=3});return;
+   if(this.loadRetries>=MAX_LOAD_RETRIES){if(!this.gaveUp){this.gaveUp=true;this.recoveryMessage='The stream page is not responding · Reload stream, or Open stream in a new tab.';this.emit('reconnect',{reason:'gaveup'});}return;}
+   this.loadRetries++;this.navigate(`The stream page is slow to load · attempt ${this.loadRetries} of ${MAX_LOAD_RETRIES}.`,{reason:'load',attempt:this.loadRetries,failover:!this.everLoaded&&this.loadRetries>=2});return;
   }
   if(this.autoReconnect&&this.nextReconnectAt!==null&&now>=this.nextReconnectAt){this.loadRetries=0;this.navigate('Refreshing stream connection…');}
  }

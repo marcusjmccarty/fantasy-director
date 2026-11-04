@@ -77,27 +77,29 @@ export function fantasyMatchup(data,teamId,games=[],matchupId=null){
 // Without an opponent the opponent columns are left empty (the table is "solo").
 // Phones show "J. Daniels"; team defenses and one-word names stay whole.
 const shortName=n=>{const words=String(n||'').trim().split(/\s+/);return words.length<2||/D\/ST$/i.test(n)?n:words[0][0]+'. '+words.slice(1).join(' ');};
+const number=v=>typeof v==='number'&&Number.isFinite(v);
+const nameLabel=n=>`<span class="full">${escape(n)}</span><span class="short" aria-hidden="true">${escape(shortName(n))}</span>`;
+const nameCell=(p,side,emptyWord)=>p?`<td class="h2h-name ${side}"><span class="h2h-player${p.active?' on':''}"><b>${nameLabel(p.name)}</b><small>${p.active?'<i class="player-live-dot" aria-hidden="true"></i>':''}${escape(p.team)} · ${escape(p.status)}</small></span></td>`:`<td class="h2h-name ${side} empty"><span class="h2h-player"><b>${emptyWord}</b></span></td>`;
+const pointsCell=(p,other,side)=>{const v=p?.points,lead=number(v)&&number(other?.points)&&v>other.points;return `<td class="h2h-pts ${side}${lead?' lead':''}${number(v)&&v<0?' sb-negative':''}">${p?formatPoints(v):''}</td>`;};
+const slotCell=(a,b)=>`<td class="h2h-slot"><span>${escape(a?.slot||b?.slot||'')}</span></td>`;
+const row=(a,b,opponent,cls='')=>opponent?`<tr${cls?` class="${cls}"`:''}>${nameCell(a,'mine','Empty')}${pointsCell(a,b,'mine')}${slotCell(a,b)}${pointsCell(b,a,'theirs')}${nameCell(b,'theirs','Empty')}</tr>`:`<tr${cls?` class="${cls}"`:''}>${slotCell(a)}${nameCell(a,'mine','')}${pointsCell(a,null,'mine')}</tr>`;
+// Starters slot by slot: yours on the left, the opponent's on the right. Alone, the list reads slot, name, points.
 export function headToHead(yours,opponent){
- // Starters only; the bench is listed separately by benchList and never scores.
  const mine=(yours?.players||[]).filter(p=>!p.bench),theirs=(opponent?.players||[]).filter(p=>!p.bench),used=new Set();
  const pairs=mine.map(p=>{const i=theirs.findIndex((q,k)=>!used.has(k)&&q.slot===p.slot);if(i>=0)used.add(i);return [p,i>=0?theirs[i]:null];});
  theirs.forEach((q,k)=>{if(!used.has(k))pairs.push([null,q]);});
- const number=v=>typeof v==='number'&&Number.isFinite(v);
- const label=n=>`<span class="full">${escape(n)}</span><span class="short" aria-hidden="true">${escape(shortName(n))}</span>`;
- const name=(p,side)=>p?`<td class="h2h-name ${side}"><span class="h2h-player${p.active?' on':''}"><b>${label(p.name)}</b><small>${p.active?'<i class="player-live-dot" aria-hidden="true"></i>':''}${escape(p.team)} · ${escape(p.status)}</small></span></td>`:`<td class="h2h-name ${side} empty"><span class="h2h-player"><b>${opponent?'Empty':''}</b></span></td>`;
- const points=(p,other,side)=>{const v=p?.points,lead=number(v)&&number(other?.points)&&v>other.points;return `<td class="h2h-pts ${side}${lead?' lead':''}${number(v)&&v<0?' sb-negative':''}">${p?formatPoints(v):''}</td>`;};
- const slot=(a,b)=>`<td class="h2h-slot"><span>${escape(a?.slot||b?.slot||'')}</span></td>`;
- // Alone, the list reads slot, name, points.
- if(!opponent)return pairs.map(([a])=>`<tr>${slot(a)}${name(a,'mine')}${points(a,null,'mine')}</tr>`).join('');
- return pairs.map(([a,b])=>`<tr>${name(a,'mine')}${points(a,b,'mine')}${slot(a,b)}${points(b,a,'theirs')}${name(b,'theirs')}</tr>`).join('');
+ return pairs.map(([a,b])=>row(a,b,!!opponent)).join('');
 }
-
-// Each side's bench (and IR) as one compact wrapped line, under the starters.
-// Bench points never count toward the matchup, so they are shown quietly.
-export function benchList(yours,opponent,{points=true}={}){
- const side=(team,cls)=>{const list=(team?.players||[]).filter(p=>p.bench);return list.length?`<div class="mu-bench-side ${cls}"><span class="mu-label">${cls==='mine'?'Your bench':'Their bench'}</span><ul>${list.map(p=>`<li${p.slot==='IR'?' class="ir"':''} title="${escape(p.name+' · '+[p.team,p.status].filter(Boolean).join(' · ')+(p.slot==='IR'?' · injured reserve':''))}">${escape(shortName(p.name))}${points?` <b>${formatPoints(p.points)}</b>`:''}${p.slot==='IR'?' <i>IR</i>':''}</li>`).join('')}</ul></div>`:'';};
- return side(yours,'mine')+(opponent?side(opponent,'theirs'):'');
+// The benches (and IR) in the same columns, after a divider, for the part of the
+// rail you scroll down to. Bench points never count toward the matchup.
+export function benchRows(yours,opponent){
+ const mine=(yours?.players||[]).filter(p=>p.bench),theirs=opponent?(opponent.players||[]).filter(p=>p.bench):[];
+ if(!mine.length&&!theirs.length)return '';
+ const rows=[];for(let i=0;i<Math.max(mine.length,theirs.length);i++)rows.push(row(mine[i]||null,theirs[i]||null,!!opponent,'bench'));
+ return `<tr class="h2h-divider"><td colspan="${opponent?5:3}"><span>Bench</span></td></tr>`+rows.join('');
 }
+// Column widths for both tables, so the bench lines up under the starters.
+export const matchupColumns=opponent=>opponent?'<col class="c-name"><col class="c-pts"><col class="c-slot"><col class="c-pts"><col class="c-name">':'<col class="c-slot"><col class="c-name"><col class="c-pts">';
 
 // Score updates have no access to the player, director, roster or saved state.
 // An old request can never replace a newly selected league or replay mode.

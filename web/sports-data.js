@@ -15,7 +15,7 @@ export function normalizeSportGames(raw,sport){
 export function normalizeSportPreferences(value={}){
  const object=v=>v&&typeof v==='object'&&!Array.isArray(v)?v:{};value=object(value);
  const streams={};for(const [key,entry] of Object.entries(object(value.streams))){if(!/^(nba|nhl|mlb):\d+$/.test(key))continue;const links={};for(const field of ['primary','backup'])try{if(typeof entry?.[field]==='string')links[field]=safeVideo(entry[field]);}catch{}links.mode=['custom','auto','NTV','StreamCorner'].includes(entry?.mode)?entry.mode:'custom';streams[key]=links;}
- return {streams,leagueId:/^\d{1,12}$/.test(value.leagueId)?value.leagueId:'',teamId:/^\d+$/.test(value.teamId)?value.teamId:'',swid:typeof value.swid==='string'?value.swid.slice(0,80):'',s2:typeof value.s2==='string'?value.s2.slice(0,2048):'',muted:!!value.muted,auto:value.auto!==false,autoReconnect:value.autoReconnect!==false,autoDiscover:value.autoDiscover!==false,leagueSeason:Number.isInteger(value.leagueSeason)?value.leagueSeason:null,delay:Math.min(600,Math.max(0,Number.isFinite(Number(value.delay))?Number(value.delay):30))};
+ return {streams,leagueId:/^\d{1,12}$/.test(value.leagueId)?value.leagueId:'',teamId:/^\d+$/.test(value.teamId)?value.teamId:'',swid:typeof value.swid==='string'?value.swid.slice(0,80):'',s2:typeof value.s2==='string'?value.s2.slice(0,2048):'',muted:!!value.muted,auto:value.auto!==false,autoReconnect:value.autoReconnect===true,prefsVersion:Number.isInteger(value.prefsVersion)?value.prefsVersion:0,chatName:typeof value.chatName==='string'?value.chatName.replace(/[\u0000-\u001f\u007f<>]/g,'').trim().slice(0,24):'',autoDiscover:value.autoDiscover!==false,leagueSeason:Number.isInteger(value.leagueSeason)?value.leagueSeason:null,delay:Math.min(600,Math.max(0,Number.isFinite(Number(value.delay))?Number(value.delay):30))};
 }
 export function sportPriority(game,followed=[]){
  const mine=game.teams.some(t=>followed.includes(t.id)),scores=game.teams.map(t=>t.score),known=scores.every(s=>s!==null),difference=known?Math.abs(scores[0]-scores[1]):Infinity;
@@ -24,10 +24,13 @@ export function sportPriority(game,followed=[]){
  const runners=game.sport==='mlb'&&!!(game.situation.onSecond||game.situation.onThird);
  return (mine?100:0)+(late&&close?25:close?5:0)+(runners?10:0);
 }
-export function chooseSportGame(games,{streams={},followed=[],currentId=null,manual=false,blocked=new Set(),now=Date.now(),lastSwitch=0}={}){
+// stayThrough: the current picture is a website player that would need a click after any switch,
+// so a break is only worth leaving for a game with one of the viewer's own players.
+export function chooseSportGame(games,{streams={},followed=[],currentId=null,manual=false,blocked=new Set(),now=Date.now(),lastSwitch=0,stayThrough=false}={}){
  const eligible=games.filter(g=>g.state==='in'&&!g.onBreak&&!blocked.has(g.id)&&!!(streams[g.key]?.primary||streams[g.key]?.backup));
  const current=games.find(g=>g.id===currentId),stillAvailable=eligible.some(g=>g.id===currentId);
  if(stillAvailable&&(manual||now-lastSwitch<60000||!current.onBreak))return current;
+ if(stayThrough&&current&&current.state==='in'&&!blocked.has(current.id)&&!eligible.some(g=>g.id!==currentId&&g.teams.some(t=>followed.includes(t.id))))return current;
  return eligible.sort((a,b)=>sportPriority(b,followed)-sportPriority(a,followed)||a.id.localeCompare(b.id))[0]||null;
 }
 export function sportMatchup(data,teamId,matchId){

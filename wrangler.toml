@@ -1,6 +1,7 @@
 # Cloudflare Workers deployment: `npm run deploy` builds dist/ and uploads it.
 # The Worker serves the whole site (pages, scripts, the ESPN proxy, the
-# highlight resolver) from one script; no other Cloudflare resources are used.
+# highlight resolver) from one script. The league chat is a Durable Object
+# per room (SQLite-backed, available on the free plan).
 name = "fantasy-stream"
 main = "dist/server/index.js"
 compatibility_date = "2026-10-01"
@@ -15,3 +16,13 @@ workers_dev = true
 name = "API"
 namespace_id = "1001"
 simple = { limit = 120, period = 60 }
+
+# League chat rooms: one Durable Object per league (or public lounge), with
+# its last few hundred messages in SQLite and live WebSocket fan-out.
+[[durable_objects.bindings]]
+name = "CHAT"
+class_name = "ChatRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["ChatRoom"]

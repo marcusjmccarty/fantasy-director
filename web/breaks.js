@@ -4,6 +4,9 @@ import {F,playWindow} from './archive.js';
 import {replayPlayBounds} from './continuity.js';
 const STOP=/^(Timeout|Official Timeout|End Period|Two-minute warning|End of Half|End of Regulation)$/;
 const CONVERSION=/extra point|two.point|conversion/i;
+// Seconds a new play must have been logged before it ends a hold: a stream
+// further behind than the delay setting still shows the commercial for a while.
+export const RETURN_MARGIN=10;
 
 export function nextFootball(game,types,index){
  return game.plays.slice(index+1).find(p=>p[F.T]>game.plays[index][F.T]&&playWindow(types[p[F.TYPE]],p[F.TEXT])>0&&!CONVERSION.test(types[p[F.TYPE]]));
@@ -64,7 +67,8 @@ export class BreakControl{
     // A review can overturn the score without replacing its play ID. Retain
     // the pre-touchdown total through PAT updates; 7 -> 6 is not an overturn.
     const overturned=scoreKnown&&hold?.before?.length===score.length&&score.length>0&&score.every((n,i)=>Number(n)<=Number(hold.before[i]));
-    if(hold&&!increased&&g.phase!=='break'&&(fresh||overturned)&&g.possession>=0&&g.down>0)hold=null;
+    const settled=!(g.sinceLogged>=0)||g.sinceLogged>=RETURN_MARGIN;
+    if(hold&&!increased&&g.phase!=='break'&&(fresh&&settled||overturned)&&g.possession>=0&&g.down>0)hold=null;
     if(increased||g.phase==='break'&&g.breakKind==='score'){
      hold=g.celebrating?{key:null,playId:null,before:hold?.before??(increased?[...previous.score]:null),kind:'score'}:{key,playId:g.lastPlayId||hold?.playId,before:hold?.before??(increased?[...previous.score]:null),kind:'score'};if(!g.celebrating)released.add(g.id);
     }
