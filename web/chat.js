@@ -7,11 +7,11 @@ const RECONNECT=[2000,4000,8000,15000,30000],POLL_VISIBLE=4000,POLL_HIDDEN=20000
 export class ChatClient{
  constructor({room='',fetcher=(...args)=>fetch(...args),socket=typeof WebSocket==='undefined'?null:url=>new WebSocket(url),origin='',onHistory=()=>{},onMessage=()=>{},onPresence=()=>{},onState=()=>{},timer=(fn,ms)=>setTimeout(fn,ms),cancel=id=>clearTimeout(id),hidden=()=>false}={}){
   Object.assign(this,{room,fetcher,socket,origin,onHistory,onMessage,onPresence,onState,timer,cancel,hidden});
-  this.messages=[];this.lastId=0;this.state='idle';this.ws=null;this.failures=0;this.pollTimer=null;this.retryTimer=null;this.openTimer=null;this.stableTimer=null;this.heartbeatTimer=null;this.pongTimer=null;this.socketBlockedUntil=0;this.closed=true;this.pending=new Map();this.nonce=0;this.epoch=0;this.historyLoaded=false;
+  this.messages=[];this.removed=new Set();this.lastId=0;this.state='idle';this.ws=null;this.failures=0;this.pollTimer=null;this.retryTimer=null;this.openTimer=null;this.stableTimer=null;this.heartbeatTimer=null;this.pongTimer=null;this.socketBlockedUntil=0;this.closed=true;this.pending=new Map();this.nonce=0;this.epoch=0;this.historyLoaded=false;
  }
  setState(state,detail=''){if(this.state===state&&this.detail===detail)return;this.state=state;this.detail=detail;this.onState(state,detail);}
  // Switch rooms (a league connected, a sport changed): start over.
- setRoom(room){if(room===this.room&&!this.closed)return;this.close();this.room=room;this.messages=[];this.lastId=0;this.historyLoaded=false;this.onHistory([]);this.onPresence(0);if(room)this.connect();}
+ setRoom(room){if(room===this.room&&!this.closed)return;this.close();this.room=room;this.messages=[];this.removed.clear();this.lastId=0;this.historyLoaded=false;this.onHistory([]);this.onPresence(0);if(room)this.connect();}
  connect(){
   // No origin (a test sandbox, a file:// preview): nothing to connect to.
   if(!this.room||!this.origin)return;this.closed=false;
@@ -64,12 +64,12 @@ export class ChatClient{
  }
  receive(data){
   if(!data||typeof data!=='object')return;
-  if(data.type==='removed'){const ids=new Set(data.ids||[]);this.messages=this.messages.filter(m=>!ids.has(m.id));this.onHistory(this.messages);return;}
+  if(data.type==='removed'){for(const id of data.ids||[])this.removed.add(id);while(this.removed.size>KEEP*2)this.removed.delete(this.removed.values().next().value);this.messages=this.messages.filter(m=>!this.removed.has(m.id));this.onHistory(this.messages);return;}
   if(data.type==='history'||data.type==='messages'){
    const reset=data.type==='history'||data.reset===true,known=new Set(this.messages.map(m=>m.id));
    if(reset)this.messages=[];
    const fresh=this.absorb(data.messages||[]).filter(m=>!known.has(m.id));
-   if(reset&&data.type!=='history'){this.onHistory(this.messages);for(const m of fresh)this.onMessage(m,false,true);if(Number.isFinite(data.count))this.onPresence(data.count);return;}
+   if(reset&&data.type!=='history'){if(this.messages.length!==known.size||this.messages.some(m=>!known.has(m.id)))this.onHistory(this.messages);for(const m of fresh)this.onMessage(m,false,true);if(Number.isFinite(data.count))this.onPresence(data.count);return;}
    if(data.type==='history'){this.historyLoaded=true;this.onHistory(this.messages);}else for(const m of fresh)this.onMessage(m);if(Number.isFinite(data.count))this.onPresence(data.count);return;}
   if(data.type==='message'){const sent=data.nonce&&this.pending.get(data.nonce);if(sent){this.pending.delete(data.nonce);sent.resolve({ok:true});}for(const m of this.absorb([data.message]))this.onMessage(m,!!sent);return;}
   if(data.type==='presence'||data.type==='pong'){if(Number.isFinite(data.count))this.onPresence(data.count);return;}
@@ -78,7 +78,7 @@ export class ChatClient{
  }
  absorb(list){
   const fresh=[];
-  for(const m of list){if(!m||!Number.isFinite(Number(m.id))||this.messages.some(x=>x.id===m.id))continue;fresh.push(m);this.messages.push(m);this.lastId=Math.max(this.lastId,Number(m.id));}
+  for(const m of list){if(!m||!Number.isFinite(Number(m.id))||this.removed.has(m.id)||this.messages.some(x=>x.id===m.id))continue;fresh.push(m);this.messages.push(m);this.lastId=Math.max(this.lastId,Number(m.id));}
   this.messages.sort((a,b)=>a.id-b.id);if(this.messages.length>KEEP)this.messages.splice(0,this.messages.length-KEEP);
   return fresh;
  }

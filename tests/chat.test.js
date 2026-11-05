@@ -206,3 +206,12 @@ test('SQLite retention, alarms, moderation broadcasts and old-lounge cleanup wor
  assert.deepEqual((await cleared.json()).removed,[legacy.id]);assert.equal(ws.closed,true);assert.equal(room.core.store.oldest(),null);
  db.close();
 });
+
+test('late polls and socket messages cannot resurrect a locally acknowledged removal',()=>{
+ const client=new ChatClient({socket:null}),message={id:1,text:'removed'};
+ client.receive({type:'history',messages:[message]});client.receive({type:'removed',ids:[1]});
+ client.receive({type:'messages',reset:true,messages:[message]});client.receive({type:'message',message});
+ assert.deepEqual(client.messages,[]);
+ client.setRoom('nfl:league:2');client.receive({type:'history',messages:[message]});
+ assert.deepEqual(client.messages,[message],'IDs in another room are independent');client.close();
+});

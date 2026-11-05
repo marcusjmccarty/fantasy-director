@@ -700,8 +700,10 @@ function renderScreen(){
  $('switching').hidden=!switching&&!starting;
  if(switching)setText('switching',`Up next · ${pend.name}`);else if(starting)setText('switching',S.unmuteHint?'Loading the replay video · if it waits, press play inside it':'Loading the replay video…');
  // Touch devices get the outside link immediately; desktop gets it after twenty seconds without footage.
- const openedAt=starting?pool.get(p.id)?.openedAt:null,stuck=starting&&pool.current.played===false&&(touch()||pool.now()-openedAt>LOAD_LIMIT);
- $('frameHelp').hidden=!stuck;if(stuck)$('frameOpen').href=archiveGame(p.id)?.embed||'#';
+ const openedAt=starting?pool.get(p.id)?.openedAt:null,stuck=starting&&pool.current.played===false&&pool.now()-openedAt>LOAD_LIMIT;
+ const waitingId=S.pending?.id||(p.kind==='game'?p.id:null),waitingSlot=waitingId&&pool.get(waitingId);
+ const phoneReplay=touch()&&S.mode==='replay'&&S.playing&&!S.wontPlay&&waitingSlot?.player.kind==='provider'&&!waitingSlot.player.played?archiveGame(waitingId):null;
+ $('frameHelp').hidden=!(stuck||phoneReplay?.embed);if(stuck||phoneReplay?.embed)$('frameOpen').href=phoneReplay?.embed||archiveGame(p.id)?.embed||'#';
  // a website player stays up through the break, dimmed, with a word on why
  const dimmed=!overlay&&S.dimmed&&pool.visible===S.dimmed.id&&p.kind==='game'&&p.id===S.dimmed.id;
  $('screen').classList.toggle('dimmed',!!dimmed);$('breakChip').hidden=!dimmed;
