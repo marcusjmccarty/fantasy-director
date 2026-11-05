@@ -1,5 +1,5 @@
 import {StreamFinder,refusesFrame} from '../web/stream-finder.js';
-import {stripEnds,stripTabStop,stripKeys} from '../web/strip.js';
+import {stripEnds,stripTabStop,stripKeys,mountGameTiles} from '../web/strip.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
@@ -16,8 +16,8 @@ class Pool{constructor(host,options){this.options=options;this.slots=new Map();t
 function app(fetcher,{sport='nba',stored={}}={}){const elements=new Map([...html.matchAll(/id="([^"]+)"/g)].map(m=>[m[1],new Element()])),stage=new Element(),events=new Map(),storage=new Map(Object.entries(stored)),timers=new Map();let timer=0;
  elements.get('games').addEventListener=function(name,fn){(this.listeners??={})[name]=fn;};
  const document={getElementById:id=>{assert.ok(elements.has(id),id);return elements.get(id);},querySelector:()=>stage,addEventListener:(n,fn)=>events.set(n,fn),visibilityState:'visible'};
- const ctx={StreamFinder,refusesFrame,stripEnds,stripTabStop,stripKeys,forgetESPN,...data,esc:data.escapeHTML,safeVideo,streamType,teamColor,teamLogo,headToHead,benchRows,matchupColumns,nearStart,mountChat,chatRoomFor,normalizeHighlights,mergeHighlights,highlightView,playable,PlayerPool:Pool,document,location:{search:'?sport='+sport},URLSearchParams,AbortController,AbortSignal,Response,Date,console,fetch:fetcher,window:{addEventListener(){}},navigator:{onLine:true},localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},setTimeout:(fn,ms)=>{timers.set(++timer,{fn,ms});return timer;},clearTimeout:id=>timers.delete(id)};
- vm.createContext(ctx);vm.runInContext(source+'\nglobalThis.app={S,pool,streamFinder,refreshStreamLinks,loadGames,loadLeague,renderGuide,renderFantasy,renderTransport,selectGame,setPlaying,direct,changeDate,rotateSource,tick,saveStreamLink,openStream,selectReplay,setMode,playClip,leaveClip,get saved(){return saved;}};',ctx);return {...ctx.app,el:id=>elements.get(id),stage,document,events,storage,timers};}
+ const ctx={StreamFinder,refusesFrame,stripEnds,stripTabStop,stripKeys,mountGameTiles,forgetESPN,...data,esc:data.escapeHTML,safeVideo,streamType,teamColor,teamLogo,headToHead,benchRows,matchupColumns,nearStart,mountChat,chatRoomFor,normalizeHighlights,mergeHighlights,highlightView,playable,PlayerPool:Pool,document,location:{search:'?sport='+sport},URLSearchParams,AbortController,AbortSignal,Response,Date,console,fetch:fetcher,window:{addEventListener(){}},navigator:{onLine:true},localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},setTimeout:(fn,ms)=>{timers.set(++timer,{fn,ms});return timer;},clearTimeout:id=>timers.delete(id)};
+ vm.createContext(ctx);vm.runInContext(source+'\nglobalThis.app={S,pool,streamFinder,refreshStreamLinks,loadGames,loadLeague,renderGuide,renderFantasy,renderTransport,selectGame,setPlaying,direct,changeDate,rotateSource,tick,saveStreamLink,openStream,selectReplay,setMode,playClip,leaveClip,get saved(){return saved;}};',ctx);return {...ctx.app,window:ctx.window,el:id=>elements.get(id),stage,document,events,storage,timers};}
 const event=(id='1')=>({id,date:'2026-11-01T22:00Z',shortName:'ATL @ BOS',competitions:[{status:{type:{state:'in',name:'STATUS_IN_PROGRESS',shortDetail:'3rd 2:00'}},competitors:[{homeAway:'away',team:{id:'1',abbreviation:'ATL',displayName:'Atlanta'},score:'80'},{homeAway:'home',team:{id:'2',abbreviation:'BOS',displayName:'Boston'},score:'81'}]}]});
 const games=(sport='nba',date=data.localDate())=>({sport,date,season:2027,events:[event()]});
 const league=(id='123')=>({leagueId:id,sport:'nba',season:2027,name:'League',isPoints:true,scoringType:'H2H_POINTS',scoringPeriod:13,ownedTeamId:'1',teams:[{id:'1',name:'My team',players:[{id:'1',name:'Starter one',team:'ATL',teamId:'1',active:true,points:10}]},{id:'2',name:'Other team',players:[{id:'2',name:'Starter two',team:'BOS',teamId:'2',active:true,points:20}]}],matchups:[{id:'2',home:{teamId:'1',points:50},away:{teamId:'2',points:60}}]});
@@ -390,14 +390,14 @@ const inProgress=(id='1')=>event(id);
 const pregame=(id='1')=>{const e=event(id);e.date=new Date(Date.now()+3*3600000).toISOString();e.competitions[0].status.type={state:'pre',name:'STATUS_SCHEDULED',shortDetail:''};e.competitions[0].competitors.forEach(c=>delete c.score);return e;};
 const WATCH='https://ntv.st/watch/raptor/nba?source=0';
 const withNTV=(a,id='1')=>a.streamFinder.matches.set(id,{sources:[WATCH],options:[{provider:'NTV',url:WATCH}]});
-test('an NTV game loads no frame, picked or chosen automatically, and shows a real link to its watch page',async()=>{
- const a=app(async()=>Response.json(games()));await a.loadGames();withNTV(a);a.renderGuide();
+test('an unresolved NTV page has a fallback while a published NTV embed plays inside the sports player',async()=>{
+ const a=app(async()=>Response.json(games()));await a.loadGames();withNTV(a);a.streamFinder.resolved.set(WATCH,{url:WATCH,kind:'page'});a.renderGuide();
  assert.match(a.el('games').innerHTML,/Opens in new tab/);assert.doesNotMatch(a.el('games').innerHTML,/>Watch</);
  a.setPlaying(true);assert.equal(a.pool.opened,0,'automatic never opens it');assert.equal(a.S.playing,false,'and Play does not pretend to be playing');
  a.selectGame('1');assert.equal(a.pool.opened,0,'picking it opens no frame');assert.equal(a.S.current,'1');assert.doesNotMatch(a.el('games').innerHTML,/ON AIR|On screen/,'nothing is on screen to say so');assert.equal(a.el('overlay').hidden,false);assert.equal(a.el('ovOpen').hidden,false);assert.equal(a.el('ovOpen').href,WATCH);assert.match(a.el('ovTitle').textContent,/opens in a new tab/);
  assert.equal(a.el('playButton').hidden,true);assert.equal(a.el('reloadStream').hidden,true);assert.equal(a.el('nextStream').hidden,true);
  a.direct();a.tick();assert.equal(a.pool.opened,0);assert.equal(a.S.current,'1','the channel stays on the chosen tile');
- a.saved.streams['nba:1']={primary:'https://ntv.st/embed?t=pasted',backup:''};a.selectGame('1');assert.equal(a.pool.opened,0,'a pasted NTV link is the same host');
+ a.saved.streams['nba:1']={primary:'https://ntv.st/embed?t=pasted',backup:''};a.selectGame('1');assert.equal(a.pool.get('1').url,'https://ntv.st/embed?t=pasted','the published embed is inline');
  a.el('ovBack').onclick();assert.equal(a.S.current,null);
 });
 test('a game not started loads nothing and says when; the stream can be opened early, and a game that starts takes over by itself',async()=>{
@@ -489,4 +489,24 @@ test('a tile focused when the strip is rebuilt gets its focus back, across the s
 test('replay controls show only what works: no reload on a player that has none, and no channel chip while a replay is up',async()=>{
  const a=replayApp([{url:'https://ok.ru/videoembed/1',provider:'OK',type:'provider/ok'}]);a.setMode('replay');await settle();await a.selectReplay('g');a.pool.current.reload=undefined;a.renderTransport();assert.equal(a.el('reloadStream').hidden,true);assert.equal(a.el('autoChip').hidden,true);
  a.setMode('live');assert.equal(a.el('autoChip').hidden,false);
+});
+
+test('touch replay users get the external-player link immediately on every other league',async()=>{
+ const a=replayApp([{url:'https://ok.ru/videoembed/1',provider:'OK',type:'provider/ok'}]);
+ a.window.matchMedia=()=>({matches:true});a.setMode('replay');await settle();await a.selectReplay('g');
+ const p=a.pool.current;p.kind='provider';p.played=false;p.advances=0;a.S.replay.started=false;a.S.replay.waited=0;
+ a.renderTransport();assert.equal(a.el('frameHelp').hidden,false);assert.equal(a.el('frameOpen').href,'https://ok.ru/videoembed/1');
+});
+test('hidden Chat is skipped by keyboard navigation on league pages',()=>{
+ const a=app(async()=>Response.json(games()));a.el('chatTab').hidden=true;
+ a.el('highlightsTab').onkeydown({key:'ArrowRight',preventDefault(){}});
+ assert.equal(a.el('matchupPanel').hidden,false);assert.equal(a.el('chatPanel').hidden,true);
+ a.el('chatTab').onclick();assert.equal(a.el('chatPanel').hidden,true);
+});
+
+test('game tile visibility is restored across sports and toggles without restarting playback',async()=>{
+ for(const sport of ['nba','nhl','mlb']){
+  const a=app(async()=>Response.json(games(sport)),{sport,stored:{'fantasy-stream-hide-tiles':'true'}});assert.equal(a.el('gameTiles').hidden,true);assert.equal(a.el('gameTilesToggle')['aria-label'],'Show game tiles');
+  await a.loadGames();a.saved.streams[a.S.games[0].key]={primary:'https://example.test/live.m3u8',backup:''};a.selectGame('1');const before=a.pool.current;assert.ok(before);a.el('gameTilesToggle').onclick();assert.equal(a.el('gameTiles').hidden,false);assert.equal(a.pool.current,before);assert.equal(a.storage.get('fantasy-stream-hide-tiles'),'false');
+ }
 });

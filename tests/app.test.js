@@ -72,7 +72,7 @@ function app(fetcher=async()=>Response.json({events:[]}),{media=false,native=fal
  vm.createContext(ctx);
  if(native){ctx.attachMediaSource=async()=>null;const code=readFileSync(new URL('../web/native-player.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace('export class NativePlayer','class NativePlayer');vm.runInContext(code+'\nglobalThis.Native=NativePlayer;',ctx);}
  vm.runInContext(script+'\n globalThis.a={S,pool,streamFinder,refreshStreamLinks,fantasyFeed,director,coverage,clock,step,frame,picture,target,openPastReplay,selectWeek,applyReplayLinks,loadReplayArchive,updateBreaks,advanceClock,skipBreak,selectGame,excluded,cutTo,warm,startHighlight,updateHighlight,finishHighlight,syncFor,nudge,nfl,setMode,setPlaying,setDay,seekTo,replaySource,useRoster,importLeague,pollLive,pollLiveClips,prepareReplay,retryMissedReplays,failHighlight,render,init,roster,get saved(){return saved;}};',ctx);
- return {...ctx.a,time,timers,storage,page:document,stage,frameEvents,emitPage(name,event={}){for(const fn of pageEvents.get(name)||[])fn(event);},network:ctx.window.navigator, get saved(){return ctx.a.saved;},el:id=>elements.get(id)};
+ return {...ctx.a,window:ctx.window,time,timers,storage,page:document,stage,frameEvents,emitPage(name,event={}){for(const fn of pageEvents.get(name)||[])fn(event);},network:ctx.window.navigator, get saved(){return ctx.a.saved;},el:id=>elements.get(id)};
 }
 const player={name:'Jonathan Taylor',team:'IND',position:'RB'};
 const game={id:'A',name:'IND @ MIN',kind:'live',teams:[{id:'11',abbr:'IND'},{id:'16',abbr:'MIN'}],state:'in',phase:'live',possession:0,down:1,distance:10,yardsToGoal:40,nextSnapIn:null,date:'2026-11-01T18:00:00Z',scores:[],score:[0,0]};
@@ -1807,12 +1807,12 @@ test('Replay week: a tab left open across a week change moves the strip and the 
 });
 // ---------- first-draft pass: streams that refuse a frame ----------
 const NTV='https://ntv.st/watch/raptor/match?source=0';
-test('an NTV game never loads in a frame: pinned or chosen by the channel it follows on the tracker, with a real link to the video',()=>{
- const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':NTV};a.saved.delay=0;a.render();assert.match(a.el('games').html,/Opens in new tab/);a.setPlaying(true);a.step(a.time.now);
+test('an unresolved NTV watch page retains its tracker fallback while a published embed plays inline',()=>{
+ const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':NTV};a.streamFinder.resolved.set(NTV,{url:NTV,kind:'page'});a.saved.delay=0;a.render();assert.match(a.el('games').html,/Opens in new tab/);a.setPlaying(true);a.step(a.time.now);
  assert.equal(a.pool.get('A'),null,'the channel found the game and opened no frame');assert.equal(a.S.program.id,'A');assert.equal(a.picture('A'),'data');
  a.render();assert.equal(a.el('fieldView').hidden,false);assert.equal(a.el('fvOpen').hidden,false);assert.equal(a.el('fvOpen').href,NTV);assert.match(a.el('fvNote').textContent,/opens in a new tab/);
  a.selectGame('A');a.step(a.time.now);assert.equal(a.pool.get('A'),null,'a viewer picking it opens no frame either');assert.equal(a.el('fvOpen').hidden,false);assert.equal(a.el('nextStream').hidden,true,'no backup on the same host to try');
- a.saved.streams={'IND-MIN':'https://ntv.st/embed?t=pasted'};a.step(a.time.now);assert.equal(a.pool.get('A'),null,'a pasted embed link is the same host');
+ a.saved.streams={'IND-MIN':'https://ntv.st/embed?t=pasted'};a.step(a.time.now);assert.equal(a.pool.get('A').url,'https://ntv.st/embed?t=pasted','the published player is loaded inline');
  a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.step(a.time.now);assert.ok(a.pool.get('A'),'a link that can play here still does');
 });
 // ---------- a game that hasn't started ----------
@@ -1898,4 +1898,21 @@ test('a hidden tab asks for no stream links, and catches up when it comes back',
 });
 test('the way out of a replay that won\'t play is the main button, and trying again the second',()=>{
  const {a,g,p,to,since}=waitingFrame();p.played=false;to(since+8250);to(since+91000);a.render();assert.match(a.el('ovButton').className,/ghost/);a.S.wontPlay=null;a.S.program={kind:'standby'};a.S.pending=null;a.render();assert.doesNotMatch(a.el('ovButton').className||'',/ghost/);void g;
+});
+
+test('touch replay users get the external-player link immediately',()=>{
+ const {a,g,p,to,since}=waitingFrame();a.window.matchMedia=()=>({matches:true});p.played=false;
+ to(since+1000);a.render();assert.equal(a.el('frameHelp').hidden,false);assert.equal(a.el('frameOpen').href,g.embed);
+});
+test('hidden Chat is skipped by keyboard navigation and cannot be selected',()=>{
+ const a=app();a.el('chatTab').hidden=true;
+ a.el('scoresTab').onkeydown({key:'ArrowRight',preventDefault(){}});
+ assert.equal(a.el('matchupPanel').hidden,false);assert.equal(a.el('chatPanel').hidden,true);
+ a.el('chatTab').onclick();assert.equal(a.el('chatPanel').hidden,true);
+});
+
+test('hiding the game tiles preserves the playing source and restores the guide',()=>{
+ const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.saved.delay=0;a.setPlaying(true);a.step(a.time.now);const before=a.pool.get('A');
+ a.el('gameTilesToggle').onclick();assert.equal(a.el('gameTiles').hidden,true);assert.equal(a.el('gameTilesToggle')['aria-expanded'],'false');assert.equal(a.storage.get('fantasy-stream-hide-tiles'),'true');assert.equal(a.pool.get('A'),before);
+ a.el('gameTilesToggle').onclick();assert.equal(a.el('gameTiles').hidden,false);assert.equal(a.el('gameTilesToggle')['aria-label'],'Hide game tiles');assert.equal(a.pool.get('A'),before);
 });

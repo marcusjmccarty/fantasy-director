@@ -11,7 +11,7 @@ const entry={id:'game-1',sport:'nfl',title:'Indianapolis Colts at Minnesota Viki
 const request=url=>new Request('https://app.example/api/streams/resolve?url='+encodeURIComponent(url));
 const raw={success:true,live:[{id:'game-1',title:entry.title,tournament:'NFL',date:entry.start,sources:[{},{}]}],upcoming:[]};
 const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
-// A provider page that plays in a frame: NTV's own pages open in a new tab and are never resolved.
+// An independent provider exercises generic resolution separately from NTV's published API.
 const framed='https://streamcorner.st/watch/game-1?source=0',framedEmbed='https://player.example/embed?t=published',framedEntry={...entry,sources:[framed,framed.replace('source=0','source=1')]};
 const finderFetch=async url=>url.startsWith('/api/streams?')?Response.json({sport:'nfl',entries:[framedEntry]}):Response.json({page:new URL(url,'https://app.example').searchParams.get('url'),url:framedEmbed+(url.includes('source%3D1')?'2':'')});
 test('catalog uses published source indexes and excludes continuous channels, malformed entries and duplicates',()=>{
@@ -115,17 +115,25 @@ test('StreamCorner catalog accepts published timed events and ignores guessing a
 });
 test('NTV and StreamCorner remain separate exact-match options for the same game',async()=>{
  const other={...entry,id:'sc',provider:'StreamCorner',sources:['https://streamcorner.st/embed/live']};
- const f=new StreamFinder({fetcher:async url=>{assert.ok(url.startsWith('/api/streams?'),'an NTV page is never resolved');return Response.json({sport:'nfl',entries:[{...entry,provider:'NTV'},other]});}});
- await f.refresh([game],'nfl');assert.equal(f.options(game).length,3);assert.deepEqual(f.urls(game,[],'StreamCorner'),other.sources);assert.deepEqual(f.urls(game,[],'NTV'),entry.sources);
+ const f=new StreamFinder({fetcher:async url=>url.startsWith('/api/streams?')?Response.json({sport:'nfl',entries:[{...entry,provider:'NTV'},other]}):Response.json({page:new URL(url,'https://app.example').searchParams.get('url'),url:embed+(url.includes('source%3D1')?'2':'')})});
+ await f.refresh([game],'nfl');assert.equal(f.options(game).length,3);assert.deepEqual(f.urls(game,[],'StreamCorner'),other.sources);assert.deepEqual(f.urls(game,[],'NTV'),[embed,embed+'2']);
 });
 test('a provider outage does not discard a working independent catalog',async()=>{
  const event={'@type':'SportsEvent',name:entry.title,sport:'NFL',startDate:game.date,url:'/watch/game'};
  const response=await streamsCatalogAPI(new Request('https://app.example/api/streams?sport=nfl'),async url=>url.includes('ntv.st')?new Response('',{status:503}):new Response('<script type="application/ld+json">'+JSON.stringify(event)+'</script>'));
  const data=await response.json();assert.equal(response.status,200);assert.equal(data.entries[0].provider,'StreamCorner');assert.equal(data.providers[0].available,false);
 });
-test('NTV opens in a new tab: every spelling of its links is caught, none costs a lookup, and other hosts are left alone',async()=>{
- for(const url of [page,embed,'https://www.ntv.st/embed?t=x'])assert.equal(refusesFrame(url),true,url);
+test('NTV watch pages resolve to official inline embeds, including host aliases',async()=>{
+ for(const url of [page,'https://www.ntv.st/watch/raptor/game-1?source=0'])assert.equal(needsPlayerResolution(url),true,url);
+ for(const url of [embed,'https://www.ntv.st/embed?t=x','https://NTV.ST./embed?t=x'])assert.equal(refusesFrame(url),false,url);
+ let lookups=0;const f=new StreamFinder({fetcher:async url=>{if(url.includes('/resolve?')){lookups++;return Response.json({page:new URL(url,'https://app.example').searchParams.get('url'),url:embed});}return Response.json({sport:'nfl',entries:[entry]});}});
+ await f.refresh([game],'nfl');assert.equal(lookups,2);assert.deepEqual(f.urls(game),[embed]);assert.equal(f.original(embed),page);
+ assert.equal(await f.resolve('https://www.ntv.st/watch/raptor/game-1?source=0'),embed);
+ assert.equal(f.playable('https://NTV.ST./embed?t=published'),embed);
+});
+test('unresolved NTV pages and invalid provider results keep their fallback instead of loading an arbitrary unsandboxed page',async()=>{
+ for(const result of ['https://unrelated.example/embed?t=x','https://ntv.st/','https://ntv.st/embed']){
+  const f=new StreamFinder({fetcher:async()=>Response.json({page,url:result})});assert.equal(await f.resolve(page),page);assert.equal(refusesFrame(f.playable(page)),true);
+ }
  for(const url of ['https://notntv.st/embed','https://streamcorner.st/watch/a','https://ntv.st.example/embed','not a url',''])assert.equal(refusesFrame(url),false,url);
- let lookups=0;const f=new StreamFinder({fetcher:async url=>{if(url.includes('/resolve?'))lookups++;return Response.json({sport:'nfl',entries:[entry]});}});
- await f.refresh([game],'nfl');assert.equal(lookups,0);assert.deepEqual(f.urls(game),entry.sources);assert.equal(f.original(page),page);
 });

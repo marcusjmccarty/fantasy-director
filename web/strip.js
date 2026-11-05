@@ -8,3 +8,11 @@ export function stripKeys(event,list){
  const to=event.key==='Home'?0:event.key==='End'?all.length-1:Math.max(0,Math.min(all.length-1,at+(event.key==='ArrowRight'?1:-1)));
  event.preventDefault();event.stopPropagation();all[to].focus();all[to].scrollIntoView?.({block:'nearest',inline:'nearest'});
 }
+
+export function mountGameTiles({$,storage=localStorage}){
+ const guide=$('gameTiles'),button=$('gameTilesToggle');let hidden=false;
+ try{hidden=storage.getItem('fantasy-stream-hide-tiles')==='true';}catch{}
+ const render=()=>{guide.hidden=hidden;button.setAttribute('aria-expanded',String(!hidden));button.setAttribute('aria-label',hidden?'Show game tiles':'Hide game tiles');button.title=hidden?'Show game tiles':'Hide game tiles';};
+ button.onclick=()=>{hidden=!hidden;render();try{storage.setItem('fantasy-stream-hide-tiles',String(hidden));}catch{}if(!hidden)stripEnds($('games'),$('stripPrev'),$('stripNext'));};
+ render();
+}

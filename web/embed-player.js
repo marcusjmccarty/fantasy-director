@@ -12,10 +12,11 @@
 // is worth more than a retry. A host that does not answer gets the spaced
 // retries and the backup. After a few attempts the viewer gets the Reload and
 // Open stream buttons instead of a loop.
+import {ntvEmbedURL} from './stream-policy.js';
 const RECONNECT_EVERY=120000,LOAD_WINDOWS=[45000,60000,90000],MAX_LOAD_RETRIES=3,NETWORK_RETRY_GAP=10000,OFFLINE_SETTLE=5000,INTERACTION_TRUST=600000;
 export class EmbedPlayer{
  constructor(url,{now=()=>performance.now(),createFrame=()=>document.createElement('iframe'),autoReconnect=true,probe=null}={}){
-  this.kind='embed';this.url=url;this.now=now;this.listeners=new Map();this.inAd=false;this.error=null;this.wantPlay=false;this.target=null;
+  this.kind='embed';this.url=ntvEmbedURL(url)||url;this.now=now;this.listeners=new Map();this.inAd=false;this.error=null;this.wantPlay=false;this.target=null;
   this.primed=true;this.advances=2;this.loadedAt=null;this.audioLocked=false;this.isMuted=true;this.duration=NaN;this.visible=false;
   this.destroyed=false;
   this.autoReconnect=!!autoReconnect;this.loadStartedAt=null;this.nextReconnectAt=null;this.loadRetries=0;this.lastReconnectAt=-Infinity;this.suspendedAt=null;this.offline=false;this.offlineSince=null;this.recoveryMessage='';this.everLoaded=false;this.interactedAt=null;this.gaveUp=false;
@@ -24,12 +25,10 @@ export class EmbedPlayer{
  newFrame(){
   const f=this.createFrame();f.className='layer';f.title='Stream';
   f.classList?.toggle('on',this.visible);f.setAttribute('aria-hidden',String(!this.visible));f.tabIndex=this.visible?0:-1;
-  // This also confines nested players and ad frames. Keep playback/storage
-  // working, but never let an embedded page open tabs, navigate our window,
-  // launch browser dialogs or download files, even after a viewer clicks it.
-  // Let the provider request its own cookie/session access after a viewer's
-  // click. This does not grant access automatically or permit popup windows.
-  f.setAttribute('sandbox','allow-scripts allow-same-origin allow-forms allow-presentation allow-storage-access-by-user-activation');
+  // NTV rejects any sandbox attribute. Its published player is the only
+  // exception; it can open ad tabs after clicks. All other pages retain the
+  // sandbox, including arbitrary pages on NTV and lookalike domains.
+  if(!ntvEmbedURL(this.url))f.setAttribute('sandbox','allow-scripts allow-same-origin allow-forms allow-presentation allow-storage-access-by-user-activation');
   // The site's own player can fullscreen just its video after a viewer click.
   // Our button uses the stable outer stage; nested fullscreen can end when its
   // document reconnects, so the app preserves a stage fallback before reload.

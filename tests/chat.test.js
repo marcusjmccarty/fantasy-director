@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ChatRoomCore,MemoryChatStore,validateChatMessage,cleanChatName,cleanChatText,chatAPI} from '../server/chat.js';
+import {CHAT_TTL,ChatRoom,SqlChatStore,ChatRoomCore,MemoryChatStore,validateChatMessage,cleanChatName,cleanChatText,chatAPI} from '../server/chat.js';
 import {ChatClient,chatMessageHTML,chatText,chatRoomFor,mountChat} from '../web/chat.js';
 
 test('chat rules: names and text are trimmed, bounded and free of control characters; events need a key',()=>{
@@ -34,12 +34,12 @@ test('chat room: one client cannot flood it',()=>{
 });
 test('chat API: rooms are validated, cross-site origins refused, and the memory fallback serves plain requests',async()=>{
  assert.equal((await chatAPI(new Request('https://site.test/api/chat?room=nfl:league:12;drop'),{})).status,400);
- assert.equal((await chatAPI(new Request('https://site.test/api/chat?room=nhl:lounge',{headers:{Origin:'https://other.test'}}),{})).status,403);
- const post=await chatAPI(new Request('https://site.test/api/chat?room=nhl:lounge',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://site.test'},body:JSON.stringify({name:'Marcus',text:'hello'})}),{});
+ assert.equal((await chatAPI(new Request('https://site.test/api/chat?room=nhl:league:120',{headers:{Origin:'https://other.test'}}),{})).status,403);
+ const post=await chatAPI(new Request('https://site.test/api/chat?room=nhl:league:120',{method:'POST',headers:{'Content-Type':'application/json',Origin:'https://site.test'},body:JSON.stringify({name:'Marcus',text:'hello'})}),{});
  assert.equal(post.status,200);const sent=await post.json();assert.equal(sent.message.name,'Marcus');
- const get=await (await chatAPI(new Request('https://site.test/api/chat?room=nhl:lounge&since=0'),{})).json();assert.equal(get.messages.length,1);
- assert.equal((await chatAPI(new Request('https://site.test/api/chat?room=nhl:lounge',{method:'POST',body:'x'.repeat(5000)}),{})).status,400);
- assert.equal((await chatAPI(new Request('https://site.test/api/chat?room=nhl:lounge',{headers:{Upgrade:'websocket'}}),{})).status,501);
+ const get=await (await chatAPI(new Request('https://site.test/api/chat?room=nhl:league:120&since=0'),{})).json();assert.equal(get.messages.length,1);
+ assert.equal((await chatAPI(new Request('https://site.test/api/chat?room=nhl:league:120',{method:'POST',body:'x'.repeat(5000)}),{})).status,400);
+ assert.equal((await chatAPI(new Request('https://site.test/api/chat?room=nhl:league:120',{headers:{Upgrade:'websocket'}}),{})).status,501);
  // With the binding present the request goes to the room's object.
  let got=null;const env={CHAT:{idFromName:name=>'id:'+name,get:id=>({fetch:async request=>{got=id+' '+request.url;return new Response('ok');}})}};
  await chatAPI(new Request('https://site.test/api/chat?room=mlb:league:7'),env);assert.equal(got,'id:mlb:league:7 https://site.test/api/chat?room=mlb:league:7');
@@ -80,7 +80,7 @@ test('chat rendering: text is escaped, https links become links, events read dif
  assert.match(chatMessageHTML({id:1,at:0,name:'A<',text:'x',kind:'chat'},'B'),/^<li class="chat-msg" data-id="1"><span class="chat-name">A&lt;<\/span>/);
  assert.match(chatMessageHTML({id:1,at:0,name:'B',text:'x',kind:'chat'},'B'),/class="chat-msg mine"/);
  assert.match(chatMessageHTML({id:2,at:0,name:'',text:'TD · Taylor',kind:'event'}),/^<li class="chat-event"/);
- assert.equal(chatRoomFor('nfl','123'),'nfl:league:123');assert.equal(chatRoomFor('nhl',''),'nhl:lounge');assert.equal(chatRoomFor('nba','12345678901234'),'nba:lounge');
+ assert.equal(chatRoomFor('nfl','123'),'nfl:league:123');assert.equal(chatRoomFor('nhl',''),'');assert.equal(chatRoomFor('nba','12345678901234'),'');
 });
 test('chat tab: the controller asks for a name before the first message, counts unread lines while hidden and posts league events once',async()=>{
  const els=new Map();const el=id=>{if(!els.has(id)){const e={id,hidden:false,value:'',textContent:'',innerHTML:'',className:'',disabled:false,scrollTop:0,scrollHeight:0,clientHeight:0,insertAdjacentHTML(_,html){this.innerHTML+=html;},querySelector(){return null;},focus(){this.focused=true;}};els.set(id,e);}return els.get(id);};
@@ -95,7 +95,7 @@ test('chat tab: the controller asks for a name before the first message, counts 
  chat.client.receive({type:'message',message:{id:50,at:1,name:'Other',text:'yo',kind:'chat'}});assert.equal(el('chatCount').textContent,'1');
  open=true;chat.markRead();assert.equal(el('chatCount').textContent,'');
  chat.event('TD · Taylor · 12 yd run','401:7');await new Promise(r=>setTimeout(r,0));assert.equal(posted.at(-1).kind,'event');assert.equal(posted.at(-1).key,'401:7');
- chat.setRoom('nfl:lounge','NFL lounge');chat.event('TD','x');await new Promise(r=>setTimeout(r,0));assert.equal(posted.filter(p=>p.kind==='event').length,1,'the public lounge gets no scoring events');
+ chat.setRoom('','');assert.equal(el('chatTab').hidden,true);assert.equal(chat.client.messages.length,0);chat.event('TD','x');await new Promise(r=>setTimeout(r,0));assert.equal(posted.filter(p=>p.kind==='event').length,1,'the public lounge gets no scoring events');
 });
 
 test('chat client: with no page origin (a sandbox) it never connects or polls',()=>{
@@ -111,7 +111,7 @@ test('chat client: a room switch while a poll is in flight ignores the old room�
  client.setRoom('nfl:league:7');const second=timers.filter(t=>t.ms===0&&!t.cancelled).at(-1).fn();await new Promise(r=>setTimeout(r,0));assert.equal(pending.length,2);
  pending[1].resolve(Response.json({messages:[{id:1,at:1,name:'L',text:'league',kind:'chat'}],count:1}));await new Promise(r=>setTimeout(r,0));
  pending[0].resolve(Response.json({messages:[{id:3,at:1,name:'Lounge',text:'lounge line',kind:'chat'}],count:9}));await new Promise(r=>setTimeout(r,0));
- await Promise.all([first,second]);assert.deepEqual(seen,['history:league']);assert.equal(client.messages.length,1);
+ await Promise.all([first,second]);assert.deepEqual(seen,['history:','history:league']);assert.equal(client.messages.length,1);
  assert.equal(timers.filter(t=>t.ms===4000&&!t.cancelled).length,1,'only the live room re-arms a poll');client.close();
 });
 test('chat client: a socket that drops right after opening counts as a failure, and a late send answer drops the socket',async()=>{
@@ -121,4 +121,98 @@ test('chat client: a socket that drops right after opening counts as a failure, 
  const retry=timers.filter(t=>!t.cancelled&&t.ms>=2000).at(-1);retry.fn();const ws=sockets.at(-1);ws.onopen();
  const sending=client.send({kind:'chat',name:'Me',text:'hi'});const wait=timers.filter(t=>t.ms===8000).at(-1);wait.fn();
  assert.deepEqual(await sending,{error:'The room did not answer. Try again.'});assert.equal(client.ws,null);assert.equal(ws.closed,true);client.close();
+});
+
+
+test('public lounges are closed over GET, POST and WebSocket, even with a Durable Object binding',async()=>{
+ let routed=0;const env={CHAT:{idFromName(){routed++;throw Error('must not route');}}};
+ for(const sport of ['nfl','nba','nhl','mlb'])for(const init of [{},{method:'POST',body:'{}'},{headers:{Upgrade:'websocket'}}]){
+  const response=await chatAPI(new Request('https://site.test/api/chat?room='+sport+':lounge',init),env);
+  assert.equal(response.status,410);assert.match((await response.json()).error,/closed/);
+ }
+ assert.equal(routed,0);
+});
+test('retention deletes at one hour, even before a new post, without resetting message IDs',()=>{
+ assert.equal(CHAT_TTL,3600000);
+ let now=1000;const store=new MemoryChatStore(),core=new ChatRoomCore(store,{now:()=>now});
+ const first=core.post({name:'A',text:'old'},'a').message;now+=5000;
+ const second=core.post({name:'B',text:'recent'},'b').message;
+ now=first.at+CHAT_TTL;assert.deepEqual(core.history().map(m=>m.id),[second.id]);assert.equal(store.rows.length,1);
+ now=second.at+CHAT_TTL;assert.deepEqual(core.history(),[]);
+ assert.ok(core.post({name:'C',text:'new'},'c').message.id>second.id);
+});
+test('moderation fails closed, rejects cross-site and ambiguous deletes, and removes or clears the actual room',async()=>{
+ const key='k'.repeat(48),env={CHAT_MODERATOR_KEY:key},url='https://site.test/api/chat?room=nfl:league:992';
+ const call=(method,body,auth,origin='https://site.test')=>chatAPI(new Request(url,{method,headers:{Origin:origin,...(auth?{Authorization:'Bearer '+auth}:{})},...(body===undefined?{}:{body:JSON.stringify(body)})}),env);
+ await call('POST',{name:'Test',text:'remove me'});
+ for(const bad of [undefined,'wrong','k'.repeat(47)+'x']){
+  assert.equal((await call('DELETE',{id:1},bad)).status,403);
+  assert.equal((await (await call('GET')).json()).messages.length,1);
+ }
+ assert.equal((await call('DELETE',{clear:true},key,'https://evil.test')).status,403);
+ for(const body of [{id:0},{id:'1'},{id:1,clear:true},null,[]])assert.equal((await call('DELETE',body,key)).status,400);
+ assert.equal((await chatAPI(new Request(url+'&moderator=1',{headers:{Authorization:'Bearer '+key}}),env)).status,200);
+ assert.equal((await chatAPI(new Request(url+'&moderator=1',{headers:{Authorization:'Bearer '+key}}),{})).status,403);
+ assert.deepEqual((await (await call('DELETE',{id:1},key)).json()).removed,[1]);
+ assert.deepEqual((await (await call('GET')).json()).messages,[]);
+ assert.equal((await call('DELETE',{clear:true},key)).status,200);
+ for(const sport of ['nfl','nba','nhl','mlb'])assert.equal((await chatAPI(new Request('https://site.test/api/chat?room='+sport+':lounge',{method:'DELETE',headers:{Authorization:'Bearer '+key},body:'{"clear":true}'}),env)).status,200);
+});
+test('snapshots and reconnects replace deleted history; live removals clear it too',()=>{
+ const client=new ChatClient(),history=[],fresh=[];client.onHistory=m=>history.push(m.map(x=>x.id));client.onMessage=(m,own,rendered)=>fresh.push([m.id,rendered]);
+ const a={id:1,text:'old'},b={id:2,text:'new'};
+ client.receive({type:'history',messages:[a]});
+ client.receive({type:'messages',reset:true,messages:[b]});
+ assert.deepEqual(client.messages,[b]);assert.deepEqual(fresh,[[2,true]]);
+ client.receive({type:'history',messages:[]});assert.deepEqual(client.messages,[]);
+ client.receive({type:'message',message:b});client.receive({type:'removed',ids:[2]});assert.deepEqual(client.messages,[]);
+ assert.deepEqual(history,[[1],[2],[],[]]);
+});
+test('switching leagues clears immediately, resolves pending sends and ignores stale socket callbacks',async()=>{
+ const {sockets,factory}=fakeSockets(),timers=[];
+ const client=new ChatClient({origin:'https://site.test',socket:factory,timer:(fn,ms)=>{timers.push({fn,ms});return timers.length;},cancel:()=>{}});
+ client.setRoom('nfl:league:1');const old=sockets[0];old.onopen();
+ old.onmessage({data:JSON.stringify({type:'message',message:{id:1,text:'old room'}})});
+ const pending=client.send({name:'Me',text:'waiting'});
+ client.setRoom('nfl:league:2');assert.deepEqual(client.messages,[]);assert.match((await pending).error,/room changed/);
+ old.onopen();old.onmessage({data:JSON.stringify({type:'message',message:{id:9,text:'late'}})});
+ assert.deepEqual(client.messages,[]);assert.equal(client.state,'connecting');
+ client.setRoom('');assert.equal(client.closed,true);client.close();
+});
+test('moderator requests use authorization headers, never URL or message bodies',async()=>{
+ const key='secret'.repeat(8),calls=[];
+ const client=new ChatClient({room:'nfl:league:1',origin:'https://site.test',fetcher:async(url,options)=>{calls.push({url,options});return Response.json({ok:true,removed:[1]});}});
+ client.messages=[{id:1,text:'bad'}];
+ assert.deepEqual(await client.moderate(null,key),{ok:true});
+ assert.deepEqual(await client.moderate({id:1},key),{ok:true});assert.deepEqual(client.messages,[]);
+ for(const {url,options} of calls){assert.ok(!url.includes(key));assert.equal(options.headers.Authorization,'Bearer '+key);assert.ok(!String(options.body).includes(key));}
+ assert.match(chatMessageHTML({id:1,text:'bad',kind:'chat'},'',true),/data-remove-message="1"/);
+ assert.doesNotMatch(chatMessageHTML({id:1,text:'bad',kind:'chat'}),/data-remove-message/);
+});
+test('SQLite retention, alarms, moderation broadcasts and old-lounge cleanup work together',async()=>{
+ const {DatabaseSync}=await import('node:sqlite'),db=new DatabaseSync(':memory:');
+ const sql={exec(query,...args){const rows=db.prepare(query).all(...args);return {toArray:()=>rows,one:()=>rows[0]};}};
+ let next=null;const seen=[],ws={send:text=>seen.push(JSON.parse(text)),close(){this.closed=true;},deserializeAttachment:()=>({room:'nfl:lounge',ip:'a'})};
+ const state={storage:{sql,getAlarm:async()=>next,setAlarm:async value=>{next=value;},deleteAlarm:async()=>{next=null;}},getWebSockets:()=>[ws]};
+ const key='s'.repeat(48),room=new ChatRoom(state,{CHAT_MODERATOR_KEY:key}),now=Date.now();
+ room.core.store.insert({at:now-CHAT_TTL-1,name:'Old',text:'expired',kind:'chat',key:''});
+ const fresh=room.core.store.insert({at:now,name:'A',text:'fresh',kind:'chat',key:''});
+ const response=await room.fetch(new Request('https://site.test/api/chat?room=nfl:league:12'));assert.equal(response.status,200);
+ assert.deepEqual((await response.json()).messages.map(m=>m.id),[fresh.id]);assert.ok(next>=now+CHAT_TTL);
+ assert.deepEqual(seen[0],{type:'removed',ids:[1]});
+ room.core.now=()=>now+CHAT_TTL+1;next=null;await room.alarm();assert.deepEqual(room.core.history(),[]);assert.equal(next,null);
+ const legacy=room.core.store.insert({at:now,name:'Test',text:'legacy test',kind:'chat',key:''});
+ assert.equal((await room.fetch(new Request('https://site.test/api/chat?room=nfl:lounge'))).status,410);
+ const cleared=await room.fetch(new Request('https://site.test/api/chat?room=nfl:lounge',{method:'DELETE',headers:{Authorization:'Bearer '+key},body:'{"clear":true}'}));
+ assert.deepEqual((await cleared.json()).removed,[legacy.id]);assert.equal(ws.closed,true);assert.equal(room.core.store.oldest(),null);
+ db.close();
+});
+
+test('late polls and socket messages cannot resurrect a locally acknowledged removal',()=>{
+ const client=new ChatClient({socket:null}),message={id:1,text:'removed'};
+ client.receive({type:'history',messages:[message]});client.receive({type:'removed',ids:[1]});
+ client.receive({type:'messages',reset:true,messages:[message]});client.receive({type:'message',message});
+ assert.deepEqual(client.messages,[]);
+ client.setRoom('nfl:league:2');client.receive({type:'history',messages:[message]});
+ assert.deepEqual(client.messages,[message],'IDs in another room are independent');client.close();
 });

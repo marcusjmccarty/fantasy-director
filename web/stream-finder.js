@@ -1,3 +1,4 @@
+import {ntvURL,ntvEmbedURL} from './stream-policy.js';
 import {safeVideo,streamType} from './roster.js';
 import {publicPlayerURL,embeddedPlayerFromHTML,boundedStreamText} from './stream-html.js';
 const words=s=>String(s||'').toLowerCase().replace(/\bla\b/g,'los angeles').replace(/\bn\.y\.\b/g,'new york').replace(/[^a-z0-9]+/g,' ').trim();
@@ -7,14 +8,14 @@ export function matchStream(game,entries,sport){
  const matches=entries.filter(e=>e&&Array.isArray(e.sources)&&e.sources.length&&e.sport===sport&&Number.isFinite(e.start)&&Math.abs(e.start-start)<=90*60000&&names.every(n=>(' '+words(e.title)+' ').includes(' '+n+' ')));
  return matches.length===1?matches[0]:null;
 }
-const providerPage=url=>['ntv.st','streamcorner.st'].includes(new URL(url).hostname);
-// NTV answers a sandboxed frame with its own error page, so its games open on its own site in a new tab; our frames stay sandboxed.
-export function refusesFrame(url){try{return /(?:^|\.)ntv\.st$/i.test(new URL(url).hostname);}catch{return false;}}
-export function needsPlayerResolution(url){try{const u=new URL(url);return !refusesFrame(url)&&streamType(url)==='embed/page'&&!/\/(?:embed|player|videoembed)(?:[/.]|$)/i.test(u.pathname);}catch{return false;}}
+const providerPage=url=>!!ntvURL(url)||new URL(url).hostname==='streamcorner.st';
+// Only a resolved NTV embed plays inline; unresolved watch pages keep a fallback link.
+export function refusesFrame(url){try{return /(?:^|\.)ntv\.st$/i.test(new URL(url).hostname.replace(/\.$/,''))&&!ntvEmbedURL(url);}catch{return false;}}
+export function needsPlayerResolution(url){try{const u=new URL(url);return streamType(url)==='embed/page'&&!/\/(?:embed|player|videoembed)(?:[/.]|$)/i.test(u.pathname);}catch{return false;}}
 export class StreamFinder{
  constructor({fetcher=fetch,now=()=>Date.now()}={}){this.fetcher=fetcher;this.now=now;this.matches=new Map();this.resolved=new Map();this.catalogs=new Map();this.generation=0;this.status='';this.enabled=true;this.pending=false;this.resolving=new Map();}
  cancel(){this.generation++;this.pending=false;this.matches.clear();}
- playable(url){try{url=safeVideo(url);}catch{return null;}if(!url)return null;if(!needsPlayerResolution(url))return url;return this.resolved.get(url)?.url||null;}
+ playable(url){try{url=safeVideo(url);}catch{return null;}if(!url)return null;if(!needsPlayerResolution(url))return ntvEmbedURL(url)||url;return this.resolved.get(url)?.url||null;}
  options(game){return this.matches.get(String(game.id))?.options||[];}
  urls(game,manual=[],preference='custom'){
   const match=this.enabled?this.matches.get(String(game.id)):null;
@@ -36,8 +37,9 @@ export class StreamFinder{
   try{
    let url;
    if(providerPage(page)){
-    const response=await this.fetcher('/api/streams/resolve?url='+encodeURIComponent(page),{signal:AbortSignal.timeout(12000),cache:'no-store'}),data=await response.json();
-    if(!response.ok||data.page!==page)throw new Error();url=safeVideo(data.url);if(!url||url===page)throw new Error();
+    const providerURL=ntvURL(page)?.href||page;
+    const response=await this.fetcher('/api/streams/resolve?url='+encodeURIComponent(providerURL),{signal:AbortSignal.timeout(12000),cache:'no-store'}),data=await response.json();
+    if(!response.ok||data.page!==providerURL)throw new Error();url=safeVideo(data.url);if(!url||url===page||ntvURL(page)&&!ntvEmbedURL(url))throw new Error();
    }else{
     // Generic pages are inspected in the visitor's browser under normal CORS rules.
     // They never become arbitrary upstream fetches on our Worker and receive no cookies.
