@@ -49,6 +49,21 @@ test('continuity: a queued old sound-recovery callback cannot remute resumed vid
  const h=harness(Promise.resolve(null));await h.player.ready;h.video.currentTime=4;h.player.play();h.player.muted=false;const old=[...h.timers.values()][0];h.player.pause();h.player.play();h.player.muted=false;
  const newest=[...h.timers.values()][0];old();assert.equal(h.player.audioLocked,false);assert.equal(h.video.muted,false);assert.equal(h.timers.size,1);newest();assert.equal(h.player.audioLocked,true,'the current recovery still works');
 });
+test('sound: a source still loading is not an audio refusal, so a stream shown before it starts keeps its sound',async()=>{
+ const h=harness(Promise.resolve(null));await h.player.ready;Object.assign(h.video,{readyState:0,currentTime:0,paused:false,muted:true});h.player.play();h.player.muted=false;
+ assert.equal(h.timers.size,0,'no footage yet, nothing to judge');assert.equal(h.video.muted,false);assert.equal(h.player.audioLocked,false);
+ const pending=harness(new Promise(()=>{}));pending.player.play();pending.player.muted=false;await Promise.resolve();
+ assert.equal(pending.timers.size,0,'nor while the source is attaching');assert.equal(pending.video.muted,false);assert.equal(pending.player.audioLocked,false);
+});
+test('sound: a real refusal of a source still loading still locks, through play()',async()=>{
+ let calls=0;const h=harness(Promise.resolve(null),()=>++calls===1?Promise.reject(Object.assign(new Error('gesture needed'),{name:'NotAllowedError'})):Promise.resolve());await h.player.ready;h.video.readyState=0;let notices=0;h.player.on('audiolocked',()=>notices++);h.player.muted=false;h.player.wantPlay=true;h.player.play();await Promise.resolve();
+ assert.equal(h.player.audioLocked,true);assert.equal(h.video.muted,true);assert.equal(notices,1);
+});
+test('sound: footage moving with sound on clears a stale lock, and a stalled one still locks',async()=>{
+ const h=harness(Promise.resolve(null));await h.player.ready;Object.assign(h.video,{readyState:4,currentTime:10,paused:false});h.player.play();h.player.audioLocked=true;h.player.muted=false;h.video.currentTime=12;[...h.timers.values()].at(-1)();
+ assert.equal(h.player.audioLocked,false,'the button goes once sound is really playing');assert.equal(h.video.muted,false);
+ h.player.muted=false;[...h.timers.values()].at(-1)();assert.equal(h.player.audioLocked,true,'no footage moved after a started stream: still a refusal');assert.equal(h.video.muted,true);
+});
 const liveSource={url:'https://video.example/live.m3u8',type:'application/vnd.apple.mpegurl',live:true};
 const check=(h,at,options={})=>{h.time.now=at;h.player.checkHealth({active:true,...options});};
 test('live recovery: uninterrupted advancing video never reloads during a three-hour session',async()=>{

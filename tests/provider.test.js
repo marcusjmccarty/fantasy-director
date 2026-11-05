@@ -527,6 +527,13 @@ test('a pre-roll ad that reports its own duration before the recording length is
 });
 
 // ---- message hygiene -------------------------------------------------------
+test('a pre-roll that reports before adShown arrives is not taken for the recording: the first real report is, and the seek is clamped to it',t=>{
+ const h=harness(t),p=h.init(h.make());p.play();p.seek(9000);
+ h.msg(p,{event:'timeupdate',time:3,duration:15});assert.equal(Number.isNaN(p.duration),true);assert.equal(p.knownDuration,false);
+ h.msg(p,{event:'adShown'});h.msg(p,{event:'timeupdate',time:4,duration:15});assert.equal(p.inAd,true);assert.equal(Number.isNaN(p.duration),true);
+ h.msg(p,{event:'timeupdate',time:0,duration:7000});assert.equal(p.inAd,false);assert.equal(p.duration,7000);assert.equal(p.knownDuration,false);
+ p.seek(9000);assert.equal(p.target,6999);p.destroy();
+});
 test('messages from another origin, another window, or with malformed payloads are ignored entirely',t=>{
  const h=harness(t);const p=h.make();
  h.msg(p,{event:'inited'},{origin:'https://attacker.example'});
@@ -984,6 +991,15 @@ test('EmbedPlayer: hidden it has no page and counts as ready; shown it loads the
   p.destroy();assert.equal(frame.src,'about:blank');assert.equal(frame.removed,true);
  }finally{globalThis.document=saved;}
 });
+test('PlayerPool.retryAudio(): the viewer\'s click also starts a direct video whose muted autoplay was refused, and only that',()=>{
+ const make=(kind,o)=>({kind,element:Object.assign(fakeElement(),{paused:true}),on(){},play(){this.plays=(this.plays||0)+1;},pause(){},destroy(){},setVisible(){},audioLocked:true,muted:true,wantPlay:true,...o});
+ const run=(player,muted=false)=>{const pool=new PlayerPool(fakeHost(),{create:()=>player,now:()=>0});pool.open('a',{url:'a'});pool.muted=muted;pool.visible='a';const asked=pool.retryAudio();return {asked,plays:player.plays||0,locked:player.audioLocked};};
+ assert.deepEqual(run(make('native')),{asked:true,plays:1,locked:false},'inside the gesture');
+ assert.equal(run(make('native',{wantPlay:false})).plays,0,'a video the viewer paused stays paused');
+ const moving=make('native');moving.element.paused=false;assert.equal(run(moving).plays,0,'one already playing needs no second play');
+ for(const kind of ['provider','embed'])assert.equal(run(make(kind)).plays,0,`${kind} has no media element to start`);
+ assert.deepEqual(run(make('native'),true),{asked:false,plays:0,locked:true},'a viewer who chose mute is left alone');
+});
 test('PlayerPool.show()/hide() tell players whether they are on screen',()=>{
  const host=fakeHost(),shown=[];
  const make=key=>({kind:'embed',element:fakeElement(),listeners:new Map(),on(){},play(){},pause(){},seek(){},destroy(){},near(){return true;},progressing:true,target:null,primed:true,advances:2,wantPlay:false,error:null,set muted(v){},get muted(){return true;},setVisible(on){shown.push([key,on]);}});
@@ -1025,4 +1041,22 @@ test('pausing cancels provider sound recovery without mistaking the pause for an
  t.after(()=>{globalThis.setTimeout=outer.setTimeout;globalThis.clearTimeout=outer.clearTimeout;});
  const p=h.init(h.make());p.play();h.prime(p,100);p.muted=false;assert.equal(timers.size,1);const callback=[...timers.values()][0];p.pause();assert.equal(timers.size,0);clear(p);callback();
  assert.equal(p.audioLocked,false);assert.equal(p.muted,false);assert.equal(p.wantPlay,false);assert.deepEqual(actions(p),[]);p.destroy();
+});
+
+// ---------- a told length can be wrong ----------
+test('a told length gives way only to long footage that keeps reporting another: not to one report, an ad, or a small difference',t=>{
+ const h=harness(t),p=h.init(h.make(EMBED,{duration:10000}));p.play();
+ for(const time of [0,1])h.msg(p,{event:'timeupdate',time,duration:8000});assert.equal(p.duration,10000,'two reports are not yet a pattern');assert.equal(p.knownDuration,true);
+ h.msg(p,{event:'timeupdate',time:2,duration:8000});assert.equal(p.duration,8000);assert.equal(p.knownDuration,false);assert.equal(p.corrected,true);
+ const ad=h.init(h.make(EMBED,{duration:10000}));ad.play();h.msg(ad,{event:'adShown'});for(let i=0;i<20;i++)h.msg(ad,{event:'timeupdate',time:i,duration:600});assert.equal(ad.inAd,true,'an ad, however long it reports');assert.equal(ad.duration,10000);
+ const near=h.init(h.make(EMBED,{duration:7990}));near.play();for(let i=0;i<20;i++)h.msg(near,{event:'timeupdate',time:i,duration:8000});assert.equal(near.duration,7990,'a rounding difference is left alone');assert.equal(near.knownDuration,true);
+});
+test('long footage of a slightly different length also ends an ad, or the player waits in it forever',t=>{
+ const h=harness(t),p=h.init(h.make(EMBED,{duration:7990}));const ads=[];p.on('ad',on=>ads.push(on));p.play();h.msg(p,{event:'adShown'});
+ for(const time of [0,1])h.msg(p,{event:'timeupdate',time,duration:8000});assert.equal(p.inAd,true);h.msg(p,{event:'timeupdate',time:2,duration:8000});assert.equal(p.inAd,false);assert.deepEqual(ads,[true,false]);assert.equal(p.duration,7990);
+});
+test('an end of file straight after one report of another length takes that length, and a target past it comes back inside',t=>{
+ const h=harness(t),p=h.init(h.make(EMBED,{duration:10000}));p.play();p.seek(9000);assert.equal(p.target,9000);let ended=0;p.on('ended',()=>ended++);
+ h.msg(p,{event:'timeupdate',time:0,duration:7000});assert.equal(p.duration,10000);h.msg(p,{event:'ended'});assert.equal(ended,1);assert.equal(p.duration,7000);assert.equal(p.corrected,true);assert.equal(p.target,6999);
+ const q=h.init(h.make(EMBED,{duration:10000}));q.play();h.msg(q,{event:'ended'});assert.equal(q.duration,10000,'an end alone teaches nothing');
 });

@@ -135,3 +135,7 @@ test('release: incomplete team scores cannot masquerade as an overturned touchdo
  assert.equal(update(control,{...live,scoreKnown:false,lastPlayId:'td'}).blocked.has('A'),true);
  assert.equal(update(control,{...live,score:[7,0],lastPlayId:'drive'}).blocked.size,0,'restored totals do not fabricate another score');
 });
+test('forget drops one game\'s evidence and leaves every other game\'s alone',()=>{
+ const control=new BreakControl();for(const map of [control.records,control.holds,control.live,control.positions]){map.set('A',1);map.set('B',2);}
+ control.forget('A');for(const map of [control.records,control.holds,control.live,control.positions]){assert.equal(map.has('A'),false);assert.equal(map.get('B'),2);}
+});

@@ -3,10 +3,10 @@
 // carry. Public pages only, on an allowlist; no video is proxied or decoded.
 import {publicPlayerURL,decodeEmbedHTML} from '../web/stream-html.js';
 const REPLAY_SITES={nba:{host:'basketballreplays.net',home:'https://basketballreplays.net/',pages:['https://basketballreplays.net/','https://basketballreplays.net/?page2','https://basketballreplays.net/?page3']},mlb:{host:'mlblive.net',home:'https://mlblive.net/',pages:['https://mlblive.net/','https://mlblive.net/?page2','https://mlblive.net/?page3']}};
-const NFL_REPLAY_HOST='nfl-video.com',NFL_REPLAY_PAGES=['https://nfl-video.com/2026','https://nfl-video.com/2026?page2','https://nfl-video.com/2026?page3','https://nfl-video.com/2026?page4','https://nfl-video.com/2026?page5','https://nfl-video.com/2026?page6'];
+const NFL_REPLAY_HOST='nfl-video.com',NFL_REPLAY_MAX_PAGE=20,nflListingPage=n=>n===1?'https://nfl-video.com/2026':'https://nfl-video.com/2026?page'+n;
 const MONTHS=['january','february','march','april','may','june','july','august','september','october','november','december'];
 const replayCache=new Map(),replayPending=new Map();
-const replayJSON=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
+const replayJSON=(data,status=200,life=0)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json','Cache-Control':life?'private, max-age='+life:'no-store','X-Content-Type-Options':'nosniff'}});
 async function replayText(url,host,fetcher){
  for(let hop=0;hop<3;hop++){
   const u=new URL(url);if(u.hostname!==host||u.protocol!=='https:'||u.port&&u.port!=='443')throw new Error('Unsupported replay site.');
@@ -19,9 +19,28 @@ async function replayText(url,host,fetcher){
  }
  throw new Error('Too many redirects.');
 }
-async function cachedReplay(key,fetcher,ttl,loader){
+async function cachedReplay(key,fetcher,life,loader){
  if(fetcher!==fetch)return loader();const now=Date.now(),hit=replayCache.get(key);if(hit&&hit.until>now)return hit.value;if(replayPending.has(key))return replayPending.get(key);
- const task=loader().then(value=>{if(replayCache.size>=256)replayCache.delete(replayCache.keys().next().value);replayCache.set(key,{until:Date.now()+ttl,value});return value;}).finally(()=>replayPending.delete(key));replayPending.set(key,task);return task;
+ const task=loader().then(value=>{if(replayCache.size>=256)replayCache.delete(replayCache.keys().next().value);replayCache.set(key,{until:Date.now()+life(value)*1000,value});return value;}).finally(()=>replayPending.delete(key));replayPending.set(key,task);return task;
+}
+// Seconds an answer may be reused. Anything short of a full answer is asked again soon, so a failure or a video not posted yet does not stick.
+// The newest listed week may still be missing a game the listing has not posted at all (Monday night's), however many it has.
+const nflWeekLife=(games,newest=false)=>!games.length?60:games.some(g=>!g.embed)?300:newest||games.length<13?900:21600;
+const replayListLife=games=>games.length?900:60;
+const replayPageLife=sources=>sources.length?1800:60;
+const edgeLife=(path,status,data)=>status>=500?30:status!==200&&status!==404?0:path==='/api/nfl-replays'?nflWeekLife(data.games||[],data.newest):path==='/api/replays'?(data.note?3600:replayListLife(data.games||[])):replayPageLife(data.sources||[]);
+// Cloudflare's shared cache in front of the slow public replay routes, so one cold isolate's walk of the replay sites serves every later visitor.
+// A no-op where caches.default is absent (tests, check-build, the local preview). The key holds only the named parameters and no headers,
+// and a request carrying credentials skips the cache altogether. Browsers get what the route says, never the shared lifetime; X-Edge-Cache tells a hit from a miss.
+export async function edgeCached(request,ctx,params,handler){
+ const cache=typeof caches==='undefined'?null:caches.default;
+ if(!cache||request.method!=='GET'||request.headers.has('Authorization')||request.headers.has('Cookie'))return handler();
+ const url=new URL(request.url),query=new URLSearchParams();for(const name of params)if(url.searchParams.has(name))query.set(name,url.searchParams.get(name));
+ const key=new Request(url.origin+url.pathname+'?'+query),hit=await cache.match(key).catch(()=>null);
+ if(hit){const headers=new Headers(hit.headers);headers.set('Cache-Control',hit.headers.get('X-Browser-Cache')||'no-store');headers.delete('X-Browser-Cache');headers.set('X-Edge-Cache','hit');return new Response(hit.body,{status:hit.status,headers});}
+ const response=await handler(),body=await response.clone().text();let life=0;try{life=edgeLife(url.pathname,response.status,JSON.parse(body));}catch{}
+ if(life&&!response.headers.has('Set-Cookie')){const headers=new Headers(response.headers);headers.set('X-Browser-Cache',response.headers.get('Cache-Control')||'no-store');headers.set('Cache-Control','public, max-age='+life);const stored=cache.put(key,new Response(body,{status:response.status,headers})).catch(()=>{});if(ctx?.waitUntil)ctx.waitUntil(stored);else await stored;}
+ response.headers.set('X-Edge-Cache','miss');return response;
 }
 // "Phoenix Suns vs. Golden State Warriors - NBA Regular Season - Full Game Replay - 2 November 2026"
 // "Milwaukee Brewers @ Tampa Bay Rays - MLB Full Game Replay - World Series Game 5 - October 28, 2026"
@@ -61,14 +80,14 @@ export async function replayCatalogAPI(request,fetcher=fetch){
  const sport=new URL(request.url).searchParams.get('sport');
  if(sport==='nhl')return replayJSON({sport,games:[],note:'No replay source for the NHL yet.'});
  const site=REPLAY_SITES[sport];if(!site)return replayJSON({error:'Choose a supported sport.'},400);
- try{const games=await cachedReplay('replays:'+sport,fetcher,900000,async()=>{const pages=await Promise.allSettled(site.pages.map(url=>replayText(url,site.host,fetcher)));const html=pages.filter(p=>p.status==='fulfilled').map(p=>p.value).join('\n');if(!html)throw new Error(pages[0].reason?.message||'unavailable');return parseReplayListing(html,sport);});return replayJSON({sport,games,fetchedAt:Date.now()});}
+ try{const games=await cachedReplay('replays:'+sport,fetcher,replayListLife,async()=>{const pages=await Promise.allSettled(site.pages.map(url=>replayText(url,site.host,fetcher)));const html=pages.filter(p=>p.status==='fulfilled').map(p=>p.value).join('\n');if(!html)throw new Error(pages[0].reason?.message||'unavailable');return parseReplayListing(html,sport);});return replayJSON({sport,games,fetchedAt:Date.now()});}
  catch(error){return replayJSON({sport,games:[],error:'Replays are unavailable right now. '+(error.message||'')},502);}
 }
 export async function replayResolveAPI(request,fetcher=fetch){
  if(request.method!=='GET')return replayJSON({error:'Use GET.'},405);
  const input=new URL(request.url).searchParams.get('url')||'';let page;
  try{page=new URL(input);if(input.length>2048||page.protocol!=='https:'||!Object.values(REPLAY_SITES).some(s=>s.host===page.hostname))throw new Error();}catch{return replayJSON({error:'Use a replay page from a supported site.'},400);}
- try{const sources=await cachedReplay('replay-page:'+page.href,fetcher,1800000,async()=>parseReplayPlayers(await replayText(page.href,page.hostname,fetcher),page.href));if(!sources.length)return replayJSON({page:page.href,sources:[],error:'That page has no player we can embed.'},404);return replayJSON({page:page.href,sources,resolvedAt:Date.now()});}
+ try{const sources=await cachedReplay('replay-page:'+page.href,fetcher,replayPageLife,async()=>parseReplayPlayers(await replayText(page.href,page.hostname,fetcher),page.href));if(!sources.length)return replayJSON({page:page.href,sources:[],error:'That page has no player we can embed.'},404);return replayJSON({page:page.href,sources,resolvedAt:Date.now()});}
  catch(error){return replayJSON({page:page.href,sources:[],error:'Could not read that replay page. '+(error.message||'')},502);}
 }
 
@@ -93,10 +112,23 @@ export async function nflReplayWeekAPI(request,fetcher=fetch){
  const week=Number(new URL(request.url).searchParams.get('week'));
  if(!Number.isInteger(week)||week<1||week>18)return replayJSON({error:'Choose a week.'},400);
  try{
-  const games=await cachedReplay('nfl-week:'+week,fetcher,43200000,async()=>{
-   let found=[];
-   // Later listing pages are a bonus: one that fails ends the walk with what the earlier pages gave.
-   for(const url of NFL_REPLAY_PAGES){let html;try{html=await replayText(url,NFL_REPLAY_HOST,fetcher);}catch(error){if(url===NFL_REPLAY_PAGES[0])throw error;break;}found=found.concat(parseNFLReplayListing(html,week));const weeks=[...html.matchAll(/nfl-week-(\d{2})-/g)].map(m=>Number(m[1]));if(weeks.length&&Math.min(...weeks)<week)break;}
+  const {games,newest}=await cachedReplay('nfl-week:'+week,fetcher,value=>nflWeekLife(value.games,value.newest),async()=>{
+   // The listing runs newest first, about 1.3 pages a week, and every page's sidebar links a few older games.
+   // So only the week most of a page is about says where the walk has reached; any one old link says nothing.
+   let found=[],newest=false,start=0;
+   for(let n=1;n<=NFL_REPLAY_MAX_PAGE;){
+    let html;try{html=await replayText(nflListingPage(n),NFL_REPLAY_HOST,fetcher);}catch(error){if(n===1)throw error;break;}
+    const here=parseNFLReplayListing(html,week),counts=new Map();for(const m of html.matchAll(/nfl-week-(\d{2})-/g))counts.set(Number(m[1]),(counts.get(Number(m[1]))||0)+1);
+    if(!counts.size)break;
+    const main=[...counts].sort((a,b)=>b[1]-a[1])[0][0];
+    if(n===1)newest=Math.max(...counts.keys())<=week;
+    // A jump that landed past the week goes back and walks from the top.
+    if(n===start&&main<week&&!here.length){start=0;n=2;continue;}
+    found=found.concat(here);
+    if(main<week||n>1&&found.length&&!here.length)break;
+    // Skip the pages that cannot hold this week: a Worker gets a limited number of requests per visit.
+    if(n===1&&main-week>1){start=Math.max(2,Math.floor(1+(main-week)*1.1));n=start;}else n++;
+   }
    const unique=[...new Map(found.map(g=>[g.slug,g])).values()].slice(0,18),out=[];
    for(let i=0;i<unique.length;i+=4)await Promise.all(unique.slice(i,i+4).map(async g=>{
     let embed='';
@@ -105,8 +137,8 @@ export async function nflReplayWeekAPI(request,fetcher=fetch){
     }catch{}
     out.push({...g,embed});
    }));
-   return out;
+   return {games:out,newest};
   });
-  return replayJSON({week,games,fetchedAt:Date.now()});
+  return replayJSON({week,games,newest,fetchedAt:Date.now()},200,nflWeekLife(games,newest));
  }catch(error){return replayJSON({week,games:[],error:'The replay listing is unavailable right now. '+(error.message||'')},502);}
 }

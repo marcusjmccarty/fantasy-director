@@ -2,10 +2,15 @@ import {alias} from './scoring.js';
 import {involvement} from './director.js';
 
 const escape=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+// A snapshot without totals shows the last tally the feed carried (live.js shownScore), so a blank poll does not read as 0-0.
+export const tallyOf=(g,i)=>g.scoreKnown===false?g.shownScore?.[i]??'—':g.score?.[i]??0;
+// Near its listed start (from 5 minutes before until an hour after, for a late start or a delay), a game still 'pre' is worth polling fast.
+export const nearStart=(g,now=Date.now())=>{const until=Date.parse(g.date)-now;return g.state==='pre'&&until<300000&&until>-3600000;};
 export const formatPoints=value=>typeof value==='number'&&Number.isFinite(value)?value.toFixed(2):'—';
+const KICKOFF_TIME=new Intl.DateTimeFormat([],{weekday:'short',hour:'numeric',minute:'2-digit'});
 const kickoff=g=>{
  const date=new Date(g.date||g.start*1000);
- return Number.isFinite(date.getTime())?date.toLocaleString([],{weekday:'short',hour:'numeric',minute:'2-digit'}):'Time TBD';
+ return Number.isFinite(date.getTime())?KICKOFF_TIME.format(date):'Time TBD';
 };
 
 // Compact chips for the league strip under the header: status, both teams with
@@ -46,7 +51,7 @@ export function fantasyBoard(data,teamId,games=[]){
   const game=games.find(g=>g.teams.some(t=>t.abbr===alias(p.team)));
   const involved=game&&involvement(game,[p])[0];
   const side=game?game.teams.findIndex(t=>t.abbr===alias(p.team)):-1,other=side>=0?game.teams[1-side]:null;
-  const line=!game?'No game':game.state==='pre'?kickoff(game):`${side===0?'@':'vs'} ${other?.abbr||''} ${game.score?.[side]??0}-${game.score?.[1-side]??0} · ${game.state==='post'?'Final':game.detail||'In progress'}`;
+  const line=!game?'No game':game.state==='pre'?kickoff(game):`${side===0?'@':'vs'} ${other?.abbr||''} ${tallyOf(game,side)}-${tallyOf(game,1-side)} · ${game.state==='post'?'Final':game.detail||'In progress'}`;
   const status=involved?(involved.role==='defense'?'Defending':involved.role==='kicker'?'In FG range':'On offense')+' · '+line:line;
   return {slot:p.slot||p.position,name:p.name,team:p.team,status,active:!!involved&&!p.bench,points:p.points,...(p.bench?{bench:true}:{})};
  });

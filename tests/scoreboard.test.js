@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {scoreCards,fantasyBoard,fantasyMatchup,FantasyScoreFeed,formatPoints} from '../web/scoreboard.js';
+import {scoreCards,fantasyBoard,fantasyMatchup,FantasyScoreFeed,formatPoints,nearStart} from '../web/scoreboard.js';
 import {fantasyScores} from '../server/api.js';
 
 const starter=(id,points,slot=2)=>({lineupSlotId:slot,playerPoolEntry:{appliedStatTotal:points,player:{id,fullName:'Player '+id,proTeamId:11,defaultPositionId:2,stats:[{scoringPeriodId:8,statSourceId:0,statSplitTypeId:1,appliedTotal:points}]}}});
@@ -154,6 +154,8 @@ test('fantasyBoard exposes structured players with plain-language status for the
  assert.deepEqual(board.players,[{slot:'RB',name:'Jonathan Taylor',team:'IND',status:'On offense · @ MIN 10-7 · Q2 4:10',active:true,points:12}]);
  assert.equal(fantasyBoard(data,'1',[{...live,state:'post',possession:-1,detail:'Final'}]).players[0].status,'@ MIN 10-7 · Final');
  assert.equal(fantasyBoard(data,'1',[]).players[0].status,'No game');
+ assert.equal(fantasyBoard(data,'1',[{...live,scoreKnown:false,score:[0,0],shownScore:[10,7]}]).players[0].status,'On offense · @ MIN 10-7 · Q2 4:10','a blank poll keeps the last tally');
+ assert.equal(fantasyBoard(data,'1',[{...live,scoreKnown:false,score:[0,0],shownScore:null}]).players[0].status,'On offense · @ MIN —-— · Q2 4:10','never a made-up 0-0');
 });
 
 test('the matchup table lists starters only; the bench follows in the same columns after a divider',()=>{
@@ -163,4 +165,8 @@ test('the matchup table lists starters only; the bench follows in the same colum
  const bench=benchRows(yours,theirs);assert.match(bench,/^<tr class="h2h-divider"><td colspan="5">/);assert.equal((bench.match(/<tr class="bench">/g)||[]).length,2);assert.match(bench,/Bench Guy/);assert.match(bench,/Their Bench/);assert.match(bench,/Hurt Guy/);
  assert.match(benchRows(yours,null),/colspan="3"/);assert.equal(benchRows({players:[p('QB','Only',1)]},null),'');
  assert.equal((matchupColumns(true).match(/<col/g)||[]).length,5);assert.equal((matchupColumns(false).match(/<col/g)||[]).length,3);
+});
+test('nearStart covers a listed start from 5 minutes before to an hour after, only while the game is pre',()=>{
+ const at=minutes=>new Date(1e12+minutes*60000).toISOString(),near=(minutes,state='pre')=>nearStart({state,date:at(minutes)},1e12);
+ assert.equal(near(4),true);assert.equal(near(-59),true);assert.equal(near(6),false);assert.equal(near(-61),false);assert.equal(near(1,'in'),false);assert.equal(nearStart({state:'pre'},1e12),false);
 });

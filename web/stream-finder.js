@@ -53,7 +53,7 @@ export class StreamFinder{
  async refresh(games,sport,manual=[]){
   if(this.pending)return false;const generation=++this.generation;this.pending=true;
   const savedPages=[...new Set(manual.filter(needsPlayerResolution))].slice(0,48);
-  const resolvePages=async pages=>{for(let i=0;i<pages.length;i+=3){await Promise.allSettled(pages.slice(i,i+3).map(page=>this.resolve(page)));if(generation!==this.generation)return false;}return true;};
+  const resolvePages=async pages=>{for(let i=0;i<pages.length;i+=6){await Promise.allSettled(pages.slice(i,i+6).map(page=>this.resolve(page)));if(generation!==this.generation)return false;}return true;};
   try{
    if(!await resolvePages(savedPages))return false;
    let entries=[],providers=[];

@@ -30,6 +30,8 @@ const situation=g=>[g.lastPlayId||'',g.period||'',g.clock||'',g.possession,g.dow
 export class BreakControl{
  constructor(){this.reset();}
  reset(){this.records=new Map();this.holds=new Map();this.live=new Map();this.positions=new Map();}
+ // One game's mapping changed: its evidence goes, and a commercial on another game stays held.
+ forget(id){for(const map of [this.records,this.holds,this.live,this.positions])map.delete(id);}
  update({games,at,available,recording=()=>null,syncFor,types=[],currentId=null,media=null,protection=null}){
   const blocked=new Set(),released=new Set(),reasons=new Map();
   for(const g of games){

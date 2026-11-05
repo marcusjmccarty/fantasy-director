@@ -1,14 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 const {EmbedPlayer}=await import(process.env.FANTASY_AUDIT_EMBED||'../web/embed-player.js');
-function harness(){
+function harness(options={}){
  let now=0;const navigations=[],frames=[];
  const createFrame=()=>{const attributes=new Map(),events=new Map();let src;const frame={attributes,events,setAttribute:(k,v)=>attributes.set(k,v),addEventListener:(k,v)=>events.set(k,v),replaceWith(){this.removed=true;},remove(){this.removed=true;},get src(){return src;},set src(url){src=url;navigations.push({url,sandbox:attributes.get('sandbox')});}};frames.push(frame);return frame;};
  // The original adapter used the global document; keep the negative-control
  // harness compatible so failures exercise behavior, not injection support.
  const previous=globalThis.document;let p;
  globalThis.document={createElement:createFrame};
- try{p=new EmbedPlayer('https://ntv.st/game/example',{now:()=>now,createFrame});}finally{globalThis.document=previous;}
+ try{p=new EmbedPlayer('https://ntv.st/game/example',{now:()=>now,createFrame,...options});}finally{globalThis.document=previous;}
  return {p,get frame(){return p.element;},frames,navigations,load:(frame=p.element)=>frame.events.get('load')(),tick:value=>{now=value;}};
 }
 test('embed safety: every stream navigation is sandboxed before loading, including returns and reloads',()=>{
@@ -112,4 +112,46 @@ test('embed switching: all active documents delegate media across origins and re
  const h=harness(),{p}=h;p.setVisible(true);p.play();p.reload();p.setVisible(false);p.setVisible(true);
  for(const frame of h.frames){assert.match(frame.allow,/autoplay \*/);assert.match(frame.allow,/encrypted-media \*/);assert.match(frame.allow,/fullscreen \*/);assert.equal(frame.allowFullscreen,true);assert.doesNotMatch(frame.attributes.get('sandbox'),/allow-popups|allow-top-navigation/);}
  p.destroy();
+});
+const settle=()=>new Promise(resolve=>setImmediate(resolve));
+test('embed probe: a page whose host answers is left alone even if its load event never fires',async()=>{
+ let probes=0;const events=[],h=harness({autoReconnect:false,probe:url=>{probes++;assert.equal(url,'https://ntv.st/game/example');return Promise.resolve({type:'opaque'});}}),{p}=h;p.on('reconnect',d=>events.push(d));p.setVisible(true);p.play();
+ h.tick(44999);p.checkHealth();assert.equal(probes,0,'a page still inside its window is not asked');
+ h.tick(45000);p.checkHealth();p.checkHealth();await settle();assert.equal(probes,1,'one question per frame, not per tick');
+ for(const at of [45250,105000,195000,900000]){h.tick(at);p.checkHealth();}
+ assert.equal(h.navigations.length,1,'the picture is never reloaded');assert.deepEqual(events,[]);assert.equal(p.reconnecting,false);assert.equal(p.gaveUp,false);assert.equal(p.progressing,true);assert.equal(probes,1);p.destroy();
+});
+test('embed probe: a host that does not answer keeps the spaced retries and the failover',async()=>{
+ let probes=0;const events=[],h=harness({probe:()=>{probes++;return Promise.reject(new TypeError('Failed to fetch'));}}),{p}=h;p.on('reconnect',d=>events.push(d));p.setVisible(true);p.play();
+ h.tick(45000);p.checkHealth();assert.equal(h.navigations.length,1,'the frame waits for the answer');await settle();p.checkHealth();assert.equal(h.navigations.length,2);assert.equal(probes,1);
+ h.tick(105000);p.checkHealth();await settle();p.checkHealth();assert.equal(h.navigations.length,3);assert.equal(probes,2,'each new frame is asked once');
+ assert.deepEqual(events.map(x=>x.failover),[false,true]);p.destroy();
+});
+test('embed probe: a probe that throws (no fetch, no AbortSignal.timeout) falls back to the retries',async()=>{
+ const h=harness({probe:()=>{throw new TypeError('AbortSignal.timeout is not a function');}}),{p}=h;p.setVisible(true);p.play();
+ h.tick(45000);p.checkHealth();await settle();p.checkHealth();assert.equal(h.navigations.length,2);p.destroy();
+});
+test('embed probe: a late answer cannot vouch for a newer, hidden, paused or destroyed frame',async()=>{
+ for(const change of [p=>p.reload(),p=>p.setVisible(false),p=>p.pause(),p=>p.destroy()]){
+  let answer;const h=harness({probe:()=>new Promise(resolve=>{answer=resolve;})}),{p}=h;p.setVisible(true);p.play();h.tick(45000);p.checkHealth();await settle();
+  change(p);answer({});await settle();assert.equal(p.loadedAt,null);p.destroy();
+ }
+});
+test('embed probe: an answer is weaker than a load, so a host that later dies still fails over',async()=>{
+ let up=true;const events=[],h=harness({autoReconnect:false,probe:()=>up?Promise.resolve({}):Promise.reject(new TypeError('Failed to fetch'))}),{p}=h;p.on('reconnect',d=>events.push(d));p.setVisible(true);p.play();
+ h.tick(45000);p.checkHealth();await settle();assert.notEqual(p.loadedAt,null);assert.equal(p.everLoaded,false);
+ up=false;h.tick(50000);p.reload();
+ for(const at of [95000,155000]){h.tick(at);p.checkHealth();await settle();p.checkHealth();}
+ assert.deepEqual(events.filter(x=>x.reason==='load').map(x=>x.failover),[false,true]);p.destroy();
+});
+test('embed probe: the request only asks whether the host answers: no cookies, no readable response, no forged headers',async()=>{
+ const previous={fetch:globalThis.fetch,document:globalThis.document},calls=[];
+ globalThis.fetch=(url,init)=>{calls.push({url,init});return Promise.resolve({type:'opaque'});};
+ globalThis.document={createElement:()=>({classList:{toggle(){}},setAttribute(){},addEventListener(){},replaceWith(){},remove(){}})};
+ try{
+  const {createPlayer}=await import('../web/players.js'),p=createPlayer({type:'embed/page',url:'https://ntv.st/game/example',autoReconnect:false});
+  await p.probe(p.url);p.destroy();
+  assert.equal(calls.length,1);assert.equal(calls[0].url,'https://ntv.st/game/example','only the host the frame already loads');
+  const {init}=calls[0];assert.equal(init.mode,'no-cors');assert.equal(init.credentials,'omit');assert.equal(init.method,'HEAD');assert.equal(init.headers,undefined);assert.equal(init.referrer,undefined);assert.equal(init.referrerPolicy,undefined);assert.ok(init.signal);
+ }finally{globalThis.fetch=previous.fetch;globalThis.document=previous.document;}
 });

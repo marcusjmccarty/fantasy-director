@@ -116,8 +116,12 @@ export class Director{
   }
   if(!cur||excluded.has(curGame.id))return {kind:'game',id:best.game.id,entry:best,reason:explain(best)};
   if(best.game.id===curGame.id){this.challenger=null;return stay(explain(cur));}
+  // A timeout in the viewer's own drive on a website player: the drive resumes shortly and a page that leaves
+  // comes back only as a fresh load, so a defense elsewhere waits. An offense, kicker or critical drive still takes over.
+  if(stayThrough&&curGame.state==='in'&&curGame.phase==='break'&&curGame.breakKind==='timeout'&&best.tier<2&&involvement({...curGame,phase:'live'},roster,{includeDefense}).some(x=>x.role!=='defense')){this.challenger=null;return stay('Timeout · staying with this drive');}
   if(cur.tier===0)return go(best,explain(best));
-  const urgentUpgrade=best.critical&&!cur.critical&&best.score>cur.score;
+  // A drive must clear the current one by a few yards: one hovering around the 20 does not trade places with its neighbour.
+  const urgentUpgrade=best.critical&&!cur.critical&&best.score>=cur.score+Math.min(r.margin,5);
   if(at-this.lastCut<r.dwell&&best.tier<=cur.tier&&!urgentUpgrade){this.challenger=null;return stay(explain(cur));}
   const better=best.tier>cur.tier||best.score>=cur.score+r.margin||urgentUpgrade||best.imminent&&!cur.critical&&best.score>cur.score;
   if(!better){this.challenger=null;return stay(explain(cur));}

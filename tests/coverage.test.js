@@ -450,3 +450,13 @@ test('watch preserves earlier intervals after a rewind and merges overlaps witho
  c.watch('g',92,96);c.watch('g',95,100);assert.deepEqual(c.intervals.get('g'),[[90,104]]);
  assert.equal(c.seen('g',97),true);assert.equal(c.seen('g',110),false);
 });
+
+test('reconcile: a wording edit keeps only the replay on air, with its watch link; anything else is retired as before',()=>{
+ const score=(text,o={})=>play('A:td',100,IND,text,o),on=s=>game('A',s?[s]:[]);
+ const run=(next,options)=>{const c=new Coverage(),old=score('Jonathan Taylor 4 Yd Run');c.update([on(old)],roster,200);const entry=c.log[0];entry.status='queued';entry.watchUrl='https://example.test/w';const invalid=c.reconcile(on(next),[old],roster,options);return {c,entry,invalid};};
+ const onAir=run(score('Jonathan Taylor 5 Yd Run'),{playing:'A:td'});assert.deepEqual(onAir.invalid,['A:td']);assert.equal(onAir.c.log[0],onAir.entry);assert.match(onAir.entry.score.text,/5 Yd/);assert.equal(onAir.entry.watchUrl,'https://example.test/w');assert.equal(onAir.c.judged.has('A:td'),true);
+ const waiting=run(score('Jonathan Taylor 5 Yd Run'));assert.equal(waiting.c.log.length,0);assert.equal(waiting.c.judged.has('A:td'),false);
+ const other=run(score('Jonathan Taylor 5 Yd Run'),{playing:'A:other'});assert.equal(other.c.log.length,0);
+ const removed=run(null,{playing:'A:td'});assert.equal(removed.c.log.length,0);
+ const reassigned=run(score('Josh Downs 5 Yd Rush'),{playing:'A:td'});assert.equal(reassigned.c.log.length,0);
+});

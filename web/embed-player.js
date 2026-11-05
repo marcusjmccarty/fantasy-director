@@ -6,17 +6,20 @@
 // A loaded page is NOT proof of moving video. Periodic reconnect is an explicit
 // fallback for that blind spot, separate from page-loading recovery. Loading
 // retries back off, but never abandon a stream the viewer still wants playing.
-// A page with ads and nested frames can take a long time to fire `load`; a
-// healthy picture is never interrupted over that. After a few attempts the
-// viewer gets the Reload and Open stream buttons instead of a loop.
+// A page with ads and nested frames can take a long time to fire `load`, or
+// never fire it. Before a slow page is reloaded its host is asked once whether
+// it answers; a page that answers is left alone, a picture that may be playing
+// is worth more than a retry. A host that does not answer gets the spaced
+// retries and the backup. After a few attempts the viewer gets the Reload and
+// Open stream buttons instead of a loop.
 const RECONNECT_EVERY=120000,LOAD_WINDOWS=[45000,60000,90000],MAX_LOAD_RETRIES=3,NETWORK_RETRY_GAP=10000,OFFLINE_SETTLE=5000,INTERACTION_TRUST=600000;
 export class EmbedPlayer{
- constructor(url,{now=()=>performance.now(),createFrame=()=>document.createElement('iframe'),autoReconnect=true}={}){
+ constructor(url,{now=()=>performance.now(),createFrame=()=>document.createElement('iframe'),autoReconnect=true,probe=null}={}){
   this.kind='embed';this.url=url;this.now=now;this.listeners=new Map();this.inAd=false;this.error=null;this.wantPlay=false;this.target=null;
   this.primed=true;this.advances=2;this.loadedAt=null;this.audioLocked=false;this.isMuted=true;this.duration=NaN;this.visible=false;
   this.destroyed=false;
   this.autoReconnect=!!autoReconnect;this.loadStartedAt=null;this.nextReconnectAt=null;this.loadRetries=0;this.lastReconnectAt=-Infinity;this.suspendedAt=null;this.offline=false;this.offlineSince=null;this.recoveryMessage='';this.everLoaded=false;this.interactedAt=null;this.gaveUp=false;
-  this.createFrame=createFrame;this.element=this.newFrame();
+  this.probe=probe;this.probing=null;this.probedFrame=null;this.createFrame=createFrame;this.element=this.newFrame();
  }
  newFrame(){
   const f=this.createFrame();f.className='layer';f.title='Stream';
@@ -53,6 +56,8 @@ export class EmbedPlayer{
  get currentTime(){return 0;}
  get progressing(){return !this.destroyed&&!this.error&&(!this.visible||this.loadedAt!==null&&this.now()-this.loadedAt>1500);}
  near(){return this.progressing;}
+ // The one sign of real viewing a cross-origin page gives: a recent click inside this document (a reload clears it).
+ get viewerConfirmed(){return !this.destroyed&&!this.error&&this.visible&&this.wantPlay&&this.loadedAt!==null&&this.interactedAt!==null&&this.now()-this.interactedAt<INTERACTION_TRUST&&this.suspendedAt===null&&!this.offline;}
  play(){if(this.destroyed)return;this.wantPlay=true;if(this.visible)this.setVisible(true);}
  pause(){this.wantPlay=false;this.resetRecovery();this.unload();}
  seek(){}
@@ -91,10 +96,20 @@ export class EmbedPlayer{
   }
   if(this.loadedAt===null){
    if(now-this.loadStartedAt<LOAD_WINDOWS[Math.min(this.loadRetries,LOAD_WINDOWS.length-1)])return;
+   if(this.probing===this.element)return;
+   if(this.probe&&this.probedFrame!==this.element){this.probeHost();return;}
    if(this.loadRetries>=MAX_LOAD_RETRIES){if(!this.gaveUp){this.gaveUp=true;this.recoveryMessage='The stream page is not responding · Reload stream, or Open stream in a new tab.';this.emit('reconnect',{reason:'gaveup'});}return;}
    this.loadRetries++;this.navigate(`The stream page is slow to load · attempt ${this.loadRetries} of ${MAX_LOAD_RETRIES}.`,{reason:'load',attempt:this.loadRetries,failover:!this.everLoaded&&this.loadRetries>=2});return;
   }
   if(this.autoReconnect&&this.nextReconnectAt!==null&&now>=this.nextReconnectAt){this.loadRetries=0;this.navigate('Refreshing stream connection…');}
+ }
+ // Once per frame. An answer counts as loaded for this frame, but is weaker than a `load`: everLoaded stays false so a host that later dies still fails over. A late answer for a retired frame is ignored.
+ probeHost(){
+  const f=this.element;this.probing=f;this.probedFrame=f;
+  Promise.resolve().then(()=>this.probe(this.url)).then(()=>true,()=>false).then(answered=>{
+   if(this.probing===f)this.probing=null;
+   if(answered&&!this.destroyed&&f===this.element&&this.visible&&this.wantPlay&&this.loadedAt===null){this.loadedAt=this.now();this.loadRetries=0;this.gaveUp=false;this.recoveryMessage='';}
+  });
  }
  set muted(value){this.isMuted=!!value;}
  get muted(){return this.isMuted;}

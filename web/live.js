@@ -53,20 +53,33 @@ export const TEMPO=30;             // logged plays this close together mean a hu
 export const CELEBRATION=20;       // seconds a fresh score stays on screen before the game is a break
 export const STOPPAGE_GRACE=12;    // a possession missing for less than this is a gap in the feed, not a stoppage
 export const STOPPAGE_MAX=180;     // a logged stoppage with no sign of football since is over
+export const FEED_SILENCE=20;      // longest normal wait for a snapshot (one timed-out poll: 5 s + 8 s + 5 s, with room): past it ESPN, not the field, has gone quiet
+export const FEED_GAP=90;          // a snapshot this long after the last follows a sleep or an outage (longer than a throttled tab's poll): a fresh start, not a diff
+export const TRY_WINDOW=180;       // seconds after a touchdown its extra point or two-point try can still land on the scoreboard
+export const MISSING_GRACE=60;     // seconds an in-progress game stays in the feed after polls omit it: a gap in the response, not a game that ended
 const KEEP=900;                    // seconds of snapshots kept (the longest delay, with room)
 const clockSeconds=c=>{const m=/^(\d{1,2}):(\d{2})$/.exec(String(c||'').trim());return m?Number(m[1])*60+Number(m[2]):null;};
 export class LiveFeed{
  constructor(){this.snapshots=[];this.logged=new Map();this.scored=new Map();this.resumed=new Map();this.lost=new Map();}
  push(games,at){
-  const last=this.snapshots.at(-1);
+  const last=this.snapshots.at(-1),gap=last&&at-last.at>FEED_GAP;
+  // ESPN can leave an in-progress game out of a response, or list it without both teams: one poll's gap does not end the game.
+  const carried=(last?.games||[]).filter(p=>p.state==='in'&&!games.some(g=>g.id===p.id)&&at-(p.seenAt??last.at)<=MISSING_GRACE).map(p=>({...p,seenAt:p.seenAt??last.at}));
+  if(carried.length)games=[...games,...carried];
   const note=(map,id,event,limit=80)=>{const list=map.get(id)||[];list.push(event);if(list.length>limit)list.shift();map.set(id,list);};
   for(const g of games){
    const prev=last?.games.find(x=>x.id===g.id);
+   g.shownScore=g.scoreKnown!==false?g.score:prev?.shownScore||null;   // the tally to display when ESPN omits one; stamped per snapshot so a delayed view cannot spoil
    if(!prev)continue;   // the first sighting says nothing about when anything happened
+   // Nor does the first snapshot after a long gap: what changed happened sometime in the gap, not now, and old plays must not read as a stall.
+   if(gap){for(const map of [this.logged,this.resumed,this.lost])map.delete(g.id);continue;}
    if(g.lastPlayId&&prev.lastPlayId!==g.lastPlayId)note(this.logged,g.id,{at,playId:g.lastPlayId});
-   // A score increase starts the celebration; the extra point that follows it does not start another.
+   // A score increase starts the celebration; the one try that follows a touchdown does not start another.
    const gained=(g.score||[]).reduce((sum,n,i)=>sum+Math.max(0,Number(n)-Number(prev.score?.[i]??n)),0);
-   if(g.scoreKnown!==false&&prev.scoreKnown!==false&&gained>0&&!(gained===1&&at-(this.scored.get(g.id)?.at(-1)?.at??-Infinity)<CELEBRATION+15))note(this.scored,g.id,{at},40);
+   if(g.scoreKnown!==false&&prev.scoreKnown!==false&&gained>0){
+    const score=this.scored.get(g.id)?.at(-1),isTry=gained<=2&&score?.gained===6&&!score.tried&&at-score.at<TRY_WINDOW;
+    if(isTry)score.tried=true;else note(this.scored,g.id,{at,gained},40);
+   }
    // The clock ran down within the same period while no new play was logged: football is back after a stoppage.
    const was=clockSeconds(prev.clock),now=clockSeconds(g.clock);
    if(g.state==='in'&&g.lastPlayId&&g.lastPlayId===prev.lastPlayId&&g.period===prev.period&&was!==null&&now!==null&&now<=was-2)note(this.resumed,g.id,{at,playId:g.lastPlayId},40);
@@ -117,9 +130,11 @@ export class LiveFeed{
    // In tempo the next snap comes well inside the play clock: the window to cut away shrinks with the offense's cadence.
    const recent=(this.logged.get(g.id)||[]).filter(x=>x.at<=t).slice(-3),gaps=recent.slice(1).map((x,i)=>x.at-recent[i].at),cadence=gaps.length?Math.min(...gaps):Infinity;
    const safe=cadence<TEMPO?Math.max(5,cadence-8):SAFE_AFTER_PLAY;
-   if(since!==null&&since>safe&&since<=STALLED_AFTER)return {...out,phase:'play',playAge:since-safe,playEndsIn:null,synthesized:true,safeWindow:safe};
+   // Silence from ESPN itself (an outage, a sleeping laptop, a game left out of a response) says nothing about the field: only time the feed was heard can age a game into a stall.
+   const heardAt=g.seenAt??snap.at,heard=since===null||snap.at>t?null:Math.min(since,heardAt+FEED_SILENCE-logged.at);
+   if(heard!==null&&heard>safe&&heard<=STALLED_AFTER)return {...out,phase:'play',playAge:heard-safe,playEndsIn:null,synthesized:true,safeWindow:safe};
    // Nothing logged for longer than a play clock and the clock has not moved: an injury, a review, a measurement. A break, not football.
-   if(since!==null&&since>STALLED_AFTER){
+   if(heard!==null&&heard>STALLED_AFTER&&t-heardAt<=FEED_SILENCE){
     const resumed=before(this.resumed,g.id);
     if(resumed&&resumed.at>logged.at&&t-resumed.at<=STALLED_AFTER)return {...out,phase:'play',breakKind:null,playAge:t-resumed.at,playEndsIn:null,synthesized:true,safeWindow:safe};
     if(!(resumed&&resumed.at>logged.at))return {...out,phase:'break',breakKind:'stoppage',safeWindow:safe};

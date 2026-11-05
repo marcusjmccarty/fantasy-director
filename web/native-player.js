@@ -85,9 +85,10 @@ export class NativePlayer{
  // unmute; if that happens, go back to muted playback and flag it.
  set muted(value){
   const v=this.element,generation=++this.audioGeneration;v.muted=!!value;clearTimeout(this.audioWatch);this.audioWatch=null;
-  if(!value&&this.wantPlay){
+  // A source still loading has no footage to judge: a real refusal arrives through play() once it attaches or can play.
+  if(!value&&this.wantPlay&&this.attached&&!(v.readyState<3)){
    const mark=v.currentTime;
-   this.audioWatch=setTimeout(()=>{if(generation!==this.audioGeneration)return;this.audioWatch=null;if(this.destroyed||!this.wantPlay||v.muted||this.error)return;if(v.paused||v.currentTime<=mark+.3){this.audioLocked=true;v.muted=true;this.play();this.emit('audiolocked');}},1500);
+   this.audioWatch=setTimeout(()=>{if(generation!==this.audioGeneration)return;this.audioWatch=null;if(this.destroyed||!this.wantPlay||v.muted||this.error)return;if(v.paused||v.currentTime<=mark+.3){this.audioLocked=true;v.muted=true;this.play();this.emit('audiolocked');}else this.audioLocked=false;},1500);
    this.audioWatch.unref?.();
   }
  }

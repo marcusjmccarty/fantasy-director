@@ -32,3 +32,8 @@ test('backup links migrate independently, reject unsafe URLs and survive repeate
  assert.deepEqual(saved.streamBackups,{'IND-MIN':'https://another.example/watch'});assert.equal(saved.streams['IND-MIN'],'https://streamcorner.st/stream/test');assert.deepEqual(normalizePreferences(saved),saved);
  assert.deepEqual(normalizePreferences({streamBackups:['https://example.test/live']}).streamBackups,{});
 });
+
+test('the video a saved length was measured on survives a save, and a damaged one does not',()=>{
+ const saved=normalizePreferences({replayDurations:{'1':8000},replayDurationEmbeds:{'1':'https://ok.ru/videoembed/123','2':'https://evil.test/videoembed/1',bad:'https://ok.ru/videoembed/1','3':7}});
+ assert.deepEqual(saved.replayDurationEmbeds,{'1':'https://ok.ru/videoembed/123'});assert.deepEqual(normalizePreferences(saved),saved);assert.deepEqual(normalizePreferences({}).replayDurationEmbeds,{});
+});

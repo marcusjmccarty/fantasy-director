@@ -290,6 +290,24 @@ test('decide: a critical, higher-scoring option breaks the dwell; a critical one
  assert.equal(decide(d,{games:[mineRZ,theirsRZ],at:1002,current:{kind:'game',id:'A'}}).id,'A');
  assert.equal(decide(d,{games:[mineRZ,theirsRZ],at:1100,current:{kind:'game',id:'A'}}).id,'A');
 });
+test('decide: a drive a few yards better across the 20 does not break the dwell or the margin',()=>{
+ const roster=[RB,WR],current={kind:'game',id:'A'},cur=game('A','IND','KC',{yardsToGoal:24});   // score 76, just out of the red zone after a penalty
+ const just=game('B','DAL','NYG',{yardsToGoal:20});   // score 80, critical, 4 yards better
+ for(const at of [1002,1100]){const d=new Director({debounce:0});d.committed(1000);assert.equal(decide(d,{games:[cur,just],roster,at,current}).id,'A',`a 4-yard edge at +${at-1000}s`);}
+ const clear=game('B','DAL','NYG',{yardsToGoal:19});   // score 81: the 5-yard floor
+ const d=new Director({debounce:0});d.committed(1000);assert.equal(decide(d,{games:[cur,clear],roster,at:1002,current}).id,'B','a drive that clears the floor still breaks the dwell');
+});
+test('decide: a timeout in the viewer\'s own drive keeps a website player from leaving for a defense',()=>{
+ const timeout=game('A','IND','KC',{yardsToGoal:8,phase:'break',breakKind:'timeout'}),defense=game('B','BAL','PIT'),current={kind:'game',id:'A'};
+ const run=(games,o={})=>{const d=new Director();d.committed(1000);return decide(d,{games,at:1002,current,stayThrough:true,...o});};
+ const stayed=run([timeout,defense]);assert.equal(stayed.id,'A','the drive resumes shortly: two page reloads and the next snap are not worth a D/ST');assert.equal(stayed.reason,'Timeout · staying with this drive');
+ assert.equal(run([timeout,defense],{stayThrough:false}).id,'B','a player that can resume still fills the break');
+ assert.equal(run([timeout,game('B','DAL','NYG')]).id,'B','an offense elsewhere takes over');
+ assert.equal(run([timeout,game('B','DAL','NYG',{yardsToGoal:15})]).id,'B','a critical drive takes over');
+ assert.equal(run([{...timeout,breakKind:'halftime'},defense]).id,'B','a long break still hands the screen to a starter on the field');
+ assert.equal(run([{...timeout,possession:1},defense]).id,'B','nor does it hold a game where the viewer\'s starter is on the sideline');
+ assert.equal(run([{...timeout,phase:'live',breakKind:null},defense]).id,'A','when the drive resumes it is simply the best game');
+});
 test('decide: a same-tier challenger needs RULES.margin more score to take over a healthy drive',()=>{
  const d=new Director({debounce:0}),roster=[RB,WR];   // one starter per side, so score is exactly 100 - yardsToGoal
  const cur=game('A','IND','KC',{yardsToGoal:50});

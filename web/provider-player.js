@@ -15,7 +15,7 @@ export class ProviderPlayer{
   this.element=createFrame();this.element.className='layer';this.element.title='Game replay';
   this.element.allow='autoplay; fullscreen; picture-in-picture; encrypted-media';this.element.referrerPolicy='strict-origin-when-cross-origin';
   this.duration=Number(duration)>0?Number(duration):NaN;this.knownDuration=Number.isFinite(this.duration);this.lastTime=0;this.lastMessage=-Infinity;this.lastAdvance=-Infinity;this.advances=0;
-  this.initialized=false;this.primed=false;this.inAd=false;this.timer=null;this.error=null;this.wantPlay=false;this.target=null;this.isMuted=true;this.seekedAt=-Infinity;this.seekStartedAt=null;this.seekLatency=3000;this.lastReport=-Infinity;this.kickedAt=-Infinity;this.audioLocked=false;this.audioWatch=null;
+  this.initialized=false;this.primed=false;this.inAd=false;this.timer=null;this.error=null;this.wantPlay=false;this.target=null;this.isMuted=true;this.seekedAt=-Infinity;this.seekStartedAt=null;this.seekLatency=3000;this.lastReport=-Infinity;this.kickedAt=-Infinity;this.audioLocked=false;this.audioWatch=null;this.otherLength=0;this.otherReports=0;this.corrected=false;
   this.element.setAttribute?.('sandbox','allow-scripts allow-same-origin allow-forms allow-presentation allow-storage-access-by-user-activation');   // the player works; popups and top navigation do not
   this.element.src=providerURL(url);   // validated before anything is registered
   this.onMessage=event=>this.receive(event);events.addEventListener('message',this.onMessage);
@@ -91,7 +91,7 @@ export class ProviderPlayer{
     this.emit('error',this.error);return;
    case 'adShown':
     if(!this.inAd){this.inAd=true;this.advances=0;this.primed=false;this.emit('ad',true);}return;
-   case 'ended':this.emit('ended');return;
+   case 'ended':this.adoptLength();this.emit('ended');return;
    case 'started':case 'resumed':
     // The provider restarts from its own remembered position; put it back on ours.
     // (A pause reply is sent at most every few seconds, or the two players ping-pong.)
@@ -105,12 +105,14 @@ export class ProviderPlayer{
   // Only content progress with the recording's own duration ends an ad. Before
   // the recording length is known, a pre-roll's own length must not be adopted.
   if(typeof data.duration==='number'&&data.duration>0){
+   this.noteLength(data.duration);
    if(this.inAd){
     // Content is recognized by the recording's length (from the catalog when we have it); ads are short.
-    const content=Number.isFinite(this.duration)?Math.abs(data.duration-this.duration)<=5:data.duration>180;
-    if(!content)return;this.inAd=false;this.emit('ad',false);if(this.target!==null)this.send('seek',{time:this.target});
+    const content=Number.isFinite(this.duration)?Math.abs(data.duration-this.duration)<=5||this.otherReports>=3:data.duration>180;
+    if(!content)return;this.inAd=false;this.emit('ad',false);if(this.target!==null){this.seekedAt=this.seekStartedAt=now;this.send('seek',{time:this.target});}   // the seek starts now: an ad's length is not its latency
    }
-   if(!Number.isFinite(this.duration))this.duration=data.duration;
+   // A pre-roll can report before adShown arrives: its length must not become the recording's.
+   if(!Number.isFinite(this.duration)&&data.duration>180)this.duration=data.duration;
   }else if(this.inAd)return;
   if(this.target!==null){
    if(Math.abs(data.time-this.target)>3){
@@ -127,5 +129,13 @@ export class ProviderPlayer{
   this.lastTime=data.time;this.lastMessage=now;
   if(!this.wantPlay&&this.advances>2)this.send('pause');
  }
+ // A told length can go out of date (the listing reposted the game). Long footage that keeps reporting another length is the recording, not an ad.
+ noteLength(seconds){
+  if(!Number.isFinite(this.duration)||seconds<=600||Math.abs(seconds-this.duration)<=5){this.otherLength=0;this.otherReports=0;return;}
+  this.otherReports=seconds===this.otherLength?this.otherReports+1:1;this.otherLength=seconds;
+  if(this.otherReports>=3)this.adoptLength();
+ }
+ // A gap this big is another video, not a rounding difference: the player now knows only what it was shown, and the app may learn from it.
+ adoptLength(){if(!this.otherLength||Math.abs(this.otherLength-this.duration)<=60)return;this.duration=this.otherLength;this.knownDuration=false;this.corrected=true;this.otherLength=0;this.otherReports=0;if(this.target!==null)this.target=Math.min(this.target,this.duration-1);}
  destroy(){this.wantPlay=false;this.stopBootstrap();clearTimeout(this.audioWatch);this.events.removeEventListener('message',this.onMessage);this.element.removeAttribute('src');this.element.remove();this.listeners.clear();}
 }

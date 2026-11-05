@@ -14,7 +14,7 @@ import {normalizePreferences} from './preferences.js';
 import {liveClipCandidates,highlightPage,canRetryReplay,REPLAY_RETRY_MS,REPLAY_WAIT_SECONDS} from './live-highlights.js';
 import {protectedReplayPlay,protectedHighlight,broadcastReplayWindow} from './continuity.js';
 import {BreakControl} from './breaks.js';
-import {fantasyBoard,fantasyMatchup,headToHead,benchRows,matchupColumns,FantasyScoreFeed} from './scoreboard.js';
+import {fantasyBoard,fantasyMatchup,headToHead,benchRows,matchupColumns,FantasyScoreFeed,tallyOf,nearStart} from './scoreboard.js';
 import {mountChat,chatRoomFor} from './chat.js';
 import {buildArchive,latestCompletedWeek} from './archive-build.js';
 
@@ -22,7 +22,11 @@ const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const starterCount=n=>`${n} starter${n===1?'':'s'}`;
 const STORE='fantasy-stream-v3',ESPN='https://site.api.espn.com/apis/site/v2/sports/football/nfl/';
-const LOAD_LIMIT=20000,LIVE_LOAD_LIMIT=45000,COOLDOWN=60000,STALE_AFTER=45000;
+const LOAD_LIMIT=20000,CLICK_LIMIT=90000,LIVE_LOAD_LIMIT=45000,COOLDOWN=60000,STALE_AFTER=45000,STANDBY_HOLD=90000;
+// A replay whose length is not known yet gets a plausible one until its player reports the real figure.
+const GUESSED_DURATION=11000;
+// The provider's codes for a recording removed, blocked or refused: unlike "still processing", these will not pass.
+const GONE_FOR_GOOD=/^PROVIDER_(?:10[123]|15[0-3])$/;
 
 // ---------- saved preferences ----------
 let saved=normalizePreferences();
@@ -38,16 +42,18 @@ try{
  }
 }catch{}
 saved=normalizePreferences(saved);
+// An earlier release saved the guess as if it were the real length. Forget it, so the game learns its length again.
+for(const [id,seconds] of Object.entries(saved.replayDurations))if(seconds===GUESSED_DURATION)delete saved.replayDurations[id];
 const hasLineup=()=>saved.lineupReady??(saved.teamName!=='Sample lineup');
 const lineupSnapshot=()=>Object.fromEntries(['roster','teamName','teamId','leagueId','league','lineupReady','espn'].map(key=>[key,saved[key]]));
 function persist(){try{localStorage.setItem(STORE,JSON.stringify(S.mode==='replay'&&S.liveLineup?{...saved,...S.liveLineup}:saved));S.storageError=false;}catch{S.storageError=true;}}
 
 // ---------- state ----------
-const S={scope:'game',center:null,range:null,mode:'live',archive:null,archives:new Map(),archiveKey:'w7',weeks:{season:0,latest:0,current:0,loading:0,failed:null},pastWeeks:[],pastLoading:false,week7Clips:[],clips:[],liveClips:[],day:0,games:[],at:Date.now()/1000,lastAt:null,
+const S={scope:'game',center:null,range:null,mode:'live',archive:null,archives:new Map(),archiveKey:'w7',weeks:{season:0,latest:0,current:0,loading:0,failed:null,listing:false,landing:0},weekChosen:false,weekRequest:0,weekVideos:new Map(),deadEmbeds:new Set(),pastWeeks:[],pastLoading:false,stripTarget:null,stripStartedAt:0,week7Clips:[],clips:[],liveClips:[],day:0,games:[],at:Date.now()/1000,lastAt:null,
  program:{kind:'idle'},pending:null,pinned:null,selection:null,highlight:null,decision:null,playing:false,started:false,
  fullscreenWanted:false,fullscreenRequest:0,
  streamChoices:new Map(),deadStreams:new Map(),streamRotations:new Map(),
- cooldown:new Map(),ads:new Set(),breaks:new Map(),detectedBreaks:new Map(),dimmed:null,sources:new Map(),syncs:new Map(),usedClips:new Map(),failedClips:new Map(),seekHold:false,cuts:0,
+ cooldown:new Map(),recordingEnds:new Map(),holdBudget:STANDBY_HOLD,ads:new Set(),breaks:new Map(),detectedBreaks:new Map(),dimmed:null,sources:new Map(),syncs:new Map(),usedClips:new Map(),failedClips:new Map(),seekHold:false,cuts:0,
  lastStep:0,lastWarm:0,lastRender:0,live:{games:[],feed:new LiveFeed(),scores:new Map(),summaryPending:new Map(),fetched:0,error:'',generation:0},toastTimer:null,unmuteHint:false};
 const fantasyFeed=new FantasyScoreFeed(),streamFinder=new StreamFinder({fetcher:(...args)=>fetch(...args)});
 streamFinder.enabled=saved.autoDiscover;
@@ -55,6 +61,7 @@ const clock=new Clock(),director=new Director(),coverage=new Coverage(),nfl=new 
 const pool=new PlayerPool($('layers'),{capacity:3,
  onAd:(key,on)=>{
   if(on)S.ads.add(key);else S.ads.delete(key);
+  const adSlot=pool.get(key);if(adSlot)adSlot.adAt=on?performance.now():null;
   if(on)suppressBreak(key);
   if(on&&S.highlight?.src.key===key){failHighlight('the replay opened an advertisement');return;}
   render();
@@ -72,9 +79,10 @@ const pool=new PlayerPool($('layers'),{capacity:3,
  },
  onEnded:key=>{
   if(S.highlight?.src.key===key)finishHighlight({ended:true});
+  else if(S.mode==='replay'&&archiveGame(key))recordingEnded(key);
   else if(S.program.kind==='game'&&S.program.id===key){S.pinned=null;S.selection=null;S.cooldown.set(key,performance.now()+COOLDOWN);director.reset();}
  },
- onError:(key,error)=>{if(S.highlight?.src.key===key){failHighlight(error.message);return;}if(S.mode==='live'&&pool.get(key)?.player.live)return;cool(key,error.message);},
+ onError:(key,error)=>{if(S.highlight?.src.key===key){failHighlight(error.message);return;}if(S.mode==='live'&&pool.get(key)?.player.live)return;if(S.mode==='replay'&&GONE_FOR_GOOD.test(error.code)&&archiveGame(key)){videoGone(key,error.message);return;}cool(key,error.message);},
  onAudioLocked:key=>{if(key===pool.visible){if(S.audioAsked>=1)toast('The provider only unmutes from a click inside its own player: hover the video and use its speaker button.','warn');render();}}
 });
 window.fantasyStream={S,get saved(){return saved;},pool,director,coverage,clock};
@@ -83,22 +91,28 @@ window.fantasyStream={S,get saved(){return saved;},pool,director,coverage,clock}
 const roster=()=>S.mode==='live'&&!hasLineup()?[]:saved.roster;
 const archiveGame=id=>S.archive?.game(id);
 const gameState=id=>S.games.find(g=>g.id===id);
-// A replay whose length is not known yet gets a plausible one until its player reports the real figure.
-const GUESSED_DURATION=11000;
 function syncFor(game){
  let sync=S.syncs.get(game.id);
  if(!sync){if(!(game.recordingDuration>0)){game.recordingDuration=GUESSED_DURATION;game.durationGuessed=true;}sync=new RecordingSync(game,{types:S.archive.types,anchors:mergeAnchors(game.anchors||[],saved.marks[game.id]||[])});S.syncs.set(game.id,sync);}
  return sync;
 }
+// Only a length the provider itself reported counts: a player told the length at its start has nothing to teach.
 function learnDuration(id,player){
- const g=archiveGame(id);if(!g||player?.kind!=='provider'||!(Number.isFinite(player.duration)&&player.duration>600))return;
- if(!g.durationGuessed&&g.recordingDuration>0)return;
- g.recordingDuration=player.duration;g.durationGuessed=false;saved.replayDurations[g.id]=Math.round(player.duration);persist();S.syncs.delete(g.id);resetBreaks();
+ const g=archiveGame(id);if(!g||player?.kind!=='provider'||player.knownDuration||!(Number.isFinite(player.duration)&&player.duration>600))return false;
+ if(!g.durationGuessed&&g.recordingDuration>0&&!(player.corrected&&!S.archive.data.calibrated&&Math.abs(g.recordingDuration-player.duration)>5))return false;
+ g.recordingDuration=player.duration;g.durationGuessed=false;saved.replayDurations[g.id]=Math.round(player.duration);if(g.embed)saved.replayDurationEmbeds[g.id]=g.embed;persist();S.syncs.delete(g.id);S.recordingEnds.delete(g.id);breakControl.forget(g.id);S.detectedBreaks.delete(g.id);
+ // Broadcast replays waiting in the queue were cut on the guessed curve: prepare them again.
+ for(const q of coverage.queue)if(q.gameId===g.id&&S.sources.get(q.id)?.label==='Broadcast replay')S.sources.delete(q.id);
+ return true;
 }
+// What a player is told about its recording: a guess is not knowledge, so it finds out for itself.
+const knownLength=g=>g.durationGuessed?undefined:g.recordingDuration;
+// A replay's video, unless the provider has said it is gone for good.
+const hasVideo=id=>{const embed=archiveGame(id)?.embed;return !!embed&&!S.deadEmbeds.has(embed);};
 const DEAD_STREAM=300000;   // ms a direct link that never showed footage is left alone
 function streamURLs(game){const key=gameKey(game),now=performance.now();return streamFinder.urls(game,[saved.streams[key],saved.streamBackups[key]],saved.streamModes[key]).filter(url=>!(S.deadStreams.get(url)>now));}
 function sourceFor(id){
- if(S.mode==='replay'){const g=archiveGame(id);return g?.embed?{url:g.embed,type:'provider/ok',duration:g.recordingDuration}:null;}
+ if(S.mode==='replay'){const g=archiveGame(id);return hasVideo(id)?{url:g.embed,type:'provider/ok',duration:knownLength(g)}:null;}
  const g=gameState(id),urls=g?streamURLs(g):[],choice=S.streamChoices.get(id),url=urls.includes(choice)?choice:(pool.visible===id?pool.get(id)?.url:null)||urls[0];
  return url?{url,page:streamFinder.original(url),type:streamType(url),live:true,autoReconnect:saved.autoReconnect}:null;
 }
@@ -114,12 +128,35 @@ function rotateStream(id,manual=false){
  S.stall=null;S.lastAt=null;toast(`Trying the next stream for ${g.name}.`);render();return true;
 }
 // A replay without its video (a latest-week game with no link yet) runs on the game tracker.
-const picture=id=>S.mode==='replay'?(saved.dataOnly||!archiveGame(id)?.embed?'data':'video'):(sourceFor(id)?'video':'data');
+const pastRecordingEnd=(id,at)=>at>=(S.recordingEnds.get(id)??Infinity);
+const picture=id=>S.mode==='replay'?(saved.dataOnly||!hasVideo(id)||pastRecordingEnd(id,S.at)?'data':'video'):(sourceFor(id)?'video':'data');
 function target(id){if(S.mode!=='replay')return null;const g=archiveGame(id);return g?syncFor(g).media(S.at-g.start):0;}
 function cool(id,message){
  S.cooldown.set(id,performance.now()+COOLDOWN);if(S.pending?.id===id)S.pending=null;pool.close(id);
- if(S.program.kind==='game'&&S.program.id===id){S.program={kind:'standby'};pool.hide();}
+ if(S.program.kind==='game'&&S.program.id===id){S.program={kind:'standby'};S.unmuteHint=false;pool.hide();}
  if(message)toast(`${gameState(id)?.name||'Game'} video unavailable · ${message}`,'warn');
+}
+// A recording that really ends hands the rest of the game to the tracker: no cooldown, no reopening the same
+// last frame. It goes by position, so seeking back before that point brings the video back.
+function recordingEnded(key){
+ const slot=pool.get(key),player=slot.player;if(player.inAd)return;
+ // A seek past the end of a guessed length ends the file too: correct the length and go where the footage is.
+ if(learnDuration(key,player)){slot.seekAt=-Infinity;player.seek(target(key));return;}
+ // Left over from before a seek that is still on its way to footage inside the file.
+ if(player.target!==null&&!(player.target>=player.duration-2))return;   // an unknown length proves nothing about the end
+ S.recordingEnds.set(key,Math.min(S.recordingEnds.get(key)??Infinity,S.at));
+ if(S.pending?.id===key)S.pending=null;
+ const shown=S.program.kind==='game'&&S.program.id===key,name=archiveGame(key).name,inPlay=gameState(key)?.state==='in';
+ if(S.pinned===key||shown){S.pinned=null;S.selection=null;director.reset();}
+ pool.close(key);
+ if(shown){S.stall=null;S.program={kind:'standby'};pool.hide();if(inPlay)toast(`${name}: the recording ends here · following on the game tracker.`,'warn');}
+}
+// A recording the provider has removed or refused will not come back: the tracker takes this game, with no cooldown and no reopening.
+function videoGone(key,message){
+ const embed=archiveGame(key).embed,shown=S.program.kind==='game'&&S.program.id===key,name=archiveGame(key).name;
+ S.deadEmbeds.add(embed);if(S.pending?.id===key)S.pending=null;pool.close(key);
+ if(shown){S.stall=null;S.program={kind:'standby'};pool.hide();}
+ toast(`${name}: ${message} · following on the game tracker.`,'warn');
 }
 function excluded(){
  const now=performance.now(),out=new Set();
@@ -136,8 +173,9 @@ function excluded(){
   // A commercial should yield to available football, even when another
   // starter's game has only a text tracker. Keep trackers as the fallback
   // when no replacement video is available. Before any break, an unrelated
-  // link alone still cannot displace the viewer's roster tracker.
-  if(rosterVideo||backup)for(const g of S.games)if(!sourceFor(g.id))out.add(g.id);
+  // link alone still cannot displace the viewer's roster tracker. A tracker
+  // the viewer pinned holds until its own break or final.
+  if(rosterVideo||backup)for(const g of S.games)if(!sourceFor(g.id)&&!(g.id===S.pinned&&g.state==='in'))out.add(g.id);
  }
  return out;
 }
@@ -162,7 +200,7 @@ function updateBreaks(){
  const state=breakControl.update({games:S.games,at:S.at,available:backupGames(),currentId:id,media,protection,
   recording:key=>S.mode==='replay'?archiveGame(key):null,syncFor,types:S.archive?.types||[]});
  S.detectedBreaks=state.reasons;
- if(S.pinned&&state.released.has(S.pinned)){S.pinned=null;S.selection=null;director.reset();}
+ if(S.pinned&&state.released.has(S.pinned)&&!heldChoice(S.pinned)){S.pinned=null;S.selection=null;director.reset();}
  const visible=pool.visible,manual=visible&&S.breaks.get(visible)>performance.now();
  if(visible&&(state.blocked.has(visible)||S.ads.has(visible)||manual)){
   if(stayThroughBreak(visible))S.dimmed={id:visible,kind:state.reasons.get(visible)?.kind||'break',since:S.dimmed?.id===visible?S.dimmed.since:performance.now()};
@@ -184,18 +222,30 @@ function visibleConfirmed(){
  const p=S.program;if(p.kind!=='game')return false;
  if(S.ads.has(p.id)||S.breaks.has(p.id)||S.detectedBreaks.has(p.id))return false;
  if(picture(p.id)==='data')return S.mode==='replay'&&saved.dataOnly;
- return pool.visible===p.id&&pool.current?.kind!=='embed'&&!!pool.current?.progressing;
+ if(pool.visible!==p.id||!pool.current)return false;
+ // A loaded page proves nothing about its video: an embed counts as watched only on the viewer's own recent click inside it.
+ if(pool.current.kind==='embed')return S.mode==='live'&&!!pool.current.viewerConfirmed;
+ return !!pool.current.progressing;
+}
+// A starter's game coming back (an ad, a cooldown, a reopen) keeps its place on the clock, so its plays are not lost behind the overlay.
+// The budget only refills while footage plays: a recording that keeps failing cannot freeze the day. Skip break needs the clock to run.
+function clockHeld(now){
+ return S.mode==='replay'&&S.playing&&S.program.kind==='standby'&&S.holdBudget>0&&!S.games.some(g=>S.breaks.has(g.id))&&S.games.some(g=>g.state==='in'&&(S.ads.has(g.id)||S.cooldown.get(g.id)>now||S.pending?.id===g.id)&&picture(g.id)==='video'&&(hasRoster(g,roster())||g.id===S.pinned));
 }
 function advanceClock(now){
  if(S.mode==='live'){S.at=Date.now()/1000;return;}
  if(!S.archive)return;
+ // Every open player can teach its game's real length, before the cut that would land on the guess. A seek aimed on the guess is aimed again.
+ for(const [key,slot] of pool.slots)if(learnDuration(key,slot.player)){slot.seekAt=-Infinity;if(key===pool.visible&&slot.player.target!==null)slot.player.seek(target(key));}
  const p=S.program,video=p.kind==='game'&&picture(p.id)==='video';
- if(S.seekHold&&video&&pool.ready(p.id,target(p.id),3))S.seekHold=false;
+ // A landing a few seconds off the target stays off it as the footage plays, so landed and moving also ends the hold.
+ if(S.seekHold&&video&&(pool.ready(p.id,target(p.id),3)||pool.visible===p.id&&pool.current?.target===null&&pool.current?.progressing))S.seekHold=false;
  if(S.seekHold&&!video)S.seekHold=false;
  // The picture drives replay time. Edits differ by recording; in-band ads
  // are not reliably observable through the provider's playback API.
- if(video&&pool.visible===p.id)learnDuration(p.id,pool.current);
+ const dt=Math.max(0,now-(clock.last??now));
  if(S.playing&&video&&!S.seekHold&&pool.visible===p.id&&pool.current?.progressing){
+  S.holdBudget=Math.min(STANDBY_HOLD,S.holdBudget+dt);
   const g=archiveGame(p.id),wall=g.start+syncFor(g).wall(pool.current.currentTime);
   // Small backward wobble is ignored; a sustained difference (the viewer
   // scrubbed inside the player) is followed.
@@ -203,7 +253,8 @@ function advanceClock(now){
   else{S.driftSince??=now;if(now-S.driftSince>2500){resetBreaks();S.lastAt=null;clock.seek(wall,now);S.driftSince=null;}else clock.tick(now);}
   clock.running=true;
  }else{
-  const waiting=S.playing&&(p.kind==='idle'||video&&(S.seekHold||pool.visible!==p.id||!pool.current?.progressing&&!S.ads.has(p.id)));
+  const holding=clockHeld(now);if(holding)S.holdBudget-=dt;
+  const waiting=S.playing&&(p.kind==='idle'||holding||video&&(S.seekHold||pool.visible!==p.id||!pool.current?.progressing&&!S.ads.has(p.id)));
   clock.set(S.playing&&!waiting,now);
  }
  S.at=clock.at;
@@ -245,7 +296,7 @@ function step(now){
   if(S.program.kind!=='standby'){S.program={kind:'standby'};pool.hide();}
   // A replay need not make the viewer wait through an edited timeout when
   // every available game is in a break. Preserve missed-score bookkeeping.
-  if(S.mode==='replay'&&S.games.some(g=>g.state==='in'&&hasRoster(g,roster()))){
+  if(S.mode==='replay'&&!S.ads.has(S.pinned)&&S.games.some(g=>g.state==='in'&&(hasRoster(g,roster())||g.id===S.pinned))){
    const next=Math.min(...[...S.detectedBreaks.values()].map(b=>b.until).filter(t=>Number.isFinite(t)&&t>S.at));
    if(Number.isFinite(next)&&next<=clock.end){clock.seek(next,now);S.at=next;S.lastAt=null;}
   }
@@ -253,6 +304,8 @@ function step(now){
  if(now-S.lastWarm>1000){S.lastWarm=now;warm(blocked);}
  nudge(now);
 }
+// A provider frame put on screen to wait for a click inside it (autoplay refused): it has CLICK_LIMIT to get that click.
+const awaitingClick=(id,player)=>S.mode==='replay'&&S.unmuteHint&&S.pending?.id===id&&pool.visible===id&&player?.kind==='provider'&&player.initialized&&!player.error;
 // The picture on screen stopped moving: ask the player again, then re-seek it, then give up on that game for a while.
 function nudge(now){
  const p=S.program,player=pool.current;
@@ -262,6 +315,7 @@ function nudge(now){
  if(player.kind==='embed'){S.stall=null;player.checkHealth?.({online:window.navigator?.onLine!==false,foreground:!document.hidden});return;}
  if(S.mode==='live'&&player.live){S.stall=null;player.checkHealth({active:true,online:window.navigator?.onLine!==false,foreground:!document.hidden});return;}
  if(player.target===null&&player.progressing){S.stall=null;return;}
+ if(awaitingClick(p.id,player)){S.stall=null;return;}
  S.stall??={since:now,step:0};const stalled=now-S.stall.since;
  if(S.stall.step===0&&stalled>3000){S.stall.step=1;player.kick?.();}
  else if(S.stall.step===1&&stalled>10000){S.stall.step=2;const t=target(p.id);if(t!==null)player.seek(t);player.play();}
@@ -269,27 +323,31 @@ function nudge(now){
 }
 
 // ---------- cuts ----------
+// A past tile opened for a game with none of the viewer's starters: nothing else ever brings that game back, so the choice outlasts its breaks.
+const heldChoice=id=>S.mode==='replay'&&S.selection?.id===id&&!!S.selection.hold&&!!gameState(id)&&!hasRoster(gameState(id),roster());
 function selectionDecision(blocked,now,protectedPlay=false){
  if(!S.pinned)return null;
  const g=gameState(S.pinned);
  const release=()=>{S.pinned=null;S.selection=null;director.reset();return null;};
- if(!g||blocked.has(g.id))return release();
+ if(!g)return release();
+ // A replay's ad belongs to the provider, not the game: the director fills the screen and the choice resumes when it ends.
+ if(blocked.has(g.id))return S.mode==='replay'&&(S.ads.has(g.id)||heldChoice(g.id))?null:release();
  const choice=S.selection?.id===g.id?S.selection:(S.selection={id:g.id,initialState:g.state,shownAt:null,actionSeen:false});
  if(S.program.kind==='game'&&S.program.id===g.id&&!S.pending){
   choice.shownAt??=now;
   if(g.state==='in'&&g.phase!=='break')choice.actionSeen=true;
  // Video breaks are excluded before selection; tracker-only selections can
  // still use their feed phase directly.
-  if(!protectedPlay&&g.phase==='break'&&(choice.actionSeen||now-choice.shownAt>=10000))return release();
+  if(!protectedPlay&&!heldChoice(g.id)&&g.phase==='break'&&(choice.actionSeen||now-choice.shownAt>=10000))return release();
   if(g.state==='post'&&choice.initialState!=='post')return release();
  }
  return {kind:'game',id:g.id,reason:'Your choice · automatic after a break'};
 }
-function selectGame(id){
+function selectGame(id,{hold=false}={}){
  const g=gameState(id);if(!g)return;
  if(S.mode==='replay'&&g.state!=='in'){const recording=archiveGame(id);if(recording)seekTo(recording.start);}
  skipHighlight();
- S.pinned=id;S.selection={id,initialState:gameState(id)?.state||g.state,shownAt:null,actionSeen:false};S.pending=null;director.reset();
+ S.pinned=id;S.selection={id,initialState:gameState(id)?.state||g.state,shownAt:null,actionSeen:false,hold};S.pending=null;director.reset();
  // Choosing Watch is an explicit playback action, including from Pause.
  if(!S.playing)setPlaying(true);
  if(S.playing)step(performance.now());render();
@@ -300,16 +358,18 @@ function skipHighlight(){
  // Keep the last picture until the selected/automatic return stream is ready.
 }
 function cutTo(id,now){
- if(S.program.kind==='game'&&S.program.id===id&&!S.highlight&&S.pending?.id!==id){S.pending=null;return;}
+ // Already the program and showing. A program with no picture yet (the tracker gave way to video after a seek back) still has to open.
+ if(S.program.kind==='game'&&S.program.id===id&&!S.highlight&&S.pending?.id!==id&&(picture(id)!=='video'||pool.visible===id)){S.pending=null;return;}
  // The target is already the picture on screen (an inset replay just finished over it): nothing to wait for.
  if(pool.visible===id&&picture(id)==='video'&&pool.get(id)&&!(S.program.kind==='game'&&S.program.id===id)){commit(id);return;}
  if(picture(id)==='data'){commit(id);return;}
  const source=sourceFor(id);if(!source){commit(id);return;}
  if(S.pending?.id!==id)S.pending={id,since:now};
- const slot=pool.open(id,source);pool.hold(id,target(id),{play:true});
+ // A stopped clock (a scrub settling, a game coming back) is not a moving target to lead.
+ const slot=pool.open(id,source);pool.hold(id,target(id),{play:true,fixed:!clock.running||clockHeld(now)});
  if(S.mode==='live'&&slot.player.live){slot.player.checkHealth({active:S.playing,online:window.navigator?.onLine!==false,foreground:!document.hidden});if(pool.get(id)!==slot)return;}
  if(pool.ready(id,target(id)))return commit(id);
- if(now-S.pending.since>LOAD_LIMIT&&!(S.mode==='live'&&slot.player.live)){
+ if(now-S.pending.since>(awaitingClick(id,slot.player)?CLICK_LIMIT:LOAD_LIMIT)&&!(S.mode==='live'&&slot.player.live)){
   cool(id,'it did not start in time');
  }else if(S.mode==='live'&&slot.player.live&&slot.player.kind!=='embed'&&S.pinned!==id&&now-S.pending.since>LIVE_LOAD_LIMIT){
   // A direct live link that never yields footage: the backup first; otherwise the link (not the game) is set aside and the tracker shows the game.
@@ -351,11 +411,13 @@ function warm(blocked){
   const healthy=p.kind!=='game'||picture(p.id)!=='video'||pool.current?.progressing;
   if(healthy)for(const id of [...new Set([now[0],ahead[0],now[1],ahead[1],fillers[0]].filter(Boolean))].slice(0,1))want.add(id);
  }
+ // A hidden player in an ad is left to finish it, within reason: a fresh embed would only start the ad again.
+ if(S.mode==='replay')for(const key of S.ads){const slot=pool.get(key);if(slot?.adAt!=null&&performance.now()-slot.adAt<STANDBY_HOLD)want.add(key);}
  for(const key of want){
   if(key.startsWith('hl:')||key===pool.visible||blocked.has(key))continue;
   if(picture(key)!=='video')continue;
   const source=sourceFor(key);if(!source)continue;
-  pool.open(key,source);pool.hold(key,target(key),{play:S.playing||key===S.pending?.id});
+  pool.open(key,source);pool.hold(key,target(key),{play:S.playing||key===S.pending?.id,fixed:!clock.running});
  }
  if(pool.visible&&S.playing&&!blocked.has(pool.visible)&&!heldHighlight(pool.visible)&&!pool.current?.wantPlay)pool.current?.play();
  pool.keep(want);
@@ -380,7 +442,7 @@ function retryMissedReplays(){
 }
 async function replaySource(item){
  // On the tracker (no video for this game) a score is replayed as the play itself.
- if(S.mode==='replay'&&(saved.dataOnly||!archiveGame(item.gameId)?.embed))return {key:'hl:'+item.id,data:true,duration:8,label:'Scoring play',title:item.score.text};
+ if(S.mode==='replay'&&(saved.dataOnly||!hasVideo(item.gameId)))return {key:'hl:'+item.id,data:true,duration:8,label:'Scoring play',title:item.score.text};
  const failed=S.failedClips;
  const games=S.live.games.map(g=>({...g,scores:S.live.scores.get(g.id)||g.scores||[]}));
  const candidates=S.mode==='replay'?[officialClip(item,S.clips)].filter(Boolean):liveClipCandidates(item,S.liveClips,games,{used:S.usedClips,failed});
@@ -396,7 +458,9 @@ async function replaySource(item){
  }
  if(S.mode==='live')throw new Error('No replay has been published yet.');
  const game=archiveGame(item.gameId);
- return {key:'hl:'+item.id,source:{url:game.embed,type:'provider/ok',duration:game.recordingDuration},...broadcastReplayWindow(item,game,syncFor(game)),label:'Broadcast replay',title:item.score.text};
+ // A score after the recording ended cannot come from its file: the tracker shows it as the play itself.
+ if(pastRecordingEnd(game.id,item.at))return {key:'hl:'+item.id,data:true,duration:8,label:'Scoring play',title:item.score.text};
+ return {key:'hl:'+item.id,source:{url:game.embed,type:'provider/ok',duration:knownLength(game)},...broadcastReplayWindow(item,game,syncFor(game)),label:'Broadcast replay',title:item.score.text};
 }
 function startHighlight(id){
  const prepared=S.sources.get(id),waiting=coverage.queue.find(q=>q.id===id);
@@ -486,8 +550,8 @@ function failHighlight(reason){
   if(h.src.clipId)S.failedClips.set(h.src.clipId,Date.now()+REPLAY_WAIT_SECONDS*1000);
   it.status='waiting';it.unavailable=false;S.sources.set(it.id,{status:'none',reason,retryAt:0});render();return;
  }
- if(S.mode==='replay'&&!saved.dataOnly&&h.src.label!=='Broadcast replay'&&game?.embed){
-  S.sources.set(h.item.id,{status:'ready',key:'hl:'+h.item.id+':b',source:{url:game.embed,type:'provider/ok',duration:game.recordingDuration},...broadcastReplayWindow(h.item,game,syncFor(game)),label:'Broadcast replay',title:h.item.score.text});
+ if(S.mode==='replay'&&!saved.dataOnly&&h.src.label!=='Broadcast replay'&&game?.embed&&!pastRecordingEnd(game.id,h.item.at)){
+  S.sources.set(h.item.id,{status:'ready',key:'hl:'+h.item.id+':b',source:{url:game.embed,type:'provider/ok',duration:knownLength(game)},...broadcastReplayWindow(h.item,game,syncFor(game)),label:'Broadcast replay',title:h.item.score.text});
   it.status='queued';coverage.requeue(h.item);
  }else{it.status='missed';it.unavailable=true;S.sources.set(h.item.id,{status:'none',reason});toast('Couldn’t play the replay of that score · '+reason,'warn');}
 }
@@ -520,15 +584,17 @@ function setPlaying(playing,message){
  if(playing&&S.mode==='live'&&!hasLineup()&&!S.pinned){openLineup();return;}
  if(playing&&S.mode==='replay'&&!S.archive)return;
  if(S.playing!==playing){
-  if(playing&&S.pausedAt!=null){const paused=performance.now()-S.pausedAt;for(const state of [S.highlight,S.pending,S.stall,S.selection])if(state){for(const key of ['since','until','checkedAt','progressAt','shownAt'])if(Number.isFinite(state[key]))state[key]+=paused;}for(const [id,until] of S.breaks)S.breaks.set(id,until+paused);S.pausedAt=null;}
+  if(playing&&S.pausedAt!=null){const paused=performance.now()-S.pausedAt;for(const state of [S.highlight,S.pending,S.stall,S.selection])if(state){for(const key of ['since','until','checkedAt','progressAt','shownAt'])if(Number.isFinite(state[key]))state[key]+=paused;}for(const [id,until] of S.breaks)S.breaks.set(id,until+paused);for(const key of S.ads){const slot=pool.get(key);if(slot?.adAt!=null)slot.adAt+=paused;}S.pausedAt=null;}
   else if(!playing)S.pausedAt=performance.now();
  }
  S.playing=playing;pool.setRunning(playing,{resumeVisible:!heldHighlight(pool.visible)});clock.set(false,performance.now());
+ // A hidden player in an ad is left to finish it: warm() skips a blocked game, so nothing else would ever start it again.
+ if(playing)for(const key of S.ads)pool.get(key)?.player.resume?.();
  // A loading highlight is hidden, so setRunning() does not resume it.
  if(playing&&S.highlight&&!S.highlight.playing&&!S.highlight.done&&!S.highlight.src.data)pool.get(S.highlight.src.key)?.player.play();
  // An inset replay is not the visible slot: resume it by hand.
  if(playing&&S.highlight?.inset&&S.highlight.playing&&!S.highlight.done)pool.get(S.highlight.src.key)?.player.play();
- if(playing&&!S.started){S.started=true;pool.setMuted(saved.muted);if($('streamsDetails').open)$('streamsDetails').close();}
+ if(playing&&!S.started){S.started=true;if(S.mode==='replay')chooseWeek();pool.setMuted(saved.muted);if($('streamsDetails').open)$('streamsDetails').close();}
  if(message)toast(message);render();
 }
 function seekTo(at){
@@ -562,7 +628,7 @@ function skipBreak(){
 }
 function setDay(index,{seek=true}={}){
  if(!S.archive?.sessions[index])return;
- if(S.highlight){S.highlight.done=true;closeHighlight();}pool.destroy();S.pending=null;S.pinned=null;S.selection=null;S.program={kind:S.started?'standby':'idle'};S.stall=null;S.sources.clear();S.cooldown.clear();S.breaks.clear();resetBreaks();coverage.reset();
+ if(S.highlight){S.highlight.done=true;closeHighlight();}pool.destroy();S.pending=null;S.pinned=null;S.selection=null;S.program={kind:S.started?'standby':'idle'};S.stall=null;S.sources.clear();S.cooldown.clear();S.recordingEnds.clear();S.holdBudget=STANDBY_HOLD;S.breaks.clear();resetBreaks();coverage.reset();
  S.day=index;const d=day();clock.end=d.end;$('daySelect').value=String(index);
  if(seek){const first=firstAction(d);seekTo(first??d.start);}
  S.range=null;syncTimeline();
@@ -586,10 +652,13 @@ function renderScreen(){
  // overlay states
  let overlay=null;
  if(!S.started)overlay={eyebrow:S.mode==='replay'?`WEEK ${S.archive?.data.week||7} REPLAY · ${day()?.label.toUpperCase()||''}`:'LIVE',title:'Your starters. One channel.',text:`Following ${saved.teamName}: ${starterCount(roster().length)}. The channel follows your starters’ teams, favors drives near the end zone, and replays missed scores when footage is available.`,button:S.mode==='replay'?'Watch replay':!hasLineup()?'Choose your players':'Start watching',action:S.mode==='live'&&!hasLineup()?'lineup':'start'};
+ const landing=landingWeek();
+ if(landing)overlay={eyebrow:'REPLAY',title:landing>0?`Getting Week ${landing} ready…`:'Finding the latest week…',text:'Loading the games and their replay videos. The first time can take a moment.',spinner:true,button:S.weekChosen?null:`Watch Week ${S.archive?.data.week||7} instead`,action:'start'};
  if(!S.started&&S.mode==='live'){overlay.title='Your game day starts here.';if(!hasLineup()){overlay.button='Connect ESPN';overlay.action='connect';}overlay.text=!hasLineup()?'Connect your fantasy team, or choose a game from the guide. We’ll find matching game streams. You can change the links below.':`Following ${saved.teamName} · ${starterCount(roster().length)}. Finding game streams automatically. Your saved links take priority.`;}
  else if(S.started&&loading&&!loading.playing&&!pool.visible&&p.kind!=='game')overlay={eyebrow:'REPLAY',title:'Getting your replay ready…',text:'Your games will continue if this clip cannot play.',spinner:true};
  else if(S.started&&(p.kind==='idle'||S.pending&&!pool.visible||p.kind==='game'&&!pool.visible&&picture(p.id)==='video'))overlay={eyebrow:'TUNING IN',title:S.pending?`Opening ${esc(gameState(S.pending.id)?.name||'the game')}…`:'Finding your players…',text:'The picture appears as soon as the game is playing.',spinner:true};
  else if(p.kind==='standby'&&!loading&&S.games.some(g=>g.state==='in'&&(S.ads.has(g.id)||S.breaks.has(g.id)||S.detectedBreaks.has(g.id))))overlay={eyebrow:'COMMERCIAL BREAK',title:'Waiting for a game to return.',text:S.mode==='live'?'Add another game stream to give the channel somewhere to go during breaks. We will retry your games automatically.':'Finding the next available play. You can also move to the next drive.',button:S.mode==='live'?'Add game streams':'Next drive',action:S.mode==='live'?'streams':'next'};
+ else if(p.kind==='standby'&&!loading&&!S.playing&&S.games.some(g=>g.state==='in'&&hasRoster(g,roster())))overlay={eyebrow:S.mode==='replay'?`WEEK ${S.archive?.data.week||7} REPLAY`:'LIVE',title:'Ready when you are.',text:'The channel is paused. Press Watch to pick up your games.',button:'Watch',action:'start'};
  else if(p.kind==='standby'&&!loading&&S.games.some(g=>g.state==='in'&&hasRoster(g,roster())))overlay={eyebrow:'VIDEO UNAVAILABLE',title:'Your game video is unavailable.',text:S.mode==='live'?'Try another stream link below, or retry your current links.':'Retry the video, or choose the game tracker in Settings.',button:'Retry video',action:'retry'};
  else if(p.kind==='standby'&&!loading){const next=nextKickoff();overlay={eyebrow:'STANDBY',title:'None of your starters are playing right now.',text:next?`Next up: ${next.name} at ${timeLabel(next.start)} ET.`:S.mode==='live'?(S.live.error?'Game updates are unavailable. We will keep trying.':S.games.length?'Your games will appear here when they start. You can add their streams below now.':'Getting the latest NFL schedule…'):'Your starters are done for this slate.',button:S.mode==='replay'&&next?'Skip to kickoff':null,action:'kickoff'};}
  else if(p.kind==='game'&&(S.ads.has(p.id)||S.breaks.has(p.id)))overlay={eyebrow:'COMMERCIAL',title:'Skipping the break.',text:'Opening another available game. Your lineup will return when its games are ready.',spinner:true,dim:true};
@@ -598,10 +667,13 @@ function renderScreen(){
  const wantsSound=!overlay&&!saved.muted&&!!pool.current?.audioLocked&&S.playing;
  $('unmute').hidden=!wantsSound||pool.current?.kind==='provider';
  $('soundHint').hidden=!wantsSound||pool.current?.kind!=='provider';
- if(overlay){$('ovEyebrow').textContent=overlay.eyebrow;$('ovTitle').innerHTML=overlay.title;$('ovText').textContent=overlay.text;$('ovButton').hidden=!overlay.button;$('ovButton').textContent=overlay.button||'';$('ovButton').dataset.action=overlay.action||'start';o.classList.toggle('busy',!!overlay.spinner);$('ovHint').textContent=S.unmuteHint?'If the video waits, press play inside it.':'';}
+ if(overlay){setText('ovEyebrow',overlay.eyebrow);put('ovTitle',overlay.title);setText('ovText',overlay.text);$('ovButton').hidden=!overlay.button;setText('ovButton',overlay.button||'');$('ovButton').dataset.action=overlay.action||'start';o.classList.toggle('busy',!!overlay.spinner);setText('ovHint',S.unmuteHint?'If the video waits, press play inside it.':'');}
  // switching chip
- const pend=S.pending&&gameState(S.pending.id);$('switching').hidden=!(pend&&pool.visible&&pool.visible!==S.pending.id&&performance.now()-S.pending.since>700);
- if(pend)$('switching').textContent=`Up next · ${pend.name}`;
+ const pend=S.pending&&gameState(S.pending.id),switching=!!(pend&&pool.visible&&pool.visible!==S.pending.id&&performance.now()-S.pending.since>700);
+ // A recorded video that has not shown its first frame yet gets a word, so a dark stage never looks broken.
+ const starting=!overlay&&!switching&&S.playing&&p.kind==='game'&&pool.visible===p.id&&pool.current?.kind==='provider'&&!(pool.current.advances>0);
+ $('switching').hidden=!switching&&!starting;
+ if(switching)setText('switching',`Up next · ${pend.name}`);else if(starting)setText('switching',S.unmuteHint?'Loading the replay video · if it waits, press play inside it':'Loading the replay video…');
  // a website player stays up through the break, dimmed, with a word on why
  const dimmed=!overlay&&S.dimmed&&pool.visible===S.dimmed.id&&p.kind==='game'&&p.id===S.dimmed.id;
  $('screen').classList.toggle('dimmed',!!dimmed);$('breakChip').hidden=!dimmed;
@@ -612,26 +684,26 @@ function renderScreen(){
  const showInfo=!!game&&!overlay;$('bug').hidden=!showInfo;$('lower').hidden=!showInfo;
  $('screen').classList.toggle('replaying',!!h?.playing&&!h.inset);
  if(!showInfo)return;
- $('bugTag').textContent=h?.playing&&!h.inset?'REPLAY':S.mode==='live'?'LIVE':'WEEK '+(S.archive?.data.week||7);
- $('bugGame').innerHTML=`${esc(game.teams[0].abbr)} <b>${game.score?.[0]??0}</b> · ${esc(game.teams[1].abbr)} <b>${game.score?.[1]??0}</b>`;
- $('bugClock').textContent=game.detail||'';
+ setText('bugTag',h?.playing&&!h.inset?'REPLAY':S.mode==='live'?'LIVE':'WEEK '+(S.archive?.data.week||7));
+ $('bugGame').innerHTML=`${esc(game.teams[0].abbr)} <b>${esc(tallyOf(game,0))}</b> · ${esc(game.teams[1].abbr)} <b>${esc(tallyOf(game,1))}</b>`;
+ setText('bugClock',game.detail||'');
  if(h?.playing&&!h.inset){
   const d=describeScore(h.item.score,game);
-  $('lowerKicker').textContent=`${h.src.label} · ${d.label}`;$('lowerKicker').className='lower-kicker replay';
-  $('lowerMain').textContent=d.text;$('lowerMeta').textContent=h.done?(loading?.previousKey?'Next replay is loading…':'Returning to your games…'):`Score replay · ${d.line}`;return;
+  setText('lowerKicker',`${h.src.label} · ${d.label}`);$('lowerKicker').className='lower-kicker replay';
+  setText('lowerMain',d.text);setText('lowerMeta',h.done?(loading?.previousKey?'Next replay is loading…':'Returning to your games…'):`Score replay · ${d.line}`);return;
  }
  const entry=S.decision?.entry?.game?.id===game.id?S.decision.entry:rank([game],roster(),{includeDefense:saved.includeDefense})[0];
  const players=entry?.players||[];
  const roles=new Set(players.map(x=>x.role));
  const kicker=game.phase==='break'?['BREAK','break']:roles.has('offense')?(game.yardsToGoal<=20?['RED ZONE','red']:['TEAM ON OFFENSE','go']):roles.has('kicker')?['FIELD-GOAL RANGE','amber']:roles.has('defense')?['YOUR DEFENSE','blue']:S.pinned?['YOUR CHOICE','muted']:['BETWEEN SERIES','muted'];
- $('lowerKicker').textContent=kicker[0];$('lowerKicker').className='lower-kicker '+kicker[1];
+ setText('lowerKicker',kicker[0]);$('lowerKicker').className='lower-kicker '+kicker[1];
  $('lowerMain').innerHTML=players.length?players.map(x=>`<span>${esc(x.player.name)}<i>${esc(ROLE[x.role]||x.player.position)}</i></span>`).join(''):esc(rosterIn(game).map(p=>p.name).join(' · ')||game.name);
  const off=game.possession>=0?game.teams[game.possession].abbr:'';
- $('lowerMeta').textContent=game.phase==='break'?'Break in the action':[off&&`${off} ball`,game.downDistance,Number.isFinite(game.yardsToGoal)&&!game.special?`${game.yardsToGoal} yds to the end zone`:''].filter(Boolean).join(' · ');
+ setText('lowerMeta',game.phase==='break'?'Break in the action':[off&&`${off} ball`,game.downDistance,Number.isFinite(game.yardsToGoal)&&!game.special?`${game.yardsToGoal} yds to the end zone`:''].filter(Boolean).join(' · '));
 }
 function renderField(game,replayItem){
  const off=game.possession>=0?game.possession:null,ytg=Number.isFinite(game.yardsToGoal)?game.yardsToGoal:50;
- $('fvScore').innerHTML=game.teams.map((t,i)=>`<div class="${off===i?'has-ball':''}"><b>${esc(t.abbr)}</b><strong>${game.score?.[i]??0}</strong></div>`).join('<span>'+esc(game.detail||'')+'</span>');
+ $('fvScore').innerHTML=game.teams.map((t,i)=>`<div class="${off===i?'has-ball':''}"><b>${esc(t.abbr)}</b><strong>${esc(tallyOf(game,i))}</strong></div>`).join('<span>'+esc(game.detail||'')+'</span>');
  $('fvLeft').textContent=game.teams[0].abbr;$('fvRight').textContent=game.teams[1].abbr;
  // Away attacks the right end zone in this diagram.
  const x=off===null?50:off===0?100-ytg:ytg;$('fvBall').style.left=x+'%';$('fvLine').style.left=x+'%';$('fvBall').hidden=off===null;
@@ -646,7 +718,7 @@ function nextKickoff(){
 }
 // The game card says where its picture comes from, and is the shortcut to change it.
 function streamChip(g){
- if(S.mode==='replay')return !S.archive?.data.calibrated&&!archiveGame(g.id)?.embed?`<button type="button" class="g-stream none" data-add-stream="${esc(g.id)}" title="Add the replay video for ${esc(g.name)}">+ Replay video</button>`:'';
+ if(S.mode==='replay')return !S.archive?.data.calibrated&&!hasVideo(g.id)?`<button type="button" class="g-stream none" data-add-stream="${esc(g.id)}" title="Add the replay video for ${esc(g.name)}">+ Replay video</button>`:'';
  if(g.state==='post')return '';
  const key=gameKey(g),urls=streamURLs(g);
  if(!urls.length)return `<button type="button" class="g-stream none" data-add-stream="${esc(g.id)}" title="Add a stream for ${esc(g.name)}">+ Stream</button>`;
@@ -661,9 +733,11 @@ function showPanel(tab){
 }
 for(const [name,tabId] of RAIL){$(tabId).onclick=()=>showPanel(name);$(tabId).onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const i=RAIL.findIndex(r=>r[1]===tabId),next=e.key==='Home'?0:e.key==='End'?RAIL.length-1:(i+(e.key==='ArrowRight'?1:-1)+RAIL.length)%RAIL.length;showPanel(RAIL[next][0]);$(RAIL[next][1]).focus?.();};}
 // The strip scrolls sideways: arrows, and the mouse wheel over it.
-const stripStep=dir=>$('games').scrollBy?.({left:dir*Math.max(240,($('games').clientWidth||800)*.8),behavior:'smooth'});
+// Quick clicks chain from the last target while its scroll is moving. The target expires by time, since not every browser has scrollend.
+const stripStep=dir=>{const list=$('games');if(!list.scrollTo)return;const max=Math.max(0,list.scrollWidth-list.clientWidth),moving=S.stripTarget!==null&&Date.now()-S.stripStartedAt<700&&Math.abs(S.stripTarget-list.scrollLeft)>8,from=moving?Math.min(max,S.stripTarget):list.scrollLeft;S.stripStartedAt=Date.now();S.stripTarget=Math.max(0,Math.min(max,from+dir*Math.max(240,(list.clientWidth||800)*.8)));list.scrollTo({left:S.stripTarget,behavior:'smooth'});};
+for(const name of ['scrollend','pointerdown','touchstart'])$('games').addEventListener?.(name,()=>{S.stripTarget=null;},{passive:true});
 $('stripPrev').onclick=()=>stripStep(-1);$('stripNext').onclick=()=>stripStep(1);
-$('games').addEventListener?.('wheel',e=>{const list=$('games');if(Math.abs(e.deltaY)<=Math.abs(e.deltaX)||list.scrollWidth<=list.clientWidth)return;e.preventDefault();list.scrollLeft+=e.deltaY;},{passive:false});
+$('games').addEventListener?.('wheel',e=>{S.stripTarget=null;const list=$('games');if(Math.abs(e.deltaY)<=Math.abs(e.deltaX)||list.scrollWidth<=list.clientWidth)return;e.preventDefault();list.scrollLeft+=e.deltaY;},{passive:false});
 function renderRail(){
  const teams=rosterTeams(roster()),blocked=excluded(),current=currentGameId(),ours=g=>g.teams.some(t=>teams.has(t.abbr));
  const listed=S.games.filter(g=>S.mode==='live'||ours(g)||sourceFor(g.id)||g.id===current);
@@ -671,7 +745,7 @@ function renderRail(){
  const ranked=rank(S.games,roster(),{excluded:blocked,includeDefense:saved.includeDefense});
  const order=g=>g.id===current?0:ranked.findIndex(e=>e.game.id===g.id)>=0?1+ranked.findIndex(e=>e.game.id===g.id):g.state==='in'?50:g.state==='pre'?60:70;
  const nickname=t=>{const words=String(t.name||'').trim().split(/\s+/);return words.length>1?words.at(-1):t.name||t.abbr;};
- const kickoff=g=>{const at=g.date?new Date(g.date):g.start?new Date(g.start*1000):null;return at&&Number.isFinite(at.getTime())?'Kickoff '+at.toLocaleString([],{weekday:'short',hour:'numeric',minute:'2-digit'}):'';};
+ const kickoff=g=>{const at=g.date?new Date(g.date):g.start?new Date(g.start*1000):null;return at&&Number.isFinite(at.getTime())?'Kickoff '+KICKOFF_TIME.format(at):'';};
  const items=mine.sort((a,b)=>order(a)-order(b)||(a.start||Date.parse(a.date)/1000||0)-(b.start||Date.parse(b.date)/1000||0)).map(g=>{
   const e=ranked.find(x=>x.game.id===g.id),watching=S.program.kind==='game'&&g.id===S.program.id&&!S.highlight?.playing,off=g.possession>=0?g.teams[g.possession].abbr:'';
   const tag=watching?['ON AIR','onair']:S.pending?.id===g.id?['UP NEXT','next']:blocked.has(g.id)?[S.ads.has(g.id)||S.breaks.has(g.id)||S.detectedBreaks.has(g.id)?'BREAK':'UNAVAILABLE','muted']:g.state==='post'?['FINAL','final']:g.state==='pre'?['LATER','later']:g.phase==='break'?['BREAK','muted']:e?.tier===2?(g.yardsToGoal<=20?['RED ZONE','red']:e.players.some(x=>x.role==='kicker')&&e.players.every(x=>x.role==='kicker')?['FG RANGE','amber']:['DRIVING','go']):e?.tier===1?['DEFENSE','blue']:['LIVE','live'];
@@ -686,12 +760,11 @@ function renderRail(){
   const cta=watching?'On screen':S.pending?.id===g.id?'Opening…':blocked.has(g.id)?tag[0]==='BREAK'?'On break':'Unavailable':g.state==='post'&&!selectable?'Final':selectable?(picture(g.id)==='data'?'Tracker':'Watch'):'Later';
   return `<li class="tile${watching?' watching':''}${S.pinned===g.id?' pinned':''}${selectable?'':' off'}${ours(g)?' mine':''}" style="--away:${teamColor(g.teams[0])};--home:${teamColor(g.teams[1])}"><button class="game" data-game="${esc(g.id)}" aria-pressed="${S.pinned===g.id}" aria-label="${esc(g.name+'. '+action)}" ${selectable?'':'disabled'}><span class="g-status"><span class="tag ${tag[1]}">${tag[0]}</span><span class="g-when">${esc(g.detail||'')}</span></span><span class="g-matchup">${rows}</span>${drive}</button><div class="g-footer"><span class="g-names">${names||'<span>Other game</span>'}</span>${streamChip(g)}<span class="g-cta">${cta}</span></div></li>`;
  }).join('');
- const past=S.mode==='live'?S.pastWeeks.map(w=>`<li class="week-label" aria-hidden="true">Week ${w.week}</li>`+w.games.map(g=>pastTile(g,w.week)).join('')).join(''):'';
- const thisWeek=past&&items&&S.weeks.current?`<li class="week-label" aria-hidden="true">Week ${S.weeks.current}</li>`:'';
- put('games',past+thisWeek+(items||(S.mode==='live'&&!S.live.games.length?'<li class="empty">Loading the NFL schedule…</li>':'<li class="empty">None of your starters play in this window.</li>')));
- if(past&&items&&!S.stripScrolled){const first=$('games').querySelector?.('.tile:not(.past)');if(first?.offsetLeft!==undefined){$('games').scrollLeft=Math.max(0,first.offsetLeft-48);S.stripScrolled=true;}}
+ const past=S.mode==='live'&&S.pastWeeks.length?pastRun(items?S.weeks.current:0):'',landing=landingWeek();
+ put('games',landing?`<li class="empty">${landing>0?`Getting Week ${landing} ready…`:'Finding the latest week…'}</li>`:items||(S.mode==='live'&&!S.live.games.length?'<li class="empty">Loading the NFL schedule…</li>':'<li class="empty">None of your starters play in this window.</li>'),landing?'':past.html,past.kept);
+ if(past&&items&&!S.stripScrolled){const first=$('games').querySelector?.('.tile:not(.past)');if(first?.offsetLeft!==undefined){$('games').scrollLeft=Math.max(0,first.offsetLeft-48);S.stripScrolled=true;S.stripTarget=null;}}
  const liveNow=S.mode==='live'?S.live.games.filter(g=>g.state==='in').length:0,known=S.mode==='live'&&S.live.fetched&&!S.live.error;$('liveDot').classList.toggle('on',liveNow>0);$('liveMode').title=liveNow?`${liveNow} NFL game${liveNow===1?'':'s'} live now`:known?'No NFL games live right now':S.mode==='replay'?'Switch to live games':S.live.error?'Live game updates unavailable':'Checking for live NFL games…';
- $('gamesNote').textContent=S.pinned?'Your choice':`${listed.filter(g=>g.state==='in').length} in play`;
+ setText('gamesNote',S.pinned?'Your choice':`${listed.filter(g=>g.state==='in').length} in play`);
  // Keep the game on screen in view in the strip.
  const onAir=S.program.kind==='game'?S.program.id:null;
  if(onAir&&onAir!==S.stripShown){S.stripShown=onAir;for(const b of $('games').querySelectorAll?.('button')||[])if(b.dataset?.game===onAir)b.scrollIntoView?.({block:'nearest',inline:'nearest',behavior:'smooth'});}
@@ -703,40 +776,45 @@ function renderRail(){
   const link=destination?`<a class="score-link" href="${esc(destination)}" target="_blank" rel="noopener noreferrer" aria-label="${label} (opens a new tab)">${label} ↗</a>`:'';
   return `<li><span class="s-kind ${x.score.kind}">${esc(x.score.kind)}</span><span class="s-text">${esc(x.score.text.replace(/\s*\([^)]*\)\s*$/,''))}<small>${esc(x.gameName)}</small>${link}</span><span class="tag ${st[1]}">${st[0]}</span></li>`;
  }).join('')||'<li class="empty">Scores by your starters show up here.</li>');
- $('scoresNote').textContent=coverage.log.length?`${coverage.log.filter(x=>x.seen||x.status==='replayed').length}/${coverage.log.length} watched`:'';
- $('scoreCount').textContent=coverage.log.length?String(coverage.log.length):'';
+ setText('scoresNote',coverage.log.length?`${coverage.log.filter(x=>x.seen||x.status==='replayed').length}/${coverage.log.length} watched`:'');
+ setText('scoreCount',coverage.log.length?String(coverage.log.length):'');
 }
+// Writing text, even the same text, makes the browser lay the page out again.
+const setText=(id,value)=>{const el=$(id);if(el.textContent!==String(value??''))el.textContent=value;};
 const markup=new Map();
-function put(id,html){if(markup.get(id)===html)return;const key=id==='games'?'game':id==='scoreboardGames'?'scoreLink':null,focused=key?document.activeElement?.dataset?.[key]:null;markup.set(id,html);$(id).innerHTML=html;if(focused)for(const item of $(id).querySelectorAll(key==='game'?'button':'a'))if(item.dataset[key]===focused)item.focus({preventScroll:true});}
+// Building a date format is the slow part of showing a date, and the strip and matchup show dozens per render.
+const KICKOFF_TIME=new Intl.DateTimeFormat([],{weekday:'short',hour:'numeric',minute:'2-digit'}),PAST_DAY=new Intl.DateTimeFormat([],{weekday:'short',month:'short',day:'numeric'}),CLOCK_TIME=new Intl.DateTimeFormat([],{hour:'numeric',minute:'2-digit'});
+// head is markup that rarely changes (the past weeks in the strip): when only what follows it changes, its first `kept` items stay in the page untouched.
+function put(id,html,head='',kept=0){const last=markup.get(id);if(last?.html===html&&last.head===head)return;const key=id==='games'?'game':id==='scoreboardGames'?'scoreLink':null,focused=key?document.activeElement?.dataset?.[key]:null,list=$(id);markup.set(id,{html,head});if(head&&last?.head===head&&list.insertAdjacentHTML&&list.children.length>=kept){while(list.children.length>kept)list.lastElementChild.remove();list.insertAdjacentHTML('beforeend',html);}else list.innerHTML=head+html;if(focused)for(const item of $(id).querySelectorAll(key==='game'?'button':'a'))if(item.dataset[key]===focused)item.focus({preventScroll:true});}
 function currentGameId(){return S.program.kind==='game'?S.program.id:S.highlight?.returnTo||null;}
 function renderTransport(){
  const replay=S.mode==='replay';
  $('replayControls').hidden=!replay;$('speedControl').hidden=!replay||!saved.dataOnly;
- $('channelMode').textContent=replay?`Week ${S.archive?.data.week||7} replay`:'Live games';
+ setText('channelMode',replay?`Week ${S.archive?.data.week||7} replay`:'Live games');
  const full=!!(document.fullscreenElement||document.webkitFullscreenElement||document.querySelector('.stage').classList.contains('theater'));
- $('fullButton').textContent=full?'Exit full screen':'Full screen';$('fullButton').setAttribute('aria-label',full?'Exit full screen':'Full screen');
+ setText('fullButton',full?'Exit full screen':'Full screen');$('fullButton').setAttribute('aria-label',full?'Exit full screen':'Full screen');
  for(const id of ['backButton','forwardButton','nextButton','daySelect','scope'])$(id).hidden=!replay;
  $('timeline').parentElement.hidden=!replay;$('speed').hidden=!replay||!saved.dataOnly;
- $('playButton').dataset.playing=String(S.playing);$('playButton').textContent=S.playing?'Pause':'Play';$('playButton').setAttribute('aria-label',S.playing?'Pause':'Play');
- $('muteButton').textContent=saved.muted?'Turn sound on':'Mute sound';$('muteButton').setAttribute('aria-label',$('muteButton').textContent);$('muteButton').hidden=pool.current?.kind==='embed';
+ $('playButton').dataset.playing=String(S.playing);setText('playButton',S.playing?'Pause':'Play');$('playButton').setAttribute('aria-label',S.playing?'Pause':'Play');
+ setText('muteButton',saved.muted?'Turn sound on':'Mute sound');$('muteButton').setAttribute('aria-label',$('muteButton').textContent);$('muteButton').hidden=pool.current?.kind==='embed';
  if(replay){syncTimeline();if(!S.scrubbing)$('timeline').value=String(Math.round(S.at));}
- $('timeLabel').textContent=replay?timeLabel(S.at)+' ET':new Date((S.at-saved.delay)*1000).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
- $('autoChip').textContent=S.pinned?'Your choice':'Automatic';$('autoChip').classList.toggle('on',!S.pinned);$('resumeAuto').hidden=!S.pinned;
+ setText('timeLabel',replay?timeLabel(S.at)+' ET':new Date((S.at-saved.delay)*1000).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}));
+ setText('autoChip',S.pinned?'Your choice':'Automatic');$('autoChip').classList.toggle('on',!S.pinned);$('resumeAuto').hidden=!S.pinned;
  const d=S.decision;
- $('reason').textContent=S.started&&!S.playing?'Paused':!S.started?(S.mode==='live'&&!hasLineup()?'Choose your team with Fantasy team.':`${saved.teamName} · ${starterCount(roster().length)}`):S.pending?`Opening ${gameState(S.pending.id)?.name||'video'}…`:S.highlight?.playing?'Replaying a score you missed':d?.reason||'';
- $('pictureNote').textContent=S.mode==='live'?(pool.current?.reconnecting?pool.current.recoveryMessage:S.live.error?'Game updates unavailable · retrying':`${saved.delay} sec stream delay`):saved.dataOnly?'Game tracker':'Recorded game video';
+ setText('reason',S.started&&!S.playing?'Paused':!S.started?(S.mode==='live'&&!hasLineup()?'Choose your team with Fantasy team.':`${saved.teamName} · ${starterCount(roster().length)}`):S.pending?`Opening ${gameState(S.pending.id)?.name||'video'}…`:S.highlight?.playing?'Replaying a score you missed':d?.reason||'');
+ setText('pictureNote',S.mode==='live'?(pool.current?.reconnecting?pool.current.recoveryMessage:S.live.error?'Game updates unavailable · retrying':`${saved.delay} sec stream delay`):saved.dataOnly?'Game tracker':'Recorded game video');
  const current=gameState(currentGameId()),inGame=S.program.kind==='game'&&!S.highlight;
  $('pinCurrent').hidden=!inGame||!current;
- $('pinCurrent').textContent=S.pinned?'Let the channel choose':'Stay on this game';$('pinCurrent').setAttribute('aria-pressed',String(!!S.pinned));
+ setText('pinCurrent',S.pinned?'Let the channel choose':'Stay on this game');$('pinCurrent').setAttribute('aria-pressed',String(!!S.pinned));
  $('skipBreak').hidden=!inGame||picture(currentGameId())!=='video';$('skipBreak').disabled=!S.playing;
  $('reloadStream').hidden=!inGame||S.mode!=='live'||typeof pool.current?.reload!=='function';$('reloadStream').disabled=!S.playing;
  const sources=current?streamURLs(current):[],alternate=sources.find(url=>url!==pool.get(current?.id)?.url);
  $('nextStream').hidden=!inGame||S.mode!=='live'||!alternate;$('nextStream').disabled=!S.playing;
- $('nextStream').textContent=alternate===sources[0]?'Try primary':'Try backup';
+ setText('nextStream',alternate===sources[0]?'Try primary':'Try backup');
  const embed=inGame&&S.mode==='live'&&pool.current?.kind==='embed',original=embed?(pool.get(current?.id)?.source?.page||pool.get(current?.id)?.url):null;
  $('openStream').hidden=!original;$('openStream').href=original||'#';$('embedHelp').hidden=!embed;
  const health=S.playing&&inGame&&pool.current?.reconnecting?pool.current.recoveryMessage:'';
- $('streamHealth').hidden=!health;if($('streamHealth').textContent!==health)$('streamHealth').textContent=health;
+ $('streamHealth').hidden=!health;if($('streamHealth').textContent!==health)setText('streamHealth',health);
  $('leaveHighlight').hidden=!S.highlight||S.highlight.done;$('leaveHighlight').disabled=!S.playing;
  $('undoBreak').hidden=!S.breaks.size;
 }
@@ -779,7 +857,7 @@ $('ovButton').onclick=()=>{
  if($('ovButton').dataset.action==='connect'){openESPNConnection();return;}
  if($('ovButton').dataset.action==='streams'){openStreams();return;}
  if($('ovButton').dataset.action==='next'){nextDrive();return;}
- if($('ovButton').dataset.action==='retry'){S.cooldown.clear();director.reset();setPlaying(true);return;}
+ if($('ovButton').dataset.action==='retry'){S.cooldown.clear();S.holdBudget=STANDBY_HOLD;director.reset();setPlaying(true);return;}
  if($('ovButton').dataset.action==='lineup'){openLineup();return;}
  if($('ovButton').dataset.action==='kickoff'){const next=nextKickoff();if(next)seekTo(next.start-30);return;}
  saved.muted=false;persist();setPlaying(true);
@@ -823,10 +901,10 @@ $('timeline').oninput=e=>{
 };
 $('timeline').onchange=e=>{S.scrubbing=false;$('scrubTip').hidden=true;seekTo(Number(e.target.value));};
 $('timeline').onblur=()=>{S.scrubbing=false;$('scrubTip').hidden=true;};
-$('daySelect').onchange=e=>setDay(Number(e.target.value));
+$('daySelect').onchange=e=>{chooseWeek();setDay(Number(e.target.value));};
 // The Options popover closes on a click anywhere else.
 document.addEventListener('pointerdown',e=>{const d=document.querySelector('.replay-settings');if(d?.open&&!e.target?.closest?.('.replay-settings'))d.open=false;});
-$('weekSelect').onchange=e=>{const week=Number(String(e.target.value).replace(/^w/,''));if(week)void selectWeek(week);};
+$('weekSelect').onchange=e=>{const week=Number(String(e.target.value).replace(/^w/,''));if(week){chooseWeek();void selectWeek(week);}};
 $('speed').onchange=e=>{clock.tick(performance.now());clock.rate=Number(e.target.value);};
 $('muteButton').onclick=()=>{saved.muted=!saved.muted;S.audioAsked=0;pool.setMuted(saved.muted);persist();render();};
 $('unmute').onclick=()=>{S.audioAsked=(S.audioAsked||0)+1;pool.retryAudio();render();};
@@ -907,19 +985,23 @@ document.addEventListener('visibilitychange',()=>{
 // ---------- modes ----------
 async function setMode(mode){
  if(mode===S.mode)return;
- if(mode==='replay'&&!S.archive){toast('The replay is unavailable. Live games still work.','warn');return;}
+ if(mode==='replay'&&!S.archive){$('replayMode').disabled=true;const ok=await loadReplayArchive();$('replayMode').disabled=false;if(!ok||!S.archive){toast('The replay is unavailable. Live games still work.','warn');return;}if(S.mode==='replay')return;}
  if(S.mode==='replay'){S.replayAt=S.at;S.replayLineup=lineupSnapshot();}
  else S.liveLineup=lineupSnapshot();
+ $('games').scrollLeft=0;S.stripScrolled=false;S.stripTarget=null;
  setPlaying(false);pool.destroy();S.mode=mode;S.program={kind:'idle'};S.pending=null;S.pinned=null;S.selection=null;S.highlight=null;S.started=false;S.autoAttempted=false;
  S.streamChoices.clear();S.streamRotations.clear();
  if(mode==='live'&&S.liveLineup){saved={...saved,...S.liveLineup};S.liveLineup=null;}
  else if(mode==='replay'&&S.replayLineup)saved={...saved,...S.replayLineup};
  S.resumeOnShow=false;S.pausedAt=null;S.unmuteHint=false;S.audioAsked=0;S.driftSince=null;S.usedClips=new Map();S.failedClips=new Map();franchiseOptions();
- streamFinder.cancel();S.leagueRequest=(S.leagueRequest||0)+1;$('importLeague').disabled=false;S.live.generation++;S.live.feed=new LiveFeed();S.live.games=[];S.live.fetched=0;S.live.error='';S.live.scores.clear();S.live.summaryAt={};S.liveClips=[];S.games=[];S.coverageStart=null;S.decision=null;S.seekHold=false;S.stall=null;coverage.reset();director.reset();S.sources.clear();S.cooldown.clear();S.ads.clear();S.breaks.clear();resetBreaks();S.lastAt=null;
+ streamFinder.cancel();S.leagueRequest=(S.leagueRequest||0)+1;$('importLeague').disabled=false;S.live.generation++;S.live.feed=new LiveFeed();S.live.games=[];S.live.fetched=0;S.live.error='';S.live.scores.clear();S.live.summaryAt={};S.liveClips=[];S.games=[];S.coverageStart=null;S.decision=null;S.seekHold=false;S.stall=null;coverage.reset();director.reset();S.sources.clear();S.cooldown.clear();S.recordingEnds.clear();S.holdBudget=STANDBY_HOLD;S.ads.clear();S.breaks.clear();resetBreaks();S.lastAt=null;
  $('replayMode').setAttribute('aria-pressed',String(mode==='replay'));$('liveMode').setAttribute('aria-pressed',String(mode==='live'));
  if(mode==='live'){S.at=Date.now()/1000;pollLive(S.live.generation);pollLiveClips(S.live.generation);}
  else{seekTo(S.replayAt??firstAction(day())??clock.at);}
- if(saved.leagueId)importLeague({refresh:true,quiet:true});
+ if(mode==='replay')void landOnLatest();
+ // A landing still under way decides the week, and the lineup is asked for that week once it settles.
+ S.weeks.lineupDue=false;if(mode==='replay'&&S.weeks.landing)S.weeks.lineupDue=true;else if(saved.leagueId)importLeague({refresh:true,quiet:true});
+ if(mode==='replay')void refreshWeekVideos(S.archive?.data.week);
  render();
 }
 $('replayMode').onclick=()=>setMode('replay');$('liveMode').onclick=()=>setMode('live');
@@ -928,10 +1010,13 @@ async function pollLive(generation){
  if(generation!==S.live.generation||S.mode!=='live')return;
  let summaries;
  try{
-  const games=liveGames(await espn('scoreboard',AbortSignal.timeout(8000)));
+  const board=espn('scoreboard',AbortSignal.timeout(8000));S.live.board={at:Date.now(),board};
+  const raw=await board,games=liveGames(raw);
   if(generation!==S.live.generation||S.mode!=='live')return;
+  // A tab left open across a week change: the strip and the week list move on with it.
+  if(S.weeks.listed&&!S.weeks.listing&&(Number(raw.week?.number)>S.weeks.current||latestCompletedWeek(raw)>S.weeks.latest)){S.weeks.listed=false;void loadWeekList();}
   for(const g of games)g.scores=S.live.scores.get(g.id)||[];
-  S.live.games=games;S.live.error='';S.live.fetched=Date.now();S.live.feed.push(games,Date.now()/1000);if(S.discoveryReady)void refreshStreamLinks();if($('streamsStatus').textContent==='Refreshing the schedule…')$('streamsStatus').textContent='Schedule updated.';
+  S.live.error='';S.live.fetched=Date.now();S.live.feed.push(games,Date.now()/1000);S.live.games=S.live.feed.latest;if(S.discoveryReady)void refreshStreamLinks();if($('streamsStatus').textContent==='Refreshing the schedule…')$('streamsStatus').textContent='Schedule updated.';
   const teams=rosterTeams(roster());
   const pending=S.live.summaryPending,capacity=Math.max(0,4-[...pending.values()].filter(request=>request.generation===generation).length);
   summaries=Promise.allSettled(games.filter(g=>g.state!=='pre'&&g.teams.some(t=>teams.has(t.abbr))&&pending.get(g.id)?.generation!==generation&&Date.now()-(S.live.summaryAt?.[g.id]||0)>(g.state==='post'?600000:25000)).sort((a,b)=>(S.live.summaryAt?.[a.id]||0)-(S.live.summaryAt?.[b.id]||0)).slice(0,capacity).map(async g=>{
@@ -942,7 +1027,9 @@ async function pollLive(generation){
    const summary=await espn('summary?event='+g.id,AbortSignal.timeout(10000));
    if(generation!==S.live.generation||S.mode!=='live')return;
    const previous=S.live.scores.get(g.id)||[],scores=liveScores(summary,g,previous);g.scores=scores;S.live.scores.set(g.id,scores);
-   for(const id of coverage.reconcile(g,previous,roster())){
+   const onAir=S.highlight?.playing&&!S.highlight.done?S.highlight.item.id:null;
+   for(const id of coverage.reconcile(g,previous,roster(),{playing:onAir})){
+    if(id===onAir&&coverage.log.some(e=>e.id===id))continue;   // same play, corrected wording: the replay on screen finishes untouched
     // Retire in-flight resolvers as well as ready clips. Their identity guards
     // prevent a late result from restoring an overturned or reassigned score.
     S.sources.delete(id);
@@ -957,7 +1044,7 @@ async function pollLive(generation){
  }catch{if(generation===S.live.generation){S.live.error='unavailable';$('streamsStatus').textContent='Could not refresh games. Retrying automatically.';}}
  // Commercial decisions use the scoreboard. Slow highlight/score summaries
  // must not add their ten-second timeout to its next polling interval.
- finally{if(generation===S.live.generation&&S.mode==='live')setTimeout(()=>pollLive(generation),S.live.games.some(g=>g.state==='in')?5000:30000);}
+ finally{if(generation===S.live.generation&&S.mode==='live')setTimeout(()=>pollLive(generation),S.live.games.some(g=>g.state==='in'||nearStart(g))?5000:30000);}
  await summaries;
  if(generation!==S.live.generation||S.mode!=='live')return;
  retryMissedReplays();
@@ -983,7 +1070,7 @@ function useRoster(players,{teamName,teamId=''}){
  // A refresh of the same starters must not interrupt the channel or erase coverage.
  if(!changed){franchiseOptions();render();return;}
  if(S.highlight){S.highlight.done=true;closeHighlight();}pool.destroy();S.program={kind:S.started?'standby':'idle'};S.pending=null;S.lastAt=null;S.ads.clear();S.cooldown.clear();S.decision=null;S.stall=null;
- coverage.reset();S.usedClips=new Map();S.failedClips=new Map();S.coverageStart=S.mode==='live'?S.at-saved.delay:S.at;coverage.skipTo(S.games,S.coverageStart);director.reset();S.pinned=null;S.selection=null;S.sources.clear();
+ coverage.reset();S.usedClips=new Map();S.failedClips=new Map();S.coverageStart=S.mode==='live'?S.at-saved.delay:S.at;coverage.skipTo(S.games,S.coverageStart);director.reset();if(!S.selection?.hold){S.pinned=null;S.selection=null;}S.sources.clear();   // the lineup answer for a past tile's week can land just after the tile
  franchiseOptions();S.range=null;S.streamSignature=null;render();
 }
 function chooseLeagueTeam(id){
@@ -1007,6 +1094,7 @@ async function importLeague({refresh=false,quiet=false}={}){
  const cookies=using?.swid||using?.s2?{swid:using.swid,s2:using.s2}:{};
  $('importLeague').disabled=true;$('leagueStatus').textContent='Getting every franchise from ESPN…';
  try{
+  S.importing=request;   // this answer carries every score, so the fantasy feed need not ask as well
   const r=await fetch('/api/league',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({leagueId,...(S.mode==='replay'?{week:S.archive.data.week,season:S.archive.data.season}:{}),...cookies}),signal:AbortSignal.timeout(15000)});
   if(!r.headers.get('Content-Type')?.includes('application/json'))throw new Error('The roster service is unavailable. Try again, or add your players below.');
   const data=await r.json();if(request!==S.leagueRequest||mode!==S.mode)return;if(!r.ok){if(data.code==='LEAGUE_PRIVATE'){$('leagueImport').open=true;$('espnSwid').focus?.();}throw new Error(data.error||'Could not import this league.');}
@@ -1023,7 +1111,7 @@ async function importLeague({refresh=false,quiet=false}={}){
   fillRosterRows(team.players);$('lineupStatus').textContent='';$('leagueImport').open=false;$('playersState').textContent=starterCount(team.players.length)+' · your ESPN lineup isn’t changed';
   if(!quiet)toast(`${team.name} · ${starterCount(team.players.length)}`);
  }catch(error){if(request!==S.leagueRequest||mode!==S.mode)return;$('leagueStatus').textContent=error.name==='TimeoutError'?'ESPN took too long. Try again.':error.message;}
- finally{if(request===S.leagueRequest)$('importLeague').disabled=false;}
+ finally{if(request===S.leagueRequest)$('importLeague').disabled=false;if(S.importing===request)S.importing=0;}
 }
 $('importLeague').onclick=()=>importLeague();
 $('leagueId').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();importLeague();}};
@@ -1064,20 +1152,32 @@ $('lineupForm').onsubmit=e=>{e.preventDefault();$('saveRoster').click();};
 // The room follows the connected league; before one is connected, the sport's public lounge.
 function chatRoom(){if(!S.chat)return;const league=saved.leagueId?saved.league:null;S.chat.setRoom(chatRoomFor('nfl',saved.leagueId),saved.leagueId?`${league?.name||'Your league'} chat`:'NFL lounge');}
 // ---------- replay weeks: the calibrated Week 7 and the latest completed week from ESPN ----------
-function applyReplayLinks(data){for(const g of data.games){if(g.id in saved.replayLinks)g.embed=saved.replayLinks[g.id];if(saved.replayDurations[g.id]){g.recordingDuration=saved.replayDurations[g.id];g.durationGuessed=false;}}}
+function applyReplayLinks(data){for(const g of data.games){if(g.id in saved.replayLinks)g.embed=saved.replayLinks[g.id];if(saved.replayDurations[g.id]&&saved.replayDurationEmbeds[g.id]===g.embed){g.recordingDuration=saved.replayDurations[g.id];g.durationGuessed=false;}}}
 // Every completed week of the season is a replay. Week 7 ships calibrated; the
 // others are built from ESPN's play-by-play the first time you choose them, and
 // their videos come from the replay listing (or a link you paste).
 const weekKey=week=>'w'+week;
-function switchArchive(key,{quiet=false}={}){
- const data=S.archives.get(key);if(!data||key===S.archiveKey)return;
+// The week the stage is waiting on (-1 while the latest week is still being looked up); before playback the viewer sees that, not the week being replaced.
+const landingWeek=()=>S.mode==='replay'&&!S.started?S.weeks.landing:0;
+const chooseWeek=()=>{S.weekChosen=true;S.weeks.landing=0;if(S.weeks.lineupDue)void importWeekLineup();};
+function switchArchive(key,{quiet=false,keepPlaying=true}={}){
+ const data=S.archives.get(key);if(!data||key===S.archiveKey&&data===S.archive?.data)return;
  if(!data.calibrated)applyReplayLinks(data);
+ const resume=keepPlaying&&S.mode==='replay'&&S.started&&S.playing;
  if(S.mode==='replay'&&S.started)setPlaying(false);
  S.archiveKey=key;S.archive=new ReplayArchive(data);S.syncs.clear();S.clips=data.calibrated?S.week7Clips:[];S.replayAt=null;
  $('daySelect').innerHTML=S.archive.sessions.map((s,i)=>`<option value="${i}">${esc(s.label)}</option>`).join('');
  const sunday=Math.max(0,S.archive.sessions.findIndex(s=>s.label.startsWith('Sunday')));
  if(S.mode==='replay')setDay(sunday);else{S.day=sunday;clock.end=day().end;clock.seek(firstAction(day())??day().start,performance.now());$('daySelect').value=String(sunday);}
+ if(resume){setPlaying(true);step(performance.now());}
+ if(S.mode==='replay')void importWeekLineup();
  S.streamSignature=null;renderWeekOptions();if(!quiet)render();
+}
+// The lineup follows the week on screen; a replay not started yet opens where the new lineup first plays.
+async function importWeekLineup(){
+ S.weeks.lineupDue=false;if(S.mode!=='replay'||!saved.leagueId)return;
+ const key=S.archiveKey,before=formatRoster(saved.roster);await importLeague({refresh:true,quiet:true});
+ if(S.mode==='replay'&&!S.started&&S.archiveKey===key&&formatRoster(saved.roster)!==before){const first=firstAction(day());if(first!==null)seekTo(first);}
 }
 function renderWeekOptions(){
  const latest=S.weeks.latest,options=[];
@@ -1086,54 +1186,94 @@ function renderWeekOptions(){
   options.push([weekKey(n),`Week ${n}${n===latest?' · latest':''}${data?.calibrated?' · calibrated':loading?' · loading…':failed?' · unavailable':''}`]);
  }
  if(!options.length)options.push([S.archiveKey,`Week ${S.archive?.data.week||7}`]);
- put('weekSelect',options.map(([v,l])=>`<option value="${v}">${esc(l)}</option>`).join(''));$('weekSelect').value=S.archiveKey;$('weekSelect').title=S.weeks.failed?.[S.weeks.loading]||'';
+ put('weekSelect',options.map(([v,l])=>`<option value="${v}">${esc(l)}</option>`).join(''));$('weekSelect').value=landingWeek()>0?weekKey(landingWeek()):S.archiveKey;$('weekSelect').title=S.weeks.failed?.[S.weeks.loading]||'';
 }
 // The listing's videos for a week, by the teams in each game's address.
 const teamSlug=name=>String(name||'').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'');
 function applyWeekVideos(data,videos){
+ let changed=0;
  for(const g of data.games){
-  if(g.embed)continue;const away=teamSlug(g.teams[0].name),home=teamSlug(g.teams[1].name);
-  const hit=videos.find(v=>v.embed&&(v.away===away&&v.home===home||v.away===home&&v.home===away));
-  if(hit){g.embed=hit.embed;g.page=hit.page;}
+  if(g.embed&&!S.deadEmbeds.has(g.embed))continue;const away=teamSlug(g.teams[0].name),home=teamSlug(g.teams[1].name);
+  const hit=videos.find(v=>v.embed&&v.embed!==g.embed&&(v.away===away&&v.home===home||v.away===home&&v.home===away));
+  if(hit){if(g.embed){g.recordingDuration=0;g.durationGuessed=false;}g.embed=hit.embed;g.page=hit.page;changed++;}
  }
+ return changed;
+}
+// A failure or a game not posted yet does not stick: when each week last asked, so coming back to it asks again, at most every few minutes.
+function askWeekVideos(week){
+ S.weekVideos.set(week,{at:Date.now(),failed:false});
+ return fetch('/api/nfl-replays?week='+week,{signal:AbortSignal.timeout(90000)}).then(r=>r.json()).catch(()=>null).then(found=>{const failed=!Array.isArray(found?.games)||!!found.error;S.weekVideos.set(week,{at:Date.now(),failed});return failed?null:found.games;});
+}
+async function refreshWeekVideos(week){
+ const data=S.archives.get(weekKey(week));if(!data||data.calibrated||!data.games.some(g=>!g.embed||S.deadEmbeds.has(g.embed)))return;
+ const last=S.weekVideos.get(week);if(last&&Date.now()-last.at<(last.failed?120000:300000))return;
+ const videos=await askWeekVideos(week);if(!videos){if(S.mode==='replay'&&S.archive?.data===data)toast(`The replay videos for Week ${week} aren’t answering · following on the game tracker for now.`,'warn');return;}
+ applyWeekVideos(data,videos);
+ if(S.archive?.data===data&&applyWeekVideos(S.archive,videos)){applyReplayLinks(S.archive);S.syncs.clear();S.streamSignature=null;render();}
 }
 // One load per week at a time; a second caller (a past tile clicked while the week list is still loading) waits for the same result.
 const weekLoads=new Map();
 function loadWeekArchive(week){
- const key=weekKey(week);if(S.archives.has(key))return Promise.resolve(S.archives.get(key));
+ const key=weekKey(week),hit=S.archives.get(key);if(hit&&!hit.partial){void refreshWeekVideos(week);return Promise.resolve(hit);}
  if(weekLoads.has(week))return weekLoads.get(week);
  const task=fetchWeekArchive(week).finally(()=>weekLoads.delete(week));weekLoads.set(week,task);return task;
 }
 async function fetchWeekArchive(week){
  const key=weekKey(week);S.weeks.loading=week;renderWeekOptions();
  try{
+  // The week's videos can take seconds on a cold server: asked for up front, so the play-by-play below does not queue behind them. The browser keeps the answer as long as the server says.
+  const videos=askWeekVideos(week);
   const season=S.weeks.season,cacheKey=`fantasy-stream-archive-${season}-w${week}`;let data=null;
   try{data=JSON.parse(localStorage.getItem(cacheKey)||'null');}catch{}
-  if(!data||data.version!==2||!data.games?.length){
+  // A copy an earlier release kept short of a game the strip knows about is built again.
+  if(!data||data.version!==2||!data.games?.length||S.pastWeeks.find(w=>w.week===week)?.games.length>data.games.length){
    const board=await espn(`scoreboard?dates=${season}&seasontype=2&week=${week}`,AbortSignal.timeout(10000));
    const events=(board.events||[]).filter(e=>e.competitions?.[0]?.status?.type?.completed),entries=[];
    for(let i=0;i<events.length;i+=4)await Promise.all(events.slice(i,i+4).map(async e=>{try{const raw=await espn('summary?event='+encodeURIComponent(e.id),AbortSignal.timeout(12000));entries.push({raw,meta:{id:String(e.id),name:e.shortName||e.name,date:e.date}});}catch{}}));
    data=buildArchive(entries,{season,week,title:`Week ${week}`});
    if(!data.games.length)throw new Error('ESPN has no play-by-play for that week yet.');
+   // A game whose summary did not answer: this copy serves the view for now, and the next visit builds the week again.
+   data.partial=data.games.length<events.length;
    // Only the latest week stays cached: older weeks would eat the storage every page needs for its own settings.
-   if(week===S.weeks.latest)try{for(const k of Object.keys(localStorage))if(/^fantasy-stream-archive-/.test(k)&&k!==cacheKey)localStorage.removeItem(k);localStorage.setItem(cacheKey,JSON.stringify(data));}catch{}
+   if(week===S.weeks.latest&&!data.partial)try{for(const k of Object.keys(localStorage))if(/^fantasy-stream-archive-/.test(k)&&k!==cacheKey)localStorage.removeItem(k);localStorage.setItem(cacheKey,JSON.stringify(data));}catch{}
   }
-  try{const r=await fetch('/api/nfl-replays?week='+week,{cache:'no-store',signal:AbortSignal.timeout(90000)});const found=await r.json();if(Array.isArray(found.games))applyWeekVideos(data,found.games);}catch{}
+  const found=await videos;if(found)applyWeekVideos(data,found);else if(S.mode==='replay'&&S.weeks.landing===week)toast(`The replay videos for Week ${week} aren’t answering · following on the game tracker for now.`,'warn');
   S.archives.set(key,data);delete S.weeks.failed?.[week];return data;
- }catch(error){S.weeks.failed={...(S.weeks.failed||{}),[week]:error.message};return null;}
+ }catch(error){const kept=S.archives.get(key)||null;if(!kept)S.weeks.failed={...(S.weeks.failed||{}),[week]:error.message};return kept;}
  finally{if(S.weeks.loading===week)S.weeks.loading=0;renderWeekOptions();}
 }
 async function selectWeek(week){
+ const request=++S.weekRequest;S.weeks.landing=week;render();
  const data=await loadWeekArchive(week);
- if(data)switchArchive(weekKey(week),{quiet:S.mode!=='replay'});else render();
+ if(request!==S.weekRequest)return;   // a later choice stands
+ if(S.weeks.landing===week)S.weeks.landing=0;
+ if(data)switchArchive(weekKey(week),{quiet:S.mode!=='replay'});else{toast(`Week ${week} isn’t available right now.`,'warn');renderWeekOptions();render();}
+ if(S.weeks.lineupDue)void importWeekLineup();
+}
+// Replay opens on the latest completed week, built when someone comes for it and never for a Live page that may not open
+// Replay. A week the viewer chose or started stays: the latest one just joins the list. If it fails, the calibrated Week 7 is the replay.
+async function landOnLatest(){
+ if(S.weekChosen||S.mode!=='replay')return;
+ if(S.weeks.listing){S.weeks.landing=-1;render();return;}   // the week list comes back here when ESPN answers
+ const latest=S.weeks.latest,key=weekKey(latest);
+ if(!latest||key===S.archiveKey){S.weeks.landing=0;if(S.weeks.lineupDue)void importWeekLineup();renderWeekOptions();render();return;}
+ S.weeks.landing=latest;renderWeekOptions();render();
+ const data=await loadWeekArchive(latest);
+ if(S.weeks.landing===latest)S.weeks.landing=0;
+ if(data&&!S.weekChosen)switchArchive(key,{quiet:S.mode!=='replay'});
+ else{if(S.weeks.lineupDue)void importWeekLineup();if(!data&&!S.weekChosen&&S.mode==='replay')toast(`Week ${latest} isn’t available right now · showing Week ${S.archive?.data.week||7}.`,'warn');renderWeekOptions();render();}
 }
 async function loadWeekList(){
+ if(S.weeks.listed)return;S.weeks.listed=true;S.weeks.listing=true;
  try{
-  const current=await espn('scoreboard',AbortSignal.timeout(10000));const latest=latestCompletedWeek(current),season=Number(current.season?.year)||new Date().getFullYear();
+  // The week and season come from the board the live poll asked for a moment ago, or is still asking for.
+  const shared=Date.now()-(S.live.board?.at||0)<60000?await S.live.board.board.catch(()=>null):null;
+  const current=shared||await espn('scoreboard',AbortSignal.timeout(10000));const latest=latestCompletedWeek(current),season=Number(current.season?.year)||new Date().getFullYear();
   S.weeks={...S.weeks,season,latest,current:Number(current.week?.number)||0};renderWeekOptions();
   void loadPastWeeks();
-  if(latest&&!S.archives.has(weekKey(latest)))await selectWeek(latest);
- }catch(error){S.weeks.failed={...(S.weeks.failed||{}),0:error.message};renderWeekOptions();}
+ }catch(error){S.weeks.listed=false;S.weeks.failed={...(S.weeks.failed||{}),0:error.message};renderWeekOptions();}
+ finally{S.weeks.listing=false;}
+ void landOnLatest();
 }
 // Earlier weeks' finals for the strip, oldest first, so the season reads left to right up to this week.
 // One small record per game; the season's set is cached so a reload costs ESPN nothing.
@@ -1152,63 +1292,74 @@ async function loadPastWeeks(){
   show();try{for(const k of Object.keys(localStorage))if(/^fantasy-stream-weeks-/.test(k)&&k!==WEEKS_STORE(season))localStorage.removeItem(k);localStorage.setItem(WEEKS_STORE(season),JSON.stringify(store));}catch{}
  }finally{S.pastLoading=false;}
 }
+// The season so far barely changes, so its tiles are built once per set of weeks, lineup and "this week" label.
+const pastMemo={weeks:null,who:'',label:0,html:'',kept:0};
+function pastRun(label){
+ const who=roster().map(p=>p.team+':'+p.name).join();
+ if(pastMemo.weeks!==S.pastWeeks||pastMemo.who!==who||pastMemo.label!==label)Object.assign(pastMemo,{weeks:S.pastWeeks,who,label,html:S.pastWeeks.map(w=>`<li class="week-label" aria-hidden="true">Week ${w.week}</li>`+w.games.map(g=>pastTile(g,w.week)).join('')).join('')+(label?`<li class="week-label" aria-hidden="true">Week ${label}</li>`:''),kept:S.pastWeeks.reduce((n,w)=>n+w.games.length+1,0)+(label?1:0)});
+ return pastMemo;
+}
 function pastTile(g,week){
  const known=g.teams.every(t=>Number.isFinite(Number(t.score))),diff=known?Number(g.teams[0].score)-Number(g.teams[1].score):0,nick=t=>{const words=String(t.name||'').trim().split(/\s+/);return words.length>1?words.at(-1):t.name||t.abbr;};
  const rows=g.teams.map((t,i)=>{const logo=teamLogo(t),lead=known&&(i===0?diff>0:diff<0),trail=known&&(i===0?diff<0:diff>0);return `<span class="g-team${lead?' lead':''}${trail?' trail':''}"><span class="team-logo">${logo?`<img src="${esc(logo)}" alt="" width="22" height="22" loading="lazy" referrerpolicy="no-referrer">`:''}</span><span class="team-code">${esc(t.abbr)}</span><span class="team-name">${esc(nick(t))}</span><b class="team-score">${known?esc(t.score):'—'}</b></span>`;}).join('');
- const mine=rosterIn(g),names=mine.map(p=>`<span>${esc(p.name)}</span>`).join(''),when=g.date?new Date(g.date).toLocaleDateString([],{weekday:'short',month:'short',day:'numeric'}):'';
+ const mine=rosterIn(g),names=mine.map(p=>`<span>${esc(p.name)}</span>`).join(''),when=g.date?PAST_DAY.format(new Date(g.date)):'';
  return `<li class="tile past${mine.length?' mine':''}" style="--away:${teamColor(g.teams[0])};--home:${teamColor(g.teams[1])}"><button class="game" data-game="${esc(g.id)}" data-past-week="${week}" aria-label="${esc(g.name+'. Week '+week+' final. Watch the replay')}"><span class="g-status"><span class="tag final">FINAL</span><span class="g-when">${esc(when)}</span></span><span class="g-matchup">${rows}</span><span class="g-drive quiet"><span>Week ${week} · ${esc(g.detail||'Final')}</span></span><span class="g-bar idle" aria-hidden="true"></span></button><div class="g-footer"><span class="g-names">${names||'<span>Other game</span>'}</span><span class="g-cta">Replay</span></div></li>`;
 }
 // A past tile opens that week's replay at the game's kickoff.
 async function openPastReplay(week,id){
  const button=$('games').querySelector?.(`[data-game="${CSS.escape?CSS.escape(id):id}"]`);if(button)button.disabled=true;
+ // The choice stands only once that week is on the stage: a load that fails leaves Replay free to land on the latest week.
+ const chosen=S.weekChosen,request=++S.weekRequest;let landed=false;S.weekChosen=true;S.weeks.landing=week;
  try{
-  if(S.mode!=='replay'){if(!S.archive){toast('The replay is unavailable. Live games still work.','warn');return;}await setMode('replay');}
+  if(S.mode!=='replay'){await setMode('replay');if(S.mode!=='replay')return;}
   const data=await loadWeekArchive(week);
+  // Live was clicked, or another week or tile chosen, while this loaded: that click stands.
+  if(S.mode!=='replay'||request!==S.weekRequest)return;
   if(!data){toast(`Week ${week}'s replay is unavailable right now.`,'warn');return;}
-  switchArchive(weekKey(week),{quiet:true});
+  switchArchive(weekKey(week),{quiet:true,keepPlaying:false});landed=true;
   const game=archiveGame(id),index=S.archive.sessions.findIndex(s=>s.gameIds.includes(id));
   if(!game||index<0){toast('That game has no replay yet.','warn');render();return;}
   if(index!==S.day)setDay(index);
-  selectGame(id);$('watchTitle').scrollIntoView?.({block:'start'});
- }finally{if(button)button.disabled=false;}
+  selectGame(id,{hold:true});$('watchTitle').scrollIntoView?.({block:'start'});
+ }finally{if(button)button.disabled=false;if(S.weeks.lineupDue)void importWeekLineup();if(request===S.weekRequest){if(!landed)S.weekChosen=chosen;if(S.weeks.landing===week){S.weeks.landing=0;renderWeekOptions();render();}}}
 }
 function renderSetup(){
  $('storageNotice').hidden=!S.storageError;
  const ready=S.live.games.filter(g=>g.state!=='post'&&streamURLs(g).length).length,upcoming=S.live.games.filter(g=>g.state!=='post').length;
  const latestGames=S.mode==='replay'&&!S.archive?.data.calibrated?(S.archive?.games||[]):null;
- $('streamSummary').textContent=latestGames?`${latestGames.filter(g=>g.embed).length} of ${latestGames.length} games have a replay video`:S.mode==='replay'?'Replay videos are already included':upcoming?`${ready} of ${upcoming} games today have a stream ready`:'No games left today';
+ setText('streamSummary',latestGames?`${latestGames.filter(g=>hasVideo(g.id)).length} of ${latestGames.length} games have a replay video`:S.mode==='replay'?'Replay videos are already included':upcoming?`${ready} of ${upcoming} games today have a stream ready`:'No games left today');
  const latestReplay=S.mode==='replay'&&!S.archive?.data.calibrated;
- $('streamsCount').textContent=S.mode==='live'&&ready?String(ready):'';$('streamsButton').hidden=!(S.mode==='live'||latestReplay);$('streamsButton').title=latestReplay?'Replay videos for this week':'';
+ setText('streamsCount',S.mode==='live'&&ready?String(ready):'');$('streamsButton').hidden=!(S.mode==='live'||latestReplay);$('streamsButton').title=latestReplay?'Replay videos for this week':'';
 }
 function renderScoreboard(){
  const live=S.mode==='live',games=live?S.live.games:S.games,players=live&&!hasLineup()?[]:roster();
  const week=live?games.find(g=>g.week)?.week:S.archive?.data.week;
  const age=S.live.fetched?Date.now()-S.live.fetched:Infinity;
- $('scoreboardUpdated').textContent=!live?'Following replay time':S.live.error||age>90000?(S.live.fetched?'Scores delayed · retrying':'Connecting to ESPN…'):'Updated '+new Date(S.live.fetched).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'});
- $('scoreboardCaption').textContent=live?'Live scores may be ahead of your stream. Gamecast opens ESPN in a new tab.':'Scores follow your replay timeline, so future results stay hidden.';
+ setText('scoreboardUpdated',!live?'Following replay time':S.live.error||age>90000?(S.live.fetched?'Scores delayed · retrying':'Connecting to ESPN…'):'Updated '+CLOCK_TIME.format(S.live.fetched));
+ setText('scoreboardCaption',live?'Live scores may be ahead of your stream. Gamecast opens ESPN in a new tab.':'Scores follow your replay timeline, so future results stay hidden.');
  const connected=live&&!!saved.leagueId;
  const season=games.find(g=>g.season)?.season;
- fantasyFeed.sync(connected?{leagueId:saved.leagueId,teamId:saved.teamId,...(week&&season?{week,season}:{}),swid:saved.espn.swid,s2:saved.espn.s2}:null,saved.league);
+ if(!S.importing)fantasyFeed.sync(connected?{leagueId:saved.leagueId,teamId:saved.teamId,...(week&&season?{week,season}:{}),swid:saved.espn.swid,s2:saved.espn.s2}:null,saved.league);
  const data=fantasyFeed.data,match=connected&&saved.teamId?fantasyMatchup(data,saved.teamId,S.games,S.matchupId):null;
  const league=live&&data?.leagueId===saved.leagueId?data:saved.league;
  const cached=league?.teams?.find(t=>t.id===saved.teamId),knownPlayers=cached?.players||players;
- const rosterOnly=knownPlayers.length?fantasyBoard({scoring:{week,teams:[{id:'local',players:knownPlayers.map(p=>({...p,points:null})),points:null,complete:false}]}},'local',S.games):null;
+ const rosterOnly=!match?.yours&&knownPlayers.length?fantasyBoard({scoring:{week,teams:[{id:'local',players:knownPlayers.map(p=>({...p,points:null})),points:null,complete:false}]}},'local',S.games):null;
  const board=match?.yours||(rosterOnly?{...rosterOnly,name:cached?.name||saved.teamName}:null),opponent=match?.opponent;
  $('scoreboard').dataset.empty=String(!board?.rows&&!opponent?.rows);
  $('scoreTeamPicker').hidden=false;$('scoreTeam').disabled=!league?.teams?.length;
- $('retryFantasy').hidden=!live||!fantasyFeed.error;$('retryFantasy').disabled=!!fantasyFeed.pending;$('retryFantasy').textContent=fantasyFeed.needsConnection?'Reconnect ESPN':'Retry scores';
+ $('retryFantasy').hidden=!live||!fantasyFeed.error;$('retryFantasy').disabled=!!fantasyFeed.pending;setText('retryFantasy',fantasyFeed.needsConnection?'Reconnect ESPN':'Retry scores');
  put('scoreTeam',`<option value="">${league?.teams?.length?'Choose a team…':saved.leagueId?'Loading league teams…':'Connect ESPN to choose a team'}</option>`+(league?.teams||[]).map(t=>`<option value="${esc(t.id)}">${esc(t.name)}</option>`).join(''));
  $('scoreTeam').value=saved.teamId||'';
  const matches=match?.matches||[];$('matchupPicker').hidden=matches.length<2;
  put('matchupSelect',matches.map(m=>{const other=m.home?.teamId===saved.teamId?m.away:m.home;return `<option value="${esc(m.id)}">${esc(league?.teams.find(t=>t.id===other?.teamId)?.name||'Bye')}</option>`;}).join(''));
  $('matchupSelect').value=match?.matchupId||'';
- $('scoreboardMeta').textContent=week?'Wk '+week:'';$('scoreboardMeta').title=[league?.name||'ESPN fantasy football',week?'Week '+week:''].filter(Boolean).join(' · ');
- $('fantasyTitle').textContent=board?.name||(live&&hasLineup()?saved.teamName:'Your team');
- $('opponentTitle').textContent=opponent?.name||(match?.matchupId?'Bye week':'Your opponent');$('fantasyTitle').title=$('fantasyTitle').textContent;$('opponentTitle').title=$('opponentTitle').textContent;
- $('lineupButton').textContent='Fantasy team';$('lineupButton').title=saved.teamName||'Manage your fantasy team';$('refreshScoreboard').disabled=!!fantasyFeed.pending;
- $('fantasyTotal').textContent=board?.points||'—';$('opponentTotal').textContent=opponent?.points||'—';
+ setText('scoreboardMeta',week?'Wk '+week:'');$('scoreboardMeta').title=[league?.name||'ESPN fantasy football',week?'Week '+week:''].filter(Boolean).join(' · ');
+ setText('fantasyTitle',board?.name||(live&&hasLineup()?saved.teamName:'Your team'));
+ setText('opponentTitle',opponent?.name||(match?.matchupId?'Bye week':'Your opponent'));$('fantasyTitle').title=$('fantasyTitle').textContent;$('opponentTitle').title=$('opponentTitle').textContent;
+ setText('lineupButton','Fantasy team');$('lineupButton').title=saved.teamName||'Manage your fantasy team';$('refreshScoreboard').disabled=!!fantasyFeed.pending;
+ setText('fantasyTotal',board?.points||'—');setText('opponentTotal',opponent?.points||'—');
  const period=match?.weeks.length>1?'Weeks '+match.weeks.join(' + '):board?.week?'Week '+board.week:week?'Week '+week:'This week';
- $('fantasyWeek').textContent=period;$('opponentWeek').textContent=period;
+ setText('fantasyWeek',period);setText('opponentWeek',period);
  $('fantasyTable').hidden=!board?.rows;$('fantasyTable').classList.toggle('solo',!opponent?.players);$('fantasyTable').classList.toggle('nopoints',false);
  put('fantasyPlayers',board?.players?headToHead(board,opponent):'');const bench=board?.players?benchRows(board,opponent):'';put('fantasyBench',bench);$('benchTable').hidden=!bench;$('benchTable').classList.toggle('solo',!opponent?.players);$('benchTable').classList.toggle('nopoints',false);put('fantasyCols',matchupColumns(!!opponent?.players));put('benchCols',matchupColumns(!!opponent?.players));
  const mineValue=match?.yours?.value,theirValue=match?.opponent?.value,scored=Number.isFinite(mineValue)&&Number.isFinite(theirValue);
@@ -1216,12 +1367,12 @@ function renderScoreboard(){
  $('matchupBar').style.width=(share*100).toFixed(1)+'%';$('scoreboard').dataset.state=standing;$('scoreboard').dataset.connect=String(live&&!connected);
  $('headerScore').hidden=!scored;$('headerScore').dataset.state=standing;$('headerScore').title=match?.status||'';
  put('headerScore',scored?`<span>You</span><b>${esc(match.yours.points)}</b><i>–</i><b>${esc(match.opponent.points)}</b>`:'');
- $('leagueState').textContent=!saved.leagueId?'Not connected':fantasyFeed.needsConnection?'Needs reconnecting':`${league?.name||'League '+saved.leagueId} · connected`;
- $('leagueAction').textContent=saved.leagueId&&!fantasyFeed.needsConnection?'Change':'Connect';
- $('matchupStatus').textContent=match?.status||(live?'Your team vs. your opponent':'Fantasy totals are available in Live games.');
- $('opponentEmpty').hidden=!!opponent?.rows||!connected;$('opponentEmpty').textContent=match?.matchupId&&!opponent?'No opponent this week.':'Your opponent’s starters appear once ESPN responds.';
+ setText('leagueState',!saved.leagueId?'Not connected':fantasyFeed.needsConnection?'Needs reconnecting':`${league?.name||'League '+saved.leagueId} · connected`);
+ setText('leagueAction',saved.leagueId&&!fantasyFeed.needsConnection?'Change':'Connect');
+ setText('matchupStatus',match?.status||(live?'Your team vs. your opponent':'Fantasy totals are available in Live games.'));
+ $('opponentEmpty').hidden=!!opponent?.rows||!connected;setText('opponentEmpty',match?.matchupId&&!opponent?'No opponent this week.':'Your opponent’s starters appear once ESPN responds.');
  $('fantasyTable').title=!match?'Saved players. Fantasy points appear after ESPN connects.':`${board?.official?'ESPN matchup totals':'Starter totals where ESPN matchup totals are unavailable'}. Player rows are week ${board?.week||week||'—'}; bench points never count.`;
- $('fantasyStatus').textContent=!live?'Fantasy totals are available in Live games.':!connected?'Connect ESPN to load your league’s teams, opponent and live fantasy points.':fantasyFeed.error?(fantasyFeed.updated?'Last update '+new Date(fantasyFeed.updated).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+'. ':'')+fantasyFeed.error:!saved.teamId?'Choose your team using Fantasy team in the top bar.':!match?'Getting your matchup from ESPN… Your saved players are shown while it loads.':'Updated '+new Date(fantasyFeed.updated).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})+' · Refreshes every 30 seconds';
+ setText('fantasyStatus',!live?'Fantasy totals are available in Live games.':!connected?'Connect ESPN to load your league’s teams, opponent and live fantasy points.':fantasyFeed.error?(fantasyFeed.updated?'Last update '+CLOCK_TIME.format(fantasyFeed.updated)+'. ':'')+fantasyFeed.error:!saved.teamId?'Choose your team using Fantasy team in the top bar.':!match?'Getting your matchup from ESPN… Your saved players are shown while it loads.':'Updated '+CLOCK_TIME.format(fantasyFeed.updated)+' · Refreshes every 30 seconds');
  // Only say something when it needs attention; a healthy matchup speaks for itself.
  $('fantasyStatus').hidden=live&&(!connected||!fantasyFeed.error&&!!saved.teamId&&!!match);
 
@@ -1333,9 +1484,9 @@ function saveReplayLinks(){
   if(value&&!link){input.setAttribute('aria-invalid','true');$('streamsError').textContent='Paste an ok.ru video link, such as https://ok.ru/videoembed/123456.';input.focus?.();return;}
   input.removeAttribute('aria-invalid');if((saved.replayLinks[id]||'')===link)continue;changed++;
   // A different video has a different length: forget what the old one taught us.
-  if(link)saved.replayLinks[id]=link;else delete saved.replayLinks[id];delete saved.replayDurations[id];
+  if(link)saved.replayLinks[id]=link;else delete saved.replayLinks[id];delete saved.replayDurations[id];delete saved.replayDurationEmbeds[id];S.deadEmbeds.delete(link);
   for(const data of [...[...S.archives.values()].filter(a=>!a.calibrated).map(a=>a.games),S.archive?.games||[]])for(const g of data)if(g.id===id){g.embed=link;g.recordingDuration=0;g.durationGuessed=false;}
-  S.syncs.delete(id);pool.close(id);if(S.program.kind==='game'&&S.program.id===id){S.program={kind:'standby'};S.pending=null;}
+  S.syncs.delete(id);S.recordingEnds.delete(id);pool.close(id);if(S.program.kind==='game'&&S.program.id===id){S.program={kind:'standby'};S.pending=null;}
  }
  persist();$('streamsError').textContent='';$('streamsDetails').close?.();if(changed)toast(changed===1?'Replay video saved.':changed+' replay videos saved.');S.streamSignature=null;resetBreaks();render();
 }
@@ -1363,25 +1514,35 @@ $('syncGame').onchange=syncStatus;
 $('addSync').onclick=()=>{
  try{const g=archiveGame($('syncGame').value);if(!g||S.mode!=='replay'||pool.visible!==g.id)throw new Error('Open this game in Try a replay first, then pause on the play you want to mark.');
   const wall=wallForClock(g,$('syncQuarter').value,$('syncClock').value);
-  saved.marks[g.id]=addMark(saved.marks[g.id]||[],wall,pool.current.currentTime);persist();S.syncs.delete(g.id);resetBreaks();
+  saved.marks[g.id]=addMark(saved.marks[g.id]||[],wall,pool.current.currentTime);persist();S.syncs.delete(g.id);S.recordingEnds.delete(g.id);resetBreaks();
   $('settingsError').textContent='';syncStatus();toast('Sync mark saved.');
  }catch(error){$('settingsError').textContent=error.message;}
 };
-$('clearSync').onclick=()=>{const id=$('syncGame').value;delete saved.marks[id];persist();S.syncs.delete(id);resetBreaks();syncStatus();};
+$('clearSync').onclick=()=>{const id=$('syncGame').value;delete saved.marks[id];persist();S.syncs.delete(id);S.recordingEnds.delete(id);resetBreaks();syncStatus();};
 
 // ---------- start ----------
 // A link can open a panel directly: #streams, #team, #settings.
 function openFromHash(){const hash=window.location?.hash||'';if(hash==='#streams')openStreams();else if(hash==='#team')openLineup();else if(hash==='#settings')openSettings();}
 window.addEventListener?.('hashchange',openFromHash);
 async function init(){
- S.discoveryReady=true;franchiseOptions();render();setInterval(()=>frame(performance.now()),100);pollLive(S.live.generation);pollLiveClips(S.live.generation);restoreConnection();setInterval(refreshStreamLinks,15000);
+ S.discoveryReady=true;franchiseOptions();restoreConnection();render();setInterval(()=>frame(performance.now()),100);pollLive(S.live.generation);pollLiveClips(S.live.generation);setInterval(refreshStreamLinks,15000);
  S.chat=mountChat({$,sport:'nfl',getName:()=>saved.chatName,setName:name=>{saved.chatName=name;persist();},defaultName:()=>hasLineup()?saved.teamName:'',isOpen:()=>!$('chatPanel').hidden,origin:window.location?.origin||''});S.chat.suggestName();chatRoom();
- try{
-  const [archive,clips]=await Promise.all([fetch('/week7.json',{signal:AbortSignal.timeout(15000)}).then(r=>{if(!r.ok)throw new Error('The replay archive is unavailable. Reload to try again.');return r.json();}),fetch('/nfl-highlights.json',{signal:AbortSignal.timeout(15000)}).then(r=>r.ok?r.json():{clips:[]}).catch(()=>({clips:[]}))]);
-  archive.calibrated=true;S.archives.set(weekKey(archive.week||7),archive);S.week7Clips=clips.clips||[];S.archiveKey='';switchArchive(weekKey(archive.week||7),{quiet:true});void loadWeekList();
-  render();
- if(window.location&&new URLSearchParams(window.location.search).get('mode')==='replay')setMode('replay');
+ // The replay archive (a third of a megabyte) loads after the live page is up, or at once when the page opens in Replay mode.
+ const replayFirst=window.location&&new URLSearchParams(window.location.search).get('mode')==='replay';
+ if(replayFirst){await loadReplayArchive();setMode('replay');}
+ else{void loadWeekList();setTimeout(()=>void loadReplayArchive(),1200);}
  openFromHash();
- }catch(error){$('replayMode').disabled=true;$('replayMode').title=error.message;render();}
+}
+// Loads the calibrated archive once; Replay mode waits for it instead of refusing while it is on its way.
+function loadReplayArchive(){
+ if(S.archiveLoad)return S.archiveLoad;
+ S.archiveLoad=(async()=>{
+  try{
+   const [archive,clips]=await Promise.all([fetch('/week7.json',{signal:AbortSignal.timeout(20000)}).then(r=>{if(!r.ok)throw new Error('The replay archive is unavailable. Reload to try again.');return r.json();}),fetch('/nfl-highlights.json',{signal:AbortSignal.timeout(15000)}).then(r=>r.ok?r.json():{clips:[]}).catch(()=>({clips:[]}))]);
+   archive.calibrated=true;S.archives.set(weekKey(archive.week||7),archive);S.week7Clips=clips.clips||[];S.archiveKey='';switchArchive(weekKey(archive.week||7),{quiet:true});void loadWeekList();
+   render();return true;
+  }catch(error){S.archiveLoad=null;$('replayMode').disabled=true;$('replayMode').title=error.message;render();return false;}
+ })();
+ return S.archiveLoad;
 }
 init();

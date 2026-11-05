@@ -23,6 +23,7 @@ import * as chat from '../web/chat.js';
 import * as archiveBuild from '../web/archive-build.js';
 const {PlayerPool}=await import(process.env.FANTASY_AUDIT_POOL||'../web/players.js');
 import {EmbedPlayer} from '../web/embed-player.js';
+import {ProviderPlayer} from '../web/provider-player.js';
 const html=readFileSync(new URL('../web/index.html',import.meta.url),'utf8');
 // Point at a historical app.js to reproduce the audit cases against that revision.
 const script=readFileSync(process.env.FANTASY_AUDIT_APP||new URL('../web/app.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace(/\ninit\(\);\s*$/,'');
@@ -57,18 +58,19 @@ class Media{
  play(){this.wantPlay=true;}pause(){this.wantPlay=false;}seek(at){this.currentTime=at;}near(at,tolerance=2.5){return this.progressing&&Math.abs(this.currentTime-at)<=tolerance;}
  destroy(){this.wantPlay=false;this.destroyed=true;}
 }
-function app(fetcher=async()=>Response.json({events:[]}),{media=false,native=false,embeds=false,scores=false,stored=null,storageBlocked=false}={}){
+function app(fetcher=async()=>Response.json({events:[]}),{media=false,native=false,embeds=false,scores=false,stored=null,storageBlocked=false,provider=null}={}){
  const elements=new Map([...html.matchAll(/id="([^"]+)"/g)].map(m=>[m[1],new Element()]));
+ elements.get('games').addEventListener=function(name,fn){(this.listeners??={})[name]=fn;};
  const pageEvents=new Map(),stage=new Element(),document={getElementById(id){assert.ok(elements.has(id),`Missing UI element: ${id}`);return elements.get(id);},querySelectorAll(){return [];},querySelector(selector){return selector==='.stage'?stage:new Element();},createElement(tag){return tag==='video'?new Video():new Element();},addEventListener(name,fn){if(!pageEvents.has(name))pageEvents.set(name,[]);pageEvents.get(name).push(fn);},body:new Element()};
  const time={now:1000},timers=new Map();let timerId=0;
  const frameEvents={};
  const frameFactory=()=>{const navigations=[];return ()=>{const f=new Video();let src;f.navigations=navigations;Object.defineProperty(f,'src',{get(){return src;},set(url){src=url;navigations.push(url);frameEvents.onNavigate?.(url,f);}});return f;};};
- class MediaPool extends PlayerPool{constructor(host,options){super(host,{...options,now:()=>time.now,create:source=>embeds&&source.type==='embed/page'?new EmbedPlayer(source.url,{now:()=>time.now,createFrame:frameFactory(),autoReconnect:source.autoReconnect}):native?new ctx.Native(source):new Media(source)});}}
+ class MediaPool extends PlayerPool{constructor(host,options){super(host,{...options,now:()=>time.now,create:source=>provider&&source.type==='provider/ok'?provider(source,time):embeds&&source.type==='embed/page'?new EmbedPlayer(source.url,{now:()=>time.now,createFrame:frameFactory(),autoReconnect:source.autoReconnect}):native?new ctx.Native(source):new Media(source)});}}
  const storage=new Map(stored===null?[]:[['fantasy-stream-v3',JSON.stringify(stored)]]);
- const ctx={StreamFinder,...archive,...sync,...director,...coverage,...replays,...live,...scoring,...roster,...highlights,...preferences,...liveHighlights,...continuity,...breaks,...scoreboard,...chat,...archiveBuild,FantasyScoreFeed:class extends scoreboard.FantasyScoreFeed{constructor(){super({fetcher});}sync(connection,seed){this.connection=connection;if(scores)return super.sync(connection,seed);}},PlayerPool:media?MediaPool:Pool,NFLSourceCatalog:class{},document,window:{navigator:{onLine:true},addEventListener(){}},localStorage:{getItem:key=>storage.get(key)||null,setItem(key,value){if(storageBlocked)throw new Error('Storage unavailable');storage.set(key,value);}},performance:{now:()=>time.now},setTimeout(fn,delay){timers.set(++timerId,{fn,delay});return timerId;},clearTimeout(id){timers.delete(id);},setInterval:()=>0,fetch:fetcher,AbortSignal,AbortController,Response,URL,URLSearchParams,Date,console};
+ const ctx={StreamFinder,...archive,...sync,...director,...coverage,...replays,...live,...scoring,...roster,...highlights,...preferences,...liveHighlights,...continuity,...breaks,...scoreboard,...chat,...archiveBuild,FantasyScoreFeed:class extends scoreboard.FantasyScoreFeed{constructor(){super({fetcher});}sync(connection,seed){this.connection=connection;if(scores)return super.sync(connection,seed);}},PlayerPool:media?MediaPool:Pool,NFLSourceCatalog:class{},document,window:{navigator:{onLine:true},addEventListener(){}},localStorage:{getItem:key=>storage.get(key)||null,setItem(key,value){if(storageBlocked)throw new Error('Storage unavailable');storage.set(key,value);}},performance:{now:()=>time.now},setTimeout(fn,delay){timers.set(++timerId,{fn,delay});return timerId;},clearTimeout(id){timers.delete(id);},setInterval:()=>0,fetch:fetcher,CSS:{escape:value=>String(value)},AbortSignal,AbortController,Response,URL,URLSearchParams,Date,console};
  vm.createContext(ctx);
  if(native){ctx.attachMediaSource=async()=>null;const code=readFileSync(new URL('../web/native-player.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace('export class NativePlayer','class NativePlayer');vm.runInContext(code+'\nglobalThis.Native=NativePlayer;',ctx);}
- vm.runInContext(script+'\n globalThis.a={S,pool,streamFinder,refreshStreamLinks,fantasyFeed,director,coverage,clock,step,updateBreaks,advanceClock,skipBreak,selectGame,excluded,cutTo,warm,startHighlight,updateHighlight,finishHighlight,syncFor,nudge,nfl,setMode,setPlaying,setDay,seekTo,replaySource,useRoster,importLeague,pollLive,pollLiveClips,prepareReplay,retryMissedReplays,failHighlight,render,init,roster,get saved(){return saved;}};',ctx);
+ vm.runInContext(script+'\n globalThis.a={S,pool,streamFinder,refreshStreamLinks,fantasyFeed,director,coverage,clock,step,frame,picture,target,openPastReplay,selectWeek,applyReplayLinks,loadReplayArchive,updateBreaks,advanceClock,skipBreak,selectGame,excluded,cutTo,warm,startHighlight,updateHighlight,finishHighlight,syncFor,nudge,nfl,setMode,setPlaying,setDay,seekTo,replaySource,useRoster,importLeague,pollLive,pollLiveClips,prepareReplay,retryMissedReplays,failHighlight,render,init,roster,get saved(){return saved;}};',ctx);
  return {...ctx.a,time,timers,storage,page:document,stage,frameEvents,emitPage(name,event={}){for(const fn of pageEvents.get(name)||[])fn(event);},network:ctx.window.navigator, get saved(){return ctx.a.saved;},el:id=>elements.get(id)};
 }
 const player={name:'Jonathan Taylor',team:'IND',position:'RB'};
@@ -222,18 +224,18 @@ test('public league import waits for an explicit team selection',async()=>{
  assert.equal(a.saved.teamName,'Sample lineup');assert.equal(a.el('scoreTeam').focused,true);assert.match(a.el('leagueStatus').textContent,/choose your team/);
 });
 test('live initialization survives a missing archive',async()=>{
- const a=app(async url=>{if(url==='/week7.json')return new Response('',{status:404});return Response.json(String(url).includes('scoreboard')?{events:[]}:{clips:[]});});await a.init();
+ const a=app(async url=>{if(url==='/week7.json')return new Response('',{status:404});return Response.json(String(url).includes('scoreboard')?{events:[]}:{clips:[]});});await a.init();await a.loadReplayArchive();
  assert.equal(a.S.mode,'live');assert.equal(a.el('replayMode').disabled,true);assert.equal(a.el('ovButton').hidden,false);
 });
 test('paused highlights retain their remaining playback time after resuming',()=>{
  const a=app();ready(a);a.S.playing=true;a.S.highlight={until:5000,since:800,item:{gameId:'A'},src:{}};a.setPlaying(false);assert.equal(a.S.pausedAt,1000);a.time.now=11000;a.setPlaying(true);assert.equal(a.S.highlight.until,15000);assert.equal(a.S.highlight.since,10800);
 });
 test('successful archive loading leaves live mode intact and prepares a valid replay clock',async()=>{
- const a=app(async url=>Response.json(url==='/week7.json'?archiveData:String(url).includes('scoreboard')?{events:[]}:{clips:[]}));await a.init();
+ const a=app(async url=>Response.json(url==='/week7.json'?archiveData:String(url).includes('scoreboard')?{events:[]}:{clips:[]}));await a.init();assert.ok([...a.timers.values()].some(t=>t.delay===1200),'the archive is scheduled after the live page is up');await a.loadReplayArchive();
  assert.equal(a.S.mode,'live');assert.ok(a.S.archive);assert.ok(a.clock.at>=a.S.archive.sessions[a.S.day].start);
 });
 test('viewing room: the first-visit replay shortcut enters replay without starting playback',async()=>{
- const a=app(async url=>Response.json(url==='/week7.json'?archiveData:String(url).includes('scoreboard')?{events:[]}:{clips:[]}));a.render();assert.equal(a.el('previewReplay').hidden,true);await a.init();assert.equal(a.el('previewReplay').hidden,false);
+ const a=app(async url=>Response.json(url==='/week7.json'?archiveData:String(url).includes('scoreboard')?{events:[]}:{clips:[]}));a.render();assert.equal(a.el('previewReplay').hidden,true);await a.init();await a.loadReplayArchive();assert.equal(a.el('previewReplay').hidden,false);
  await a.el('previewReplay').onclick();assert.equal(a.S.mode,'replay');assert.equal(a.S.playing,false);assert.equal(a.el('replayControls').hidden,false);assert.match(a.el('streamsHelp').textContent,/No stream links needed/);assert.equal(a.el('previewReplay').hidden,true);
 });
 test('viewing room: switching back to live hides replay-only settings and restores stream instructions',async()=>{
@@ -283,6 +285,22 @@ test('audit: unrelated or unavailable video links do not suppress a roster game 
  a.useRoster([player,{name:'CeeDee Lamb',team:'DAL',position:'WR'}],{teamName:'My lineup'});a.S.cooldown.set('B',999999);
  assert.equal(a.excluded().has('A'),false,'a failed roster stream cannot displace the tracker');
  a.S.cooldown.clear();assert.equal(a.excluded().has('A'),true,'a playable roster stream still takes priority');
+});
+test('audit: a tracker the viewer pinned holds when another roster game gains a stream, until its own break',()=>{
+ const a=app(undefined,{media:true});ready(a);const other={...game,id:'B',name:'DAL @ NYG',teams:[{abbr:'DAL'},{abbr:'NYG'}]};
+ a.useRoster([player,{name:'CeeDee Lamb',team:'DAL',position:'WR'}],{teamName:'My lineup'});a.saved.delay=0;a.S.live.feed.push([game,other],990);a.setPlaying(true);a.S.at=1000;a.step(a.time.now);a.selectGame('B');a.step(a.time.now);
+ assert.equal(a.S.pinned,'B');assert.equal(a.S.program.id,'B');
+ a.saved.streams={'IND-MIN':'https://example.com/a.mp4'};a.S.at=1001;a.step(a.time.now);
+ assert.equal(a.excluded().has('B'),false,'the choice holds');assert.equal(a.S.pinned,'B');assert.equal(a.S.program.id,'B');assert.equal(a.pool.visible,null);
+ a.S.live.feed.push([game,{...other,phase:'break',breakKind:'halftime'}],1002);a.S.at=1003;a.step(a.time.now);a.step(a.time.now);
+ assert.equal(a.S.pinned,null,'its own break releases it');assert.equal(a.S.program.id,'A');assert.equal(a.excluded().has('B'),true,'unpinned, a tracker yields to the roster video again');
+});
+test('audit: the pinned tracker exemption also covers a video break elsewhere, and ends with the game',()=>{
+ const a=app(undefined,{media:true});ready(a);const x={...game,id:'X',teams:[{abbr:'DAL'},{abbr:'NYG'}]},y={...game,id:'Y',teams:[{abbr:'SEA'},{abbr:'LAR'}]};
+ a.S.games=[game,x,y];a.saved.streams={'DAL-NYG':'https://example.com/x.mp4','LAR-SEA':'https://example.com/y.mp4'};a.S.breaks.set('X',1e12);
+ assert.equal(a.excluded().has('A'),true,'unpinned, a tracker yields to the backup video');
+ a.S.pinned='A';assert.equal(a.excluded().has('A'),false,'a choice the viewer made holds');
+ a.S.games=[{...game,state:'post',phase:'final'},x,y];assert.equal(a.excluded().has('A'),true,'a final is not worth holding a tracker for');
 });
 test('audit: a failed pinned stream waits for its cooldown before retrying',()=>{
  const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.com/a.mp4'};a.setPlaying(true);a.S.pinned='A';a.S.cooldown.set('A',61000);a.step(1000);
@@ -1175,3 +1193,603 @@ test('Done in Fantasy team acts on a typed league ID instead of discarding it',(
  a.el('lineupButton').onclick();assert.equal(a.el('leagueImport').open,true);a.el('leagueAction').onclick();assert.equal(a.el('leagueImport').open,false);
 });
 
+// ---------- NFL replay: a game outside the calibrated week ----------
+// A simulated ok.ru: real ProviderPlayers talk to it over the postMessage boundary the browser uses.
+// Real ok.ru behaviour (when it reports, what an over-the-end seek does) is not exercised by any of this.
+function okru(t,{length=8000,preroll=0,prerollLength=15,flagged=true}={}){
+ const bus=new EventTarget(),sims=[];
+ const realInterval=globalThis.setInterval;globalThis.setInterval=()=>({unref(){}});t.after(()=>{globalThis.setInterval=realInterval;});   // the test drives time
+ const create=(source,time)=>{
+  const element=new Element(),sim={source,element,time:0,moving:false,inited:false,ad:preroll,adTime:0,adFlagged:false,seeks:[],since:0};
+  const send=data=>{const e=new Event('message');Object.assign(e,{origin:'https://ok.ru',source:element.contentWindow,data});bus.dispatchEvent(e);};
+  sim.send=send;
+  element.contentWindow={postMessage(m){
+   if(m.action==='play')sim.moving=true;else if(m.action==='pause')sim.moving=false;
+   else if(m.action==='seek'){sim.seeks.push(m.time);if(sim.ad<=0&&m.time<length)sim.time=m.time;}
+  }};
+  sim.tick=ms=>{
+   if(!sim.inited){sim.inited=true;send({event:'inited'});return;}
+   if(sim.player.error||!sim.moving)return;
+   sim.since+=ms;if(sim.since<250)return;sim.since-=250;
+   if(sim.ad>0){
+    if(flagged&&!sim.adFlagged){sim.adFlagged=true;send({event:'adShown'});}
+    sim.adTime+=.25;sim.ad-=.25;send({event:'timeupdate',time:sim.adTime,duration:prerollLength});return;
+   }
+   sim.time=Math.min(length,sim.time+.25);send({event:'timeupdate',time:sim.time,duration:length});
+   if(sim.time>=length){sim.moving=false;send({event:'ended'});}
+  };
+  sim.player=new ProviderPlayer(source.url,{events:bus,now:()=>time.now,createFrame:()=>element,duration:source.duration});
+  sims.push(sim);return sim.player;
+ };
+ const open=()=>sims.filter(sim=>!sim.element.removed);
+ return {create,sims,open,bus,tick:ms=>{for(const sim of open())sim.tick(ms);}};
+}
+// Week 7's games with everything calibrated taken away: only the chosen game has a video, as a past-week game found on the listing would.
+function uncalibrated(a,{id='401873014',team='IND',withVideo=true}={}){
+ const data=structuredClone(archiveData);data.calibrated=false;
+ for(const g of data.games){g.recordingDuration=0;g.anchors=[];if(g.id!==id||!withVideo)delete g.embed;}
+ ready(a);a.S.mode='replay';a.S.archive=new archive.ReplayArchive(data);
+ const g=a.S.archive.game(id);a.S.day=a.S.archive.sessions.findIndex(s=>s.gameIds.includes(id));
+ a.useRoster([{name:'Jonathan Taylor',team,position:'RB'}],{teamName:'Replay'});a.clock.end=a.S.archive.sessions[a.S.day].end;a.clock.seek(g.start,0);
+ return g;
+}
+const run=(a,sim,ms,each=null)=>{for(let left=ms;left>0;left-=100){a.time.now+=100;sim?.tick(100);a.frame(a.time.now);each?.();}};
+const midGame=(g,share=.5)=>{const p=g.plays[Math.floor(g.plays.length*share)];return g.start+p[0];};
+
+test('NFL replay: an uncalibrated game goes from a guessed length, through a pre-roll, to its real length with the sync rebuilt',t=>{
+ const sim=okru(t,{length:8000,preroll:15,prerollLength:15}),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a),at=midGame(g);
+ a.saved.highlights=false;a.seekTo(at);a.setPlaying(true);run(a,sim,100);
+ const guessed=a.syncFor(g).media(a.S.at-g.start);
+ assert.equal(g.recordingDuration,11000);assert.equal(g.durationGuessed,true);assert.equal(sim.sims.length,1);
+ const p=sim.sims[0].player;assert.equal(sim.sims[0].source.duration,undefined,'a guess is not handed over as a known length');assert.equal(p.knownDuration,false);assert.equal(Number.isNaN(p.duration),true);
+ // The pre-roll: nothing is learned from it, the game is hidden and the clock keeps its place.
+ run(a,sim,1000);assert.equal(a.S.ads.has(g.id),true);assert.equal(p.inAd,true);assert.equal(a.pool.visible,null);
+ run(a,sim,12000);assert.equal(Number.isNaN(p.duration),true);assert.equal(g.durationGuessed,true);assert.equal(a.saved.replayDurations[g.id],undefined);assert.ok(Math.abs(a.S.at-at)<2,'the clock waits for the game to come back');
+ // The recording itself reports: the real length replaces the guess and the sync is built on it.
+ const before=sim.sims[0].seeks.length;run(a,sim,3000);
+ assert.equal(p.inAd,false);assert.equal(a.S.ads.has(g.id),false);assert.equal(p.duration,8000);assert.equal(g.recordingDuration,8000);assert.equal(g.durationGuessed,false);assert.equal(a.saved.replayDurations[g.id],8000);
+ assert.match(a.storage.get('fantasy-stream-v3'),/"replayDurations":\{"401873014":8000\}/);
+ const real=a.syncFor(g),expected=real.media(a.S.at-g.start);assert.ok(Math.abs(expected-guessed)>300,`the guessed curve was ${guessed}, the real one ${expected}`);
+ assert.ok(sim.sims[0].seeks.slice(before).some(time=>Math.abs(time-expected)<15),'the seek made on the guess is aimed again');
+ // And it comes on screen, at the right footage, with no jump in game time.
+ run(a,sim,4000);assert.equal(a.pool.visible,g.id);assert.equal(a.S.program.id,g.id);assert.equal(a.S.seekHold,false);assert.ok(Math.abs(p.currentTime-a.target(g.id))<5);assert.ok(Math.abs(a.S.at-at)<30,`the clock moved ${a.S.at-at}s`);
+ assert.equal(sim.sims.length,1,'the pre-roll is not reloaded');assert.equal(a.S.cooldown.size,0);
+ const clock=a.S.at;run(a,sim,5000);assert.ok(a.S.at>clock+3,'the picture drives the clock from here');assert.equal(a.pool.visible,g.id);
+ a.pool.destroy();
+});
+test('NFL replay: a game whose real length is already known is told it, and learns nothing further',t=>{
+ const sim=okru(t,{length:8000}),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a);g.recordingDuration=7990;a.saved.highlights=false;a.seekTo(midGame(g));a.setPlaying(true);run(a,sim,6000);
+ assert.equal(sim.sims[0].source.duration,7990);assert.equal(sim.sims[0].player.knownDuration,true);assert.equal(g.recordingDuration,7990);assert.equal(a.saved.replayDurations[g.id],undefined);assert.equal(a.pool.visible,g.id);a.pool.destroy();
+});
+test('NFL replay: no provider source is told a guessed length: the game, its broadcast replay and the replay fallback',async t=>{
+ const sim=okru(t),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a);a.syncFor(g);assert.equal(g.durationGuessed,true);
+ const score=g.scores[0],item={id:'x',gameId:g.id,score:{...score,text:'td'},at:g.start+score.t,credits:[]};
+ const broadcast=await a.replaySource(item);assert.equal(broadcast.source.duration,undefined);
+ a.coverage.log.push(item);const h={item,src:{key:'hl:x',label:'NFL.com highlight'},playing:false};a.S.highlight=h;a.failHighlight('no clip');assert.equal(a.S.sources.get('x').source.duration,undefined);
+});
+test('NFL replay: a length saved by an earlier release as the guess is dropped on load, a real one is kept',()=>{
+ const a=app(undefined,{stored:{replayDurations:{'401873013':11000,'401873014':7400}}});
+ assert.deepEqual({...a.saved.replayDurations},{'401873014':7400});
+});
+test('NFL replay: a guessed seek past the real end learns and lands instead of timing out',t=>{
+ const sim=okru(t,{length:7000}),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a),at=midGame(g,.92);
+ a.saved.highlights=false;a.seekTo(at);a.setPlaying(true);run(a,sim,100);assert.ok(a.syncFor(g).media(a.S.at-g.start)>7000,'the guess aims past the real end');
+ run(a,sim,5000);assert.equal(g.recordingDuration,7000);assert.equal(a.pool.visible,g.id);assert.equal(a.S.cooldown.size,0);assert.ok(sim.sims[0].player.currentTime<7000);a.pool.destroy();
+});
+test('NFL replay: a player given the guess as its length teaches nothing',t=>{
+ const sim=okru(t,{length:8000}),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a);a.syncFor(g);
+ a.pool.open(g.id,{url:g.embed,type:'provider/ok',duration:11000});run(a,sim,1000);assert.equal(g.durationGuessed,true);assert.equal(a.saved.replayDurations[g.id],undefined);a.pool.destroy();
+});
+test('NFL replay: a player that learned its length also teaches a game warming behind the one on air',t=>{
+ const sim=okru(t,{length:8000}),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a);a.syncFor(g);
+ const slot=a.pool.open(g.id,{url:g.embed,type:'provider/ok'});a.pool.hold(g.id,a.target(g.id),{play:true});assert.equal(a.pool.visible,null);
+ run(a,sim,1000);assert.equal(g.recordingDuration,8000);assert.equal(slot.player.duration,8000);a.pool.destroy();
+});
+test('NFL replay: learning one game keeps another game in its commercial, and re-cuts the replays queued on the guess',t=>{
+ const sim=okru(t),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a);a.syncFor(g);
+ a.pool.open(g.id,{url:g.embed,type:'provider/ok'});a.pool.hold(g.id,a.target(g.id),{play:true});
+ a.S.detectedBreaks.set('other',{kind:'timeout'});a.S.detectedBreaks.set(g.id,{kind:'timeout'});
+ a.coverage.queue.push({id:'mine',gameId:g.id},{id:'theirs',gameId:'other'});a.S.sources.set('mine',{status:'ready',label:'Broadcast replay'});a.S.sources.set('theirs',{status:'ready',label:'Broadcast replay'});
+ run(a,sim,600);assert.equal(g.durationGuessed,false);assert.equal(a.S.detectedBreaks.has('other'),true);assert.equal(a.S.detectedBreaks.has(g.id),false);assert.equal(a.S.sources.has('theirs'),true);assert.notEqual(a.S.sources.get('mine')?.status,'ready','prepared again on the real curve');a.coverage.queue.length=0;a.pool.destroy();
+});
+test('NFL replay: an ended report in the same breath as the length re-seeks instead of retiring the recording',t=>{
+ const sim=okru(t,{length:7000}),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a),at=midGame(g,.92);a.saved.highlights=false;a.seekTo(at);a.setPlaying(true);a.time.now+=100;a.frame(a.time.now);
+ const s=sim.sims[0];s.send({event:'inited'});s.inited=true;
+ s.send({event:'timeupdate',time:0,duration:7000});s.send({event:'ended'});
+ assert.equal(g.recordingDuration,7000);assert.equal(a.S.recordingEnds.size,0);assert.equal(s.player.element.removed,undefined);assert.ok(s.seeks.at(-1)<7000);a.pool.destroy();
+});
+test('NFL replay: an ended report left over from before a seek inside the file is ignored',t=>{
+ const sim=okru(t,{length:8000}),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a);g.recordingDuration=8000;a.saved.highlights=false;a.seekTo(midGame(g));a.setPlaying(true);run(a,sim,5000);
+ const s=sim.sims[0];assert.equal(a.pool.visible,g.id);s.player.seek(4000);s.send({event:'ended'});assert.equal(a.S.recordingEnds.size,0);assert.equal(a.pool.visible,g.id);a.pool.destroy();
+});
+// One game on the slate and one starter in it, with a player the test moves by hand.
+function thursday(){
+ const a=app(undefined,{media:true});replayReady(a);a.S.mode='replay';a.saved.highlights=false;a.useRoster([{name:'Drake Maye',team:'NE',position:'QB'}],{teamName:'Thursday'});
+ a.setDay(0);const g=a.S.archive.game(a.S.archive.sessions[0].gameIds[0]);a.seekTo(g.start+Math.round((g.end-g.start)*.3));a.setPlaying(true);
+ const move=ms=>{for(let left=ms;left>0;left-=250){a.time.now+=250;for(const slot of a.pool.slots.values())if(slot.player.progressing)slot.player.currentTime+=.25;a.advanceClock(a.time.now);a.step(a.time.now);}};
+ for(let i=0;i<8&&a.pool.visible!==g.id;i++)move(250);
+ assert.equal(a.pool.visible,g.id);
+ return {a,g,move};
+}
+test('NFL replay: a recording that ends mid-game hands over to the tracker, with no cooldown and no reopening',()=>{
+ const {a,g,move}=thursday();move(1000);const p=a.pool.current,at=a.S.at;
+ p.emit('ended');assert.equal(a.S.cooldown.size,0);assert.equal(a.S.recordingEnds.get(g.id),at);assert.equal(p.destroyed,true);assert.equal(a.pool.visible,null);
+ assert.match(a.el('toast').textContent,/recording ends here/);assert.equal(a.picture(g.id),'data');
+ move(1000);assert.equal(a.S.program.kind,'game');assert.equal(a.S.program.id,g.id);assert.equal(a.pool.slots.size,0,'the same last frame is never opened again');
+ move(120000);assert.equal(a.pool.slots.size,0);assert.equal(a.S.cooldown.size,0);assert.ok(a.S.at>at+100,'the tracker carries on');
+});
+test('NFL replay: seeking back before the end of a recording brings its video back',()=>{
+ // Some of these land in a break and some on a play: the tracker has to give way to video from either.
+ for(const back of [100,200,300,500,700,900,1100,1300]){
+  const {a,g,move}=thursday();move(1000);const at=a.S.at;a.pool.current.emit('ended');move(2000);assert.equal(a.picture(g.id),'data');
+  a.seekTo(at-back);assert.equal(a.picture(g.id),'video');move(3000);assert.equal(a.pool.visible,g.id,`${back}s back`);assert.ok(a.pool.current.progressing);assert.equal(a.S.program.id,g.id);assert.equal(a.S.seekHold,false);
+ }
+});
+test('NFL replay: after the recording ends at the final whistle, Watch from kickoff still works',()=>{
+ const {a,g,move}=thursday();a.seekTo(g.end-5);move(2000);const p=a.pool.current;if(p)p.emit('ended');move(10000);
+ a.selectGame(g.id);assert.ok(Math.abs(a.S.at-g.start)<1);move(1000);assert.equal(a.pool.visible,g.id);assert.equal(a.S.program.id,g.id);
+});
+test('NFL replay: an ended report during an ad retires nothing',()=>{
+ const {a,g,move}=thursday();move(1000);const p=a.pool.current;p.emit('ad',true);p.emit('ended');assert.equal(a.S.recordingEnds.size,0);assert.equal(p.destroyed,undefined);assert.equal(a.S.ads.has(g.id),true);
+});
+test('NFL replay: a score after the recording ended is shown as the play itself, not from the dead file',async()=>{
+ const {a,g,move}=thursday();move(1000);const at=a.S.at;a.pool.current.emit('ended');const later=g.scores.find(s=>g.start+s.t>at);assert.ok(later);
+ const src=await a.replaySource({id:'x',gameId:g.id,score:{...later,text:'td'},at:g.start+later.t,credits:[]});assert.equal(src.data,true);assert.equal(src.source,undefined);
+});
+test('NFL replay: changing the sync or the length forgets where the recording ended',()=>{
+ const {a,g,move}=thursday();move(1000);a.pool.current.emit('ended');assert.equal(a.S.recordingEnds.size,1);a.el('syncGame').value=g.id;a.el('clearSync').onclick();assert.equal(a.S.recordingEnds.size,0);
+});
+test('NFL replay: the clock waits for a roster game coming back from a failure, so its plays are not skipped',()=>{
+ const {a,g,move}=thursday();move(1000);const p=a.pool.current;p.emit('error',new Error('Broken'));assert.equal(a.S.program.kind,'standby');assert.equal(a.S.cooldown.has(g.id),true);const at=a.S.at;
+ move(30000);assert.ok(Math.abs(a.S.at-at)<1,`the clock moved ${a.S.at-at}s during the cooldown`);
+ move(32000);assert.equal(a.pool.visible,g.id,'the game came back');assert.ok(Math.abs(a.S.at-at)<3,`it came back ${a.S.at-at}s on`);
+});
+test('NFL replay: a video that never recovers cannot freeze the day: the hold has a cap',()=>{
+ const {a,move}=thursday();move(1000);const at=a.S.at;
+ for(let i=0;i<40;i++){for(const slot of [...a.pool.slots.values()])slot.player.emit('error',new Error('Dead'));move(10000);}
+ assert.ok(a.S.at-at>=250,`the clock moved ${a.S.at-at}s in 400s`);
+});
+test('NFL replay: Skip break still lets the clock run past the commercial',()=>{
+ const {a,g,move}=thursday();move(1000);a.skipBreak();assert.equal(a.S.program.kind,'standby');a.S.cooldown.set(g.id,a.time.now+60000);const at=a.S.at;move(10000);assert.ok(a.S.at-at>8,`the clock moved ${a.S.at-at}s`);
+});
+test('NFL replay: a hidden player in a long pre-roll is left to finish it, within a limit',t=>{
+ const sim=okru(t,{length:8000,preroll:30,prerollLength:30}),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a);a.saved.highlights=false;a.seekTo(midGame(g));a.setPlaying(true);
+ run(a,sim,45000);assert.equal(sim.sims.length,1,'not reloaded into another pre-roll');assert.equal(a.pool.visible,g.id);assert.equal(g.recordingDuration,8000);a.pool.destroy();
+});
+test('NFL replay: an ad that never ends is eventually given up on',t=>{
+ const sim=okru(t,{length:8000,preroll:100000,prerollLength:30}),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a);a.saved.highlights=false;a.seekTo(midGame(g));a.setPlaying(true);
+ run(a,sim,80000);assert.equal(sim.sims.length,1);run(a,sim,40000);assert.ok(sim.sims.length>1,'the wedged player was replaced');a.pool.destroy();
+});
+// ---------- a frame waiting for a click ----------
+function waitingFrame(){
+ const a=app(undefined,{media:true});replayReady(a);a.S.mode='replay';a.saved.highlights=false;a.useRoster([{name:'Drake Maye',team:'NE',position:'QB'}],{teamName:'Thursday'});a.setDay(0);
+ const g=a.S.archive.game(a.S.archive.sessions[0].gameIds[0]);a.seekTo(g.start+Math.round((g.end-g.start)*.3));a.setPlaying(true);
+ const p=a.pool.open(g.id,{url:g.embed,type:'provider/ok'}).player;p.kind='provider';p.initialized=true;p.moving=false;p.advances=0;
+ const to=at=>{a.time.now=at;a.advanceClock(at);a.step(at);};
+ for(let at=1250;!a.S.pending&&at<20000;at+=250)to(at);assert.equal(a.S.pending?.id,g.id);
+ return {a,g,p,to,since:a.S.pending.since};
+}
+test('NFL replay: a frame waiting for a click stays up with its cue past the load limit, then gives up after CLICK_LIMIT',()=>{
+ const {a,g,p,to,since}=waitingFrame();
+ to(since+8250);assert.equal(a.pool.visible,g.id,'shown after 8s');assert.ok(a.S.pending);a.render();assert.match(a.el('switching').textContent,/press play inside it/);assert.equal(a.el('switching').hidden,false);
+ for(const after of [14000,21000,31000,40000,60000,89000]){to(since+after);assert.equal(a.pool.visible,g.id,`still up after ${after}`);assert.equal(a.S.cooldown.has(g.id),false,`not cooled after ${after}`);}
+ assert.equal(p.destroyed,undefined);
+ to(since+91000);assert.equal(a.pool.visible,null);assert.equal(a.S.cooldown.has(g.id),true);assert.equal(a.S.unmuteHint,false);
+});
+test('NFL replay: the click starts the footage and commits one cut',()=>{
+ const {a,g,p,to,since}=waitingFrame();
+ to(since+8250);to(since+40000);assert.equal(a.pool.visible,g.id);assert.equal(a.S.cuts,0);
+ p.moving=true;to(since+40250);assert.equal(a.S.pending,null);assert.equal(a.S.cuts,1);assert.equal(a.S.unmuteHint,false);to(since+40500);assert.equal(a.S.cuts,1);
+});
+test('NFL replay: a frame that never said it is ready keeps the short limit, and an error ends the wait at once',()=>{
+ const silent=waitingFrame();silent.p.initialized=false;silent.to(silent.since+8250);assert.equal(silent.a.pool.visible,silent.g.id);silent.to(silent.since+21000);assert.equal(silent.a.pool.visible,null);assert.equal(silent.a.S.cooldown.has(silent.g.id),true);
+ const broken=waitingFrame();broken.to(broken.since+8250);broken.to(broken.since+30000);assert.equal(broken.a.pool.visible,broken.g.id);broken.p.emit('error',new Error('Removed'));assert.equal(broken.a.pool.visible,null);assert.equal(broken.a.S.cooldown.has(broken.g.id),true);
+});
+// ---------- the hold after a scrub ----------
+test('NFL replay: a scrub landing a few seconds off releases the hold once the footage moves',()=>{
+ const {a,move}=thursday();move(1000);const p=a.pool.current,to=a.S.at+200;a.seekTo(to);assert.equal(a.S.seekHold,true);
+ p.currentTime=to-a.S.archive.game(a.S.program.id).start;const mapped=a.target(a.S.program.id);
+ p.target=mapped;p.currentTime=mapped+4;a.time.now+=100;a.advanceClock(a.time.now);assert.equal(a.S.seekHold,true,'the seek has not landed');
+ p.target=null;p.inAd=true;a.time.now+=100;a.advanceClock(a.time.now);assert.equal(a.S.seekHold,true,'an ad is not footage');p.inAd=false;
+ p.moving=false;a.time.now+=100;a.advanceClock(a.time.now);assert.equal(a.S.seekHold,true,'stopped is not moving');
+ p.moving=true;a.time.now+=100;a.advanceClock(a.time.now);assert.equal(a.S.seekHold,false);assert.ok(a.S.at>to,'the clock follows the picture');
+});
+test('NFL replay: a cut opened during the hold is not led against the stopped clock',t=>{
+ const sim=okru(t),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a);g.recordingDuration=8000;a.saved.highlights=false;a.seekTo(midGame(g));a.S.seekHold=true;a.S.started=true;a.S.playing=true;a.S.program={kind:'standby'};
+ a.cutTo(g.id,a.time.now);const want=a.target(g.id);assert.equal(sim.sims[0].player.target,want);a.pool.destroy();
+});
+// ---------- which week Replay opens on ----------
+function weekFetcher({board=async()=>({season:{year:2026},week:{number:9},events:[]}),replays=async()=>({games:[]}),weekBoard=async()=>({events:[]})}={}){
+ const calls=[];
+ const fetcher=async url=>{url=String(url);calls.push(url);
+  if(url==='/week7.json')return Response.json(archiveData);if(url==='/nfl-highlights.json')return Response.json({clips:[]});
+  if(url.startsWith('/api/nfl-replays'))return Response.json(await replays());
+  if(url.includes('scoreboard?dates='))return Response.json(await weekBoard(url));
+  if(url.includes('scoreboard'))return Response.json(await board());
+  return Response.json({events:[]});};
+ return {fetcher,calls,built:()=>calls.filter(u=>u.startsWith('/api/nfl-replays')||u.includes('summary?event='))};
+}
+const week8=()=>JSON.stringify({...structuredClone(archiveData),week:8,title:'Week 8',version:2});
+const settle=async()=>{for(let i=0;i<8;i++)await flush();};
+test('Replay week: a Live page lists the weeks and builds no week until someone comes for it',async()=>{
+ const f=weekFetcher(),a=app(f.fetcher);await a.loadReplayArchive();await settle();
+ assert.equal(a.S.weeks.latest,8);assert.equal(a.S.archiveKey,'w7');assert.equal(f.built().length,0);assert.equal(a.S.archives.has('w8'),false);assert.match(a.el('weekSelect').innerHTML,/Week 8 · latest/);
+ assert.ok(f.calls.some(u=>u.includes('scoreboard?dates=')),'the past-week tiles still load');
+});
+test('Replay week: entering Replay says the latest week is loading, then lands on it',async()=>{
+ const held=deferred(),f=weekFetcher({replays:()=>held.promise}),a=app(f.fetcher);a.storage.set('fantasy-stream-archive-2026-w8',week8());await a.loadReplayArchive();await settle();
+ await a.setMode('replay');await settle();
+ assert.equal(a.S.archiveKey,'w7');assert.equal(a.S.weeks.landing,8);assert.match(a.el('ovTitle').innerHTML,/Getting Week 8 ready/);assert.equal(a.el('overlay').hidden,false);assert.match(a.el('games').innerHTML,/Getting Week 8 ready/);assert.equal(a.el('weekSelect').value,'w8');assert.match(a.el('ovButton').textContent,/Week 7 instead/);
+ held.resolve({games:[]});await settle();
+ assert.equal(a.S.archiveKey,'w8');assert.equal(a.S.weeks.landing,0);assert.equal(a.el('weekSelect').value,'w8');assert.match(a.el('ovEyebrow').textContent,/WEEK 8 REPLAY/);assert.equal(a.el('ovButton').textContent,'Watch replay');assert.equal(a.S.playing,false);
+});
+test('Replay week: opened before ESPN answers, the page says so and lands as soon as the week is known',async()=>{
+ const list=deferred(),f=weekFetcher({board:()=>list.promise}),a=app(f.fetcher);a.storage.set('fantasy-stream-archive-2026-w8',week8());await a.loadReplayArchive();await a.setMode('replay');await flush();
+ assert.equal(a.S.weeks.landing,-1);assert.match(a.el('ovTitle').innerHTML,/Finding the latest week/);
+ list.resolve({season:{year:2026},week:{number:9},events:[]});await settle();assert.equal(a.S.archiveKey,'w8');assert.equal(a.S.weeks.landing,0);
+});
+test('Replay week: if the latest week fails, the calibrated Week 7 is the replay, and the next visit tries again',async()=>{
+ let fail=true;const f=weekFetcher({weekBoard:async()=>{if(fail)throw new Error('ESPN unavailable');return {events:[]};}}),a=app(async url=>{if(fail&&String(url).includes('scoreboard?dates='))return new Response('',{status:503});return f.fetcher(url);});await a.loadReplayArchive();await settle();
+ await a.setMode('replay');await settle();
+ assert.equal(a.S.archiveKey,'w7');assert.equal(a.S.weeks.landing,0);assert.equal(a.el('ovButton').textContent,'Watch replay');assert.match(a.el('toast').textContent,/Week 8 isn’t available/);assert.equal(a.el('weekSelect').value,'w7');assert.match(a.el('weekSelect').innerHTML,/Week 8 · latest · unavailable/);
+ fail=false;a.storage.set('fantasy-stream-archive-2026-w8',week8());await a.setMode('live');await a.setMode('replay');await settle();assert.equal(a.S.archiveKey,'w8');
+});
+test('Replay week: a replay started while the latest week loads stays on screen, and the week joins the list',async()=>{
+ const held=deferred(),f=weekFetcher({replays:()=>held.promise}),a=app(f.fetcher,{media:true});a.storage.set('fantasy-stream-archive-2026-w8',week8());await a.loadReplayArchive();await settle();
+ await a.setMode('replay');await settle();a.useRoster(roster.SAMPLE,{teamName:'Replay'});a.el('ovButton').onclick();const id=a.S.games.find(g=>g.state==='in')?.id||a.S.archive.sessions[a.S.day].gameIds[0];a.selectGame(id);assert.equal(a.S.weeks.landing,0);const program={...a.S.program},at=a.S.at;
+ held.resolve({games:[]});await settle();
+ assert.equal(a.S.archiveKey,'w7');assert.equal(a.S.pinned,id);assert.equal(a.S.playing,true);assert.deepEqual({...a.S.program},program);assert.equal(a.S.at,at);assert.equal(a.S.archives.has('w8'),true);assert.equal(a.pool.destroyed,undefined);
+});
+test('Replay week: a replay started before the week list answers is left alone too',async()=>{
+ const list=deferred(),f=weekFetcher({board:()=>list.promise}),a=app(f.fetcher,{media:true});a.storage.set('fantasy-stream-archive-2026-w8',week8());await a.loadReplayArchive();await a.setMode('replay');await flush();
+ a.el('ovButton').onclick();assert.equal(a.S.playing,true);
+ list.resolve({season:{year:2026},week:{number:9},events:[]});await settle();assert.equal(a.S.archiveKey,'w7');assert.equal(a.S.playing,true);assert.equal(f.built().length,0,'nothing is built for a viewer who chose');
+});
+test('Replay week: watching Week 7, a trip to Live and back keeps the week and the place',async()=>{
+ const f=weekFetcher(),a=app(f.fetcher,{media:true});a.storage.set('fantasy-stream-archive-2026-w8',week8());await a.loadReplayArchive();await settle();
+ await a.setMode('replay');a.el('ovButton').onclick();await settle();assert.equal(a.S.archiveKey,'w7');const at=a.S.at;
+ await a.setMode('live');await settle();await a.setMode('replay');await settle();assert.equal(a.S.archiveKey,'w7');assert.ok(Math.abs(a.S.at-at)<1);
+});
+test('Replay week: choosing a week in the list still switches, even mid-play',async()=>{
+ const f=weekFetcher(),a=app(f.fetcher,{media:true});a.storage.set('fantasy-stream-archive-2026-w8',week8());await a.loadReplayArchive();await settle();await a.setMode('replay');a.el('ovButton').onclick();await settle();assert.equal(a.S.archiveKey,'w7');
+ a.el('weekSelect').onchange({target:{value:'w8'}});await settle();assert.equal(a.S.archiveKey,'w8');
+});
+test('Replay week: picking a day while the latest week loads is a choice too',async()=>{
+ const held=deferred(),f=weekFetcher({replays:()=>held.promise}),a=app(f.fetcher);a.storage.set('fantasy-stream-archive-2026-w8',week8());await a.loadReplayArchive();await settle();await a.setMode('replay');await settle();assert.equal(a.S.weeks.landing,8);
+ a.el('daySelect').onchange({target:{value:'0'}});assert.equal(a.S.day,0);assert.equal(a.S.weeks.landing,0);held.resolve({games:[]});await settle();assert.equal(a.S.archiveKey,'w7');assert.equal(a.S.day,0);
+});
+test('Replay week: a past tile opens its own week, with a loading cue, and never lands on the latest afterwards',async()=>{
+ const held=deferred(),f=weekFetcher({replays:()=>held.promise}),a=app(f.fetcher,{media:true});a.storage.set('fantasy-stream-archive-2026-w8',week8());await a.loadReplayArchive();await settle();
+ const opening=a.openPastReplay(8,archiveData.games[0].id);await settle();assert.equal(a.S.mode,'replay');assert.equal(a.S.weeks.landing,8);assert.match(a.el('ovTitle').innerHTML,/Getting Week 8 ready/);assert.equal(a.el('ovButton').hidden,true);
+ held.resolve({games:[]});await opening;await settle();assert.equal(a.S.archiveKey,'w8');assert.equal(a.S.pinned,archiveData.games[0].id);assert.equal(a.S.weekChosen,true);assert.equal(a.S.weeks.landing,0);
+});
+test('Replay week: a past tile that cannot load says so and leaves no loading cue behind',async()=>{
+ const f=weekFetcher(),a=app(async url=>{if(String(url).includes('scoreboard?dates='))return new Response('',{status:503});return f.fetcher(url);},{media:true});await a.loadReplayArchive();await settle();
+ await a.openPastReplay(3,'nope');await settle();assert.equal(a.S.weeks.landing,0);assert.match(a.el('toast').textContent,/Week 3's replay is unavailable/);assert.equal(a.S.archiveKey,'w7');assert.equal(a.el('ovButton').hidden,false);
+});
+
+// ---------- the live feed: outages, waking up, gaps, late tries ----------
+const quietFeed=(a,o={},until=1000)=>{const g=extra=>({...game,lastPlayId:'p1',clock:'10:00',period:1,score:[7,0],scoreKnown:true,...o,...extra});a.S.live.feed=new live.LiveFeed();a.S.live.feed.push([g({lastPlayId:'p0'})],955);for(let t=960;t<=until;t+=5)a.S.live.feed.push([g()],t);return g;};
+const stepTo=(a,at)=>{a.S.at=at;a.time.now=(at-1000)*1000+1000;a.S.lastAt=at-1;a.step(a.time.now);};
+test('outage: a frozen scoreboard leaves a direct stream and a manual choice on screen, through the delay after ESPN returns',()=>{
+ for(const delay of [0,30])for(const back of [1085,1125]){
+  const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.saved.delay=delay;const g=quietFeed(a);a.setPlaying(true);a.S.at=1000;a.selectGame('A');a.S.live.fetched=Date.now();const video=a.pool.current,on=at=>`delay ${delay}, back ${back}, at ${at}`;
+  for(let at=1005;at<back;at+=5){a.S.live.fetched=Date.now()-(at-1000)*1000;stepTo(a,at);assert.equal(a.pool.visible,'A',on(at));assert.equal(a.S.program.kind,'game');assert.equal(a.S.pinned,'A');assert.equal(a.S.detectedBreaks.has('A'),false);}
+  a.S.live.fetched=Date.now();a.S.live.feed.push([g({lastPlayId:'p2'})],back);
+  for(let at=back;at<=back+delay+10;at+=5){a.S.live.feed.push([g({lastPlayId:'p2'})],at);stepTo(a,at);assert.equal(a.pool.visible,'A',on(at));assert.equal(a.S.pinned,'A');}
+  assert.equal(a.pool.current,video,'never reopened');assert.equal(video.destroyed,undefined);
+ }
+});
+test('outage: a website embed is not dimmed as a break while the scoreboard is frozen',()=>{
+ const a=embeddedGame();a.saved.delay=0;quietFeed(a,{score:[0,0]});a.S.at=1000;a.pool.current.element.emit('load');
+ for(let t=1005;t<=1120;t+=5){stepTo(a,t);assert.equal(a.S.dimmed,null,`t=${t}`);assert.equal(a.pool.visible,'A');}
+});
+test('waking: a score from the gap is not a Score on the field, and a quiet game is not a stoppage',()=>{
+ const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.saved.delay=0;const g=quietFeed(a);a.setPlaying(true);stepTo(a,1000);assert.equal(a.pool.visible,'A');
+ a.S.live.fetched=Date.now();a.S.live.feed.push([g()],1300);for(const t of [1300,1305,1330,1400]){stepTo(a,t);assert.equal(a.pool.visible,'A',`no score, t=${t}`);}
+ const b=app(undefined,{media:true});ready(b);b.saved.streams={'IND-MIN':'https://example.test/a.mp4'};b.saved.delay=0;const h=quietFeed(b);b.setPlaying(true);stepTo(b,1000);
+ b.S.live.fetched=Date.now();b.S.live.feed.push([h({lastPlayId:'late',score:[14,0]})],1300);for(const t of [1300,1305,1320]){stepTo(b,t);assert.doesNotMatch(b.S.decision.reason||'',/Score on the field/);assert.equal(b.S.games[0].celebrating,undefined);}
+ b.S.live.feed.push([h({lastPlayId:'next',score:[14,0]})],1330);stepTo(b,1345);assert.equal(b.pool.visible,'A','the next settled play brings it back');
+});
+test('tries: a late extra point cannot bring the commercial back on screen',()=>{
+ const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.saved.delay=0;const g=quietFeed(a,{score:[0,0]},1000);a.setPlaying(true);stepTo(a,1000);
+ const at=(t,o)=>{a.S.live.feed.push([g(o)],t);stepTo(a,t);};
+ at(1005,{lastPlayId:'td',score:[6,0]});assert.equal(a.pool.visible,'A','the score stays on screen');assert.equal(a.S.games[0].celebrating,true);
+ for(let t=1010;t<=1025;t+=5)at(t,{lastPlayId:'td',score:[6,0]});assert.equal(a.pool.visible,null,'then the commercial');
+ for(let t=1030;t<=1060;t+=5)at(t,{lastPlayId:'td',score:[6,0]});
+ for(let t=1065;t<=1090;t+=5){at(t,{lastPlayId:'td',score:[7,0]});assert.equal(a.pool.visible,null,`t=${t}`);assert.equal(a.S.games[0].celebrating,undefined);}
+});
+test('gaps: one response without the chosen game keeps the choice and the picture',()=>{
+ const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.saved.delay=0;a.selectGame('A');const video=a.pool.current;
+ a.S.live.feed.push([],1005);stepTo(a,1005);assert.equal(a.S.pinned,'A');assert.equal(a.pool.visible,'A');
+ a.S.live.feed.push([game],1010);stepTo(a,1010);assert.equal(a.S.pinned,'A');assert.equal(a.pool.visible,'A');assert.equal(a.pool.current,video);
+});
+test('gaps: the guide and the 5 s poll survive a response that leaves the game out',async()=>{
+ let events=[feedEvent('A')];const a=app(async()=>Response.json({events}));ready(a);await a.pollLive(0);events=[];a.timers.clear();await a.pollLive(0);
+ assert.deepEqual(a.S.live.games.map(g=>g.id),['A']);assert.ok([...a.timers.values()].some(t=>t.delay===5000));
+});
+function liveScore(a,at){a.S.live.feed.push([{...game,teams:[{id:'11',abbr:'IND',abbreviation:'IND'},{id:'16',abbr:'MIN',abbreviation:'MIN'}]}],a.S.at);a.S.live.scores.set('A',[{id:'A:td',at,team:0,kind:'TD',text:'Jonathan Taylor 4 Yd Rush',players:[{name:'Jonathan Taylor',role:'scorer'}]}]);}
+test('logic: a page embed counts as watched only on a recent click inside the document on screen',()=>{
+ const run=before=>{const a=embeddedGame();a.saved.delay=0;a.S.at=1000;a.S.coverageStart=999;const p=a.pool.current;p.element.emit('load');a.time.now+=2000;before(p,a);liveScore(a,1005);for(let t=1001;t<=1030;t++){a.S.at=t;a.time.now+=1000;a.step(a.time.now);}return a.coverage.log[0];};
+ const clicked=run(p=>p.noteInteraction());assert.equal(clicked.seen,true);assert.equal(clicked.queued,false);
+ const untouched=run(()=>{});assert.equal(untouched.seen,false);assert.equal(untouched.queued,true);
+ const reloaded=run((p,a)=>{p.noteInteraction();p.reload();p.element.emit('load');a.time.now+=2000;});assert.equal(reloaded.seen,false);assert.equal(reloaded.queued,true);
+ const stale=run((p,a)=>{p.noteInteraction();a.time.now+=600000;});assert.equal(stale.seen,false);assert.equal(stale.queued,true);
+});
+test('corrections: a yardage edit lets the replay on air finish, without restarting or re-announcing it',async()=>{
+ const {a,entry,poll,summary}=await correctionFixture();a.setPlaying(true);a.startHighlight(entry.id);a.updateHighlight(1000);const h=a.S.highlight,p=a.pool.current;entry.watchUrl='https://www.espn.com/nfl/video/clip/_/id/1';
+ await poll({...summary,scoringPlays:[{...summary.scoringPlays[0],text:'Jonathan Taylor 5 Yd Rush'}]});
+ assert.equal(a.S.highlight,h);assert.equal(a.pool.current,p);assert.equal(p.destroyed,undefined);assert.equal(h.done,false);assert.equal(a.S.sources.get(entry.id),h.src);assert.match(entry.score.text,/5 Yd/);assert.equal(entry.watchUrl,'https://www.espn.com/nfl/video/clip/_/id/1');
+ const log=a.coverage.log.length;a.step(1250);assert.equal(a.S.highlight,h);assert.equal(a.coverage.queue.length,0);assert.equal(a.coverage.log.length,log);
+});
+test('corrections: an edit that changes the play still closes the replay on air',async()=>{
+ const {a,entry,poll,summary}=await correctionFixture();a.setPlaying(true);a.startHighlight(entry.id);a.updateHighlight(1000);
+ await poll({...summary,scoringPlays:[{...summary.scoringPlays[0],text:'Josh Downs 4 Yd Pass From Daniel Jones'}]});
+ assert.equal(a.S.highlight,null);assert.equal(a.S.sources.has(entry.id),false);
+});
+test('kickoff: the scoreboard polls every 5 s around a listed kickoff, and falls back when a game stays pre',async()=>{
+ const delay=async(date,failing=false)=>{const event={...feedEvent('A'),date};event.competitions[0].status.type.state='pre';let calls=0;const a=app(async()=>{if(failing&&++calls>1)throw new Error('down');return Response.json({events:[event]});});ready(a);a.S.live.games=[];a.S.live.feed=new live.LiveFeed();await a.pollLive(0);a.timers.clear();if(failing)await a.pollLive(0);else await a.pollLive(0);return [...a.timers.values()].map(t=>t.delay).filter(d=>[5000,30000].includes(d));};
+ const from=minutes=>new Date(Date.now()+minutes*60000).toISOString();
+ assert.deepEqual(await delay(from(2)),[5000]);assert.deepEqual(await delay(from(-5)),[5000],'a late start');
+ assert.deepEqual(await delay(from(300)),[30000]);assert.deepEqual(await delay(from(-300)),[30000],'stuck in pre');assert.deepEqual(await delay(undefined),[30000],'no listed time');
+ assert.deepEqual(await delay(from(2),true),[5000],'a failed poll near kickoff retries fast');
+});
+test('score display: a blank scoreboard poll keeps the last tally in the bug and the tracker',()=>{
+ const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.saved.delay=0;a.S.live.feed=new live.LiveFeed();const g=o=>({...game,scoreKnown:true,score:[14,3],...o});a.S.live.feed.push([g()],1000);a.setPlaying(true);stepTo(a,1000);a.render();assert.match(a.el('bugGame').innerHTML,/<b>14<\/b>.*<b>3<\/b>/);
+ a.S.live.feed.push([g({score:[0,0],scoreKnown:false})],1005);stepTo(a,1005);a.render();assert.equal(a.S.games[0].scoreKnown,false);assert.match(a.el('bugGame').innerHTML,/<b>14<\/b>.*<b>3<\/b>/);
+});
+
+test('the strip arrows chain only while their own scroll is moving, and a stale target cannot move the strip',()=>{
+ const a=app(),list=a.el('games');Object.assign(list,{scrollWidth:5000,clientWidth:1000,scrollLeft:0,scrollTo(o){this.went=o.left;}});
+ a.el('stripNext').onclick();assert.equal(list.went,800);list.scrollLeft=200;a.el('stripNext').onclick();assert.equal(list.went,1600,'a quick second click carries on from the first target');
+ a.S.stripStartedAt-=701;list.scrollLeft=100;a.el('stripNext').onclick();assert.equal(list.went,900,'with no scrollend the target expires by time');
+ a.S.stripStartedAt-=701;list.scrollLeft=4000;a.el('stripPrev').onclick();assert.equal(list.went,3200);
+ for(const name of ['scrollend','pointerdown','touchstart']){a.S.stripTarget=3000;list.listeners[name]();assert.equal(a.S.stripTarget,null,name);}
+ a.S.stripTarget=3000;list.listeners.wheel({deltaX:5,deltaY:0,preventDefault(){}});assert.equal(a.S.stripTarget,null,'a sideways swipe counts as well');
+});
+
+// ---------- render cost: past tiles built once, the strip patched, text and requests not repeated ----------
+const stripDOM=list=>{let items=[];const writes=[];Object.defineProperty(list,'innerHTML',{configurable:true,set(value){writes.push(value);items=value.split(/(?=<li )/);},get(){return items.join('');}});Object.defineProperty(list,'children',{configurable:true,get(){return items;}});Object.defineProperty(list,'lastElementChild',{configurable:true,get(){return {remove(){items.pop();}};}});list.insertAdjacentHTML=(_,html)=>{items.push(...html.split(/(?=<li )/));};return writes;};
+const pastGame=(id='P',counter={n:0})=>({id,date:'2026-09-13T17:00Z',detail:'Final',get name(){counter.n++;return 'IND at MIN';},teams:[{abbr:'IND',name:'Indianapolis Colts',score:'24'},{abbr:'MIN',name:'Minnesota Vikings',score:'17'}]});
+test('strip: past tiles are built once per set of weeks and lineup, and rendering again leaves them alone',()=>{
+ const a=app();ready(a);const built={n:0},weeks=[{week:1,games:[pastGame('P',built)]}];a.S.pastWeeks=weeks;a.S.weeks.current=2;
+ a.render();assert.equal(built.n,1);assert.match(a.el('games').innerHTML,/data-past-week="1"/);assert.match(a.el('games').innerHTML,/Week 2</);
+ for(let i=0;i<5;i++)a.render();assert.equal(built.n,1,'five more renders built nothing');
+ a.S.live.games=[...a.S.live.games];a.S.games=a.S.live.games;a.render();assert.equal(built.n,1,'a new poll is not a new season');
+ a.useRoster([{name:'Justin Jefferson',team:'MIN',position:'WR'}],{teamName:'Other',teamId:'2'});a.render();assert.equal(built.n,2,'a new lineup marks different tiles');assert.match(a.el('games').innerHTML,/Justin Jefferson/);
+ a.S.pastWeeks=[...weeks,{week:2,games:[pastGame('Q',built)]}];a.S.weeks.current=3;a.render();assert.equal(built.n,4,'a new week rebuilds the run');assert.match(a.el('games').innerHTML,/data-past-week="2"/);assert.match(a.el('games').innerHTML,/Week 3</);
+});
+test('strip: when only this week changes, the past tiles stay in the page and this week is replaced after them',()=>{
+ const a=app();ready(a);const writes=stripDOM(a.el('games'));a.S.pastWeeks=[{week:1,games:[pastGame()]}];a.S.weeks.current=2;
+ a.render();assert.equal(writes.length,1,'the first render writes the whole strip');const past=a.el('games').children.slice(0,3);
+ a.S.live.games=[{...game,score:[24,17]}];a.S.games=a.S.live.games;a.render();
+ assert.equal(writes.length,1,'the past tiles were not written again');assert.deepEqual(a.el('games').children.slice(0,3),past);assert.equal(a.el('games').children.length,4);assert.match(a.el('games').innerHTML,/>24</);
+ a.render();assert.equal(a.el('games').children.length,4,'nothing changed, nothing moved');
+ a.S.pastWeeks=[{week:1,games:[pastGame('Q')]}];a.render();assert.equal(writes.length,2,'a changed past is a full write');assert.equal(a.el('games').children.length,4);
+});
+test('render: text that did not change is not written again, so the browser has nothing to lay out',()=>{
+ const a=app();ready(a);const note=a.el('gamesNote');let value='',writes=0;Object.defineProperty(note,'textContent',{get(){return value;},set(next){writes++;value=String(next);}});
+ a.render();assert.equal(writes,1);a.render();a.render();assert.equal(writes,1);a.S.pinned='A';a.render();assert.equal(writes,2);assert.equal(value,'Your choice');
+});
+test('load: a saved league asks ESPN once, and the import fills the fantasy feed',async()=>{
+ const data={leagueId:'123',name:'Our league',teams:[{id:'1',name:'Team One',players:[player]}],scoring:{week:8,matchupWeeks:[8],teams:[{id:'1',players:[{...player,points:18}],points:18}],matchups:[]}};let leagues=0;
+ const a=app(async url=>{if(url==='/api/league'){leagues++;return Response.json(data);}return Response.json({events:[],clips:[]});},{scores:true});a.saved.leagueId='123';a.saved.teamId='1';
+ await a.init();await flush();await flush();a.render();await flush();a.render();
+ assert.equal(leagues,1);assert.equal(a.el('fantasyTotal').textContent,'18.00');
+});
+test('load: the strip learns the week from the live poll\'s own scoreboard, without waiting for the replay archive',async()=>{
+ const asked=[];const a=app(async url=>{asked.push(String(url));return Response.json(String(url).includes('scoreboard')?{events:[],season:{year:2026},week:{number:3}}:{clips:[]});});
+ await a.init();for(let i=0;i<8;i++)await flush();
+ assert.equal(a.S.weeks.current,3,'known before the archive is even asked for');assert.equal(asked.includes('/week7.json'),false);
+ assert.equal(asked.filter(u=>u.endsWith('/scoreboard')).length,1);assert.equal(asked.filter(u=>u.includes('dates=2026')).length,2,'and the earlier weeks still fill in');
+});
+test('Replay week: a week asks for its videos and its play-by-play together',async()=>{
+ const started=[];let release;const hold=new Promise(r=>{release=r;});
+ const a=app(async url=>{url=String(url);started.push(url);if(url==='/week7.json')return Response.json(archiveData);if(url.includes('seasontype=2&week=3')){await hold;return Response.json({events:[]});}if(url.endsWith('/scoreboard'))return Response.json({events:[],season:{year:2026},week:{number:2}});if(url.startsWith('/api/nfl-replays'))return Response.json({games:[]});return Response.json({events:[],clips:[]});});
+ await a.loadReplayArchive();for(let i=0;i<8;i++)await flush();
+ const opening=a.openPastReplay(3,'X');for(let i=0;i<8;i++)await flush();
+ assert.ok(started.some(u=>u.includes('seasontype=2&week=3')),'the play-by-play is on its way');assert.ok(started.includes('/api/nfl-replays?week=3'),'and the videos did not wait for it');
+ release();await opening;assert.equal(started.filter(u=>u==='/api/nfl-replays?week=3').length,1);
+});
+
+// ---------- review: a choice survives its pre-roll, a saved length its video, and a tab its week ----------
+// A game with none of the viewer's starters on the slate, as a past tile or a Watch tile opens it.
+const stranger=(t,options={})=>{const sim=okru(t,{length:8000,...options}),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a,{team:'NE'});a.saved.highlights=false;a.seekTo(midGame(g));return {sim,a,g};};
+test('NFL replay: a pre-roll suspends the choice of a game with none of your starters, and the game comes back when it ends',t=>{
+ const {sim,a,g}=stranger(t,{preroll:15}),at=a.S.at;a.selectGame(g.id);
+ run(a,sim,3000);assert.equal(a.S.ads.has(g.id),true);assert.equal(a.S.pinned,g.id,'the ad does not cancel the choice');assert.match(a.el('ovTitle').innerHTML,/Waiting for a game to return/);assert.ok(Math.abs(a.S.at-at)<2,'the clock holds its place, starter or not');
+ run(a,sim,25000);assert.equal(a.S.ads.size,0);assert.equal(a.S.pinned,g.id);assert.equal(a.S.program.id,g.id);assert.equal(a.pool.visible,g.id);assert.equal(sim.sims.length,1,'the finished player is the one on screen');assert.doesNotMatch(a.el('ovTitle').innerHTML,/None of your starters/);a.pool.destroy();
+});
+test('NFL replay: a past tile\'s game with none of your starters comes back after its breaks; a Watch tile still goes automatic',t=>{
+ const held=stranger(t);held.a.selectGame(held.g.id,{hold:true});let hidden=0;run(held.a,held.sim,700000,()=>{if(held.a.pool.visible!==held.g.id)hidden++;});
+ assert.ok(hidden>0,'a break hid it along the way');assert.equal(held.a.S.pinned,held.g.id);assert.equal(held.a.pool.visible,held.g.id);held.a.pool.destroy();
+ const watch=stranger(t);watch.a.selectGame(watch.g.id);run(watch.a,watch.sim,700000);assert.equal(watch.a.S.pinned,null,'a Watch tile is your choice until a break');watch.a.pool.destroy();
+});
+test('NFL replay: a past tile holds its choice through the lineup answer for that week',async()=>{
+ const league=deferred(),f=weekFetcher(),a=app(async(url,options)=>String(url)==='/api/league'?league.promise:f.fetcher(url,options),{media:true,stored:{leagueId:'123',teamId:'1',teamName:'Mine',lineupReady:true,roster:[{name:'Drake Maye',team:'NE',position:'QB'}]}});
+ a.storage.set('fantasy-stream-archive-2026-w8',week8());await a.loadReplayArchive();await settle();
+ const id=archiveData.games.find(g=>!g.teams.some(t=>['NE','BUF'].includes(t.abbreviation))).id;await a.openPastReplay(8,id);await settle();assert.equal(a.S.pinned,id);assert.equal(a.S.selection.hold,true);
+ league.resolve(Response.json({leagueId:'123',ownedTeamId:'1',teams:[{id:'1',name:'Mine',players:[{name:'Josh Allen',team:'BUF',position:'QB'}]}]}));await settle();
+ assert.equal(a.saved.roster[0].name,'Josh Allen');assert.equal(a.S.pinned,id,'the new lineup does not cancel the tile');a.pool.destroy();
+});
+test('NFL replay: pausing during a pre-roll leaves it to finish on resume, without a fresh ad',t=>{
+ const sim=okru(t,{length:8000,preroll:15}),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a);a.saved.highlights=false;a.seekTo(midGame(g));a.setPlaying(true);
+ run(a,sim,5000);assert.equal(a.S.ads.has(g.id),true);const s=sim.sims[0],left=s.ad;
+ a.setPlaying(false);run(a,sim,120000);assert.equal(s.ad,left,'paused, the ad waits');assert.equal(s.player.wantPlay,false);
+ a.setPlaying(true);assert.equal(s.player.wantPlay,true,'resumed by hand: nothing else plays a blocked, hidden slot');run(a,sim,1000);assert.ok(s.ad<left);
+ run(a,sim,20000);assert.equal(a.S.ads.size,0);assert.equal(a.pool.visible,g.id);assert.equal(sim.sims.length,1,'the paused time does not age the ad into a reload');a.pool.destroy();
+});
+test('NFL replay: the visibility auto-pause during a pre-roll resumes it too',t=>{
+ const sim=okru(t,{length:8000,preroll:15}),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a);a.saved.highlights=false;a.seekTo(midGame(g));a.setPlaying(true);run(a,sim,5000);
+ a.page.hidden=true;a.emitPage('visibilitychange');assert.equal(a.S.playing,false);run(a,sim,30000);a.page.hidden=false;a.emitPage('visibilitychange');assert.equal(a.S.playing,true);
+ run(a,sim,20000);assert.equal(a.pool.visible,g.id);assert.equal(sim.sims.length,1);a.pool.destroy();
+});
+test('NFL replay: a saved length counts only for the video it was measured on',()=>{
+ const a=app(),data={games:[{id:'1',embed:'https://ok.ru/videoembed/new',recordingDuration:0},{id:'2',embed:'https://ok.ru/videoembed/same',recordingDuration:0},{id:'3',embed:'https://ok.ru/videoembed/older',recordingDuration:0}]};
+ Object.assign(a.saved.replayDurations,{1:10000,2:8000,3:7000});Object.assign(a.saved.replayDurationEmbeds,{1:'https://ok.ru/videoembed/old',2:'https://ok.ru/videoembed/same'});a.applyReplayLinks(data);
+ assert.deepEqual(data.games.map(g=>g.recordingDuration),[0,8000,0],'a reposted video and a length saved with no video on record both find out again');
+});
+test('NFL replay: learning a length records its video, so a reload trusts it',t=>{
+ const sim=okru(t,{length:8000}),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a);a.syncFor(g);a.pool.open(g.id,{url:g.embed,type:'provider/ok'});a.pool.hold(g.id,a.target(g.id),{play:true});run(a,sim,1000);
+ assert.equal(a.saved.replayDurations[g.id],8000);assert.equal(a.saved.replayDurationEmbeds[g.id],g.embed);
+ assert.equal(JSON.parse(a.storage.get('fantasy-stream-v3')).replayDurationEmbeds[g.id],g.embed);const b=app(undefined,{stored:JSON.parse(a.storage.get('fantasy-stream-v3'))});assert.equal(b.saved.replayDurationEmbeds[g.id],g.embed);a.pool.destroy();
+});
+test('NFL replay: a wrong told length gives way to what the footage keeps reporting, through a pre-roll and without one',t=>{
+ const ad=okru(t,{length:8000,preroll:15}),a=app(undefined,{media:true,provider:ad.create}),g=uncalibrated(a);g.recordingDuration=10000;a.saved.highlights=false;a.seekTo(midGame(g));a.setPlaying(true);run(a,ad,40000);
+ assert.equal(ad.sims[0].source.duration,10000);assert.equal(a.S.ads.size,0,'footage of another length is not an ad forever');assert.equal(g.recordingDuration,8000);assert.equal(a.saved.replayDurations[g.id],8000);assert.equal(a.pool.visible,g.id);assert.equal(ad.sims.length,1);a.pool.destroy();
+ const plain=okru(t,{length:7000}),b=app(undefined,{media:true,provider:plain.create}),h=uncalibrated(b);h.recordingDuration=10000;b.saved.highlights=false;b.seekTo(midGame(h,.92));b.setPlaying(true);run(b,plain,10000);
+ assert.equal(h.recordingDuration,7000);assert.equal(b.pool.visible,h.id,'it lands inside the real file');assert.equal(b.S.cooldown.size,0);assert.equal(plain.sims.length,1);b.pool.destroy();
+});
+test('NFL replay: a calibrated game\'s sync is left alone when its player corrects a told length',t=>{
+ const sim=okru(t,{length:8000}),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a);a.S.archive.data.calibrated=true;g.recordingDuration=10000;a.saved.highlights=false;a.seekTo(midGame(g));a.setPlaying(true);run(a,sim,5000);
+ assert.equal(sim.sims[0].player.duration,8000);assert.equal(g.recordingDuration,10000);assert.equal(a.saved.replayDurations[g.id],undefined);a.pool.destroy();
+});
+test('NFL replay: a recording the provider removed goes to the tracker for good, with no reload loop',t=>{
+ const sim=okru(t,{length:8000}),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a);a.saved.highlights=false;a.seekTo(midGame(g));a.setPlaying(true);run(a,sim,5000);assert.equal(a.pool.visible,g.id);const at=a.S.at;
+ sim.sims[0].send({event:'error',code:101});assert.equal(a.picture(g.id),'data');assert.equal(a.S.cooldown.size,0);assert.match(a.el('toast').textContent,/removed.*game tracker/);
+ run(a,sim,120000);assert.equal(sim.sims.length,1,'never opened again');assert.equal(a.S.program.id,g.id);assert.equal(a.pool.slots.size,0);assert.ok(a.S.at>at+60,'the clock runs on the tracker');
+ for(const code of [102,103,150,151,152,153]){const other=okru(t,{length:8000}),b=app(undefined,{media:true,provider:other.create}),h=uncalibrated(b);b.saved.highlights=false;b.seekTo(midGame(h));b.setPlaying(true);run(b,other,5000);other.sims[0].send({event:'error',code});assert.equal(b.picture(h.id),'data',String(code));}
+});
+test('NFL replay: a game whose video is gone offers the replay-video shortcut, and the summary counts it out',t=>{
+ const sim=okru(t,{length:8000}),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a);a.saved.highlights=false;a.seekTo(midGame(g));a.setPlaying(true);run(a,sim,5000);assert.equal(a.el('streamSummary').textContent,'1 of '+a.S.archive.games.length+' games have a replay video');
+ sim.sims[0].send({event:'error',code:101});a.render();assert.equal(a.el('streamSummary').textContent,'0 of '+a.S.archive.games.length+' games have a replay video');assert.match(a.el('games').innerHTML,new RegExp('data-add-stream="'+g.id+'"'));
+});
+test('NFL replay: a recording still processing keeps its retry',t=>{
+ const sim=okru(t,{length:8000}),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a);a.saved.highlights=false;a.seekTo(midGame(g));a.setPlaying(true);run(a,sim,5000);
+ sim.sims[0].send({event:'error',code:100});assert.equal(a.picture(g.id),'video');assert.equal(a.S.cooldown.has(g.id),true);run(a,sim,65000);assert.equal(sim.sims.length,2,'tried again after the cooldown');a.pool.destroy();
+});
+test('NFL replay: an ended report before any length is known counts as a leftover, not the end of the recording',t=>{
+ const sim=okru(t,{length:8000}),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a);a.saved.highlights=false;a.seekTo(midGame(g));a.setPlaying(true);a.time.now+=100;a.frame(a.time.now);
+ const s=sim.sims[0];s.send({event:'inited'});s.inited=true;assert.equal(Number.isNaN(s.player.duration),true);assert.notEqual(s.player.target,null);
+ s.send({event:'ended'});assert.equal(a.S.recordingEnds.size,0);assert.equal(a.picture(g.id),'video');assert.equal(s.player.element.removed,undefined);a.pool.destroy();
+});
+// A latest-week build from ESPN: two final games, one of whose summaries the test can fail.
+const summaryOf=(id,away,home,awayName,homeName,hour)=>{const at=m=>`2026-11-01T${hour}:${String(m).padStart(2,'0')}:00Z`,one=(pid,seq,m)=>({id:pid,sequenceNumber:String(seq),wallclock:at(m),period:{number:1},clock:{displayValue:'14:55'},type:{text:'Rush'},start:{team:{id:'1'},down:1,distance:10,possessionText:away+' 25'},awayScore:0,homeScore:0,text:'A run for 5 yards.'});
+ return {header:{id,competitions:[{date:at(0),competitors:[{homeAway:'away',team:{id:'1',abbreviation:away,displayName:awayName}},{homeAway:'home',team:{id:'2',abbreviation:home,displayName:homeName}}]}]},drives:{previous:[{plays:[one('a',1,2),one('b',2,5),one('c',3,9)]}]},scoringPlays:[]};};
+function builtWeek({summaryFails=()=>false,replays=async()=>({games:[]})}={}){
+ const finals=[{id:'901',competitions:[{status:{type:{completed:true}}}]},{id:'902',competitions:[{status:{type:{completed:true}}}]}],calls=[];
+ const fetcher=async url=>{url=String(url);calls.push(url);
+  if(url==='/week7.json')return Response.json(archiveData);if(url==='/nfl-highlights.json')return Response.json({clips:[]});
+  if(url.startsWith('/api/nfl-replays'))return Response.json(await replays());
+  if(url.includes('scoreboard?dates='))return Response.json(url.includes('week=8')?{events:finals}:{events:[]});
+  if(url.includes('scoreboard'))return Response.json({season:{year:2026},week:{number:9},events:[]});
+  const id=/summary\?event=(\d+)/.exec(url)?.[1];if(id){if(summaryFails(id))return new Response('',{status:503});return Response.json(id==='901'?summaryOf('901','BUF','MIA','Buffalo Bills','Miami Dolphins','18'):summaryOf('902','SEA','SF','Seattle Seahawks','San Francisco 49ers','21'));}
+  return Response.json({events:[]});};
+ return {fetcher,calls,summaries:()=>calls.filter(u=>u.includes('summary?event=')).length,listings:()=>calls.filter(u=>u.startsWith('/api/nfl-replays')).length};
+}
+test('Replay week: a week short of a game is not cached, and the next visit builds it again',async()=>{
+ let down=true;const f=builtWeek({summaryFails:id=>down&&id==='902'}),a=app(f.fetcher,{media:true});await a.loadReplayArchive();await settle();await a.setMode('replay');await settle();
+ assert.equal(a.S.archiveKey,'w8');assert.equal(a.S.archive.games.length,1,'what answered is on the stage');assert.equal(a.storage.has('fantasy-stream-archive-2026-w8'),false,'but it is not kept');
+ down=false;await a.openPastReplay(8,'902');await settle();assert.equal(a.S.archive.games.length,2);assert.equal(a.S.pinned,'902');assert.equal(JSON.parse(a.storage.get('fantasy-stream-archive-2026-w8')).games.length,2,'the whole week is kept');assert.equal(a.S.archives.get('w8').partial,false);
+ const asked=f.summaries();await a.setMode('live');await a.setMode('replay');await settle();assert.equal(f.summaries(),asked,'and not asked for again');a.pool.destroy();
+});
+test('Replay week: a cached week short of a game the strip knows about is built again',async()=>{
+ const tile=id=>({id,name:'Game '+id,detail:'Final',teams:[{abbr:'AAA',name:'Away',score:1},{abbr:'BBB',name:'Home',score:2}]}),knownWeek=[{week:8,games:[tile('901'),tile('902')]}];
+ const f=builtWeek(),a=app(f.fetcher,{media:true});await a.loadReplayArchive();await settle();const whole=(await a.selectWeek(8),a.S.archives.get('w8'));assert.equal(whole.games.length,2);
+ const short={...JSON.parse(JSON.stringify(whole)),games:[JSON.parse(JSON.stringify(whole.games[0]))]},b=app(f.fetcher,{media:true});b.storage.set('fantasy-stream-archive-2026-w8',JSON.stringify(short));await b.loadReplayArchive();await settle();
+ b.S.pastWeeks=knownWeek;await b.setMode('replay');await settle();assert.equal(b.S.archive.games.length,2);assert.equal(JSON.parse(b.storage.get('fantasy-stream-archive-2026-w8')).games.length,2);
+ const c=app(f.fetcher,{media:true}),asked=f.summaries();c.storage.set('fantasy-stream-archive-2026-w8',JSON.stringify(whole));await c.loadReplayArchive();await settle();c.S.pastWeeks=knownWeek;await c.setMode('replay');await settle();assert.equal(f.summaries(),asked,'a whole copy is used as it is');
+});
+test('Replay week: a rebuild that fails falls back on the copy already here',async()=>{
+ let down=true;const f=builtWeek({summaryFails:id=>down&&id==='902'}),a=app(async url=>!down&&String(url).includes('scoreboard?dates=')?new Response('',{status:503}):f.fetcher(url),{media:true});await a.loadReplayArchive();await settle();await a.setMode('replay');await settle();assert.equal(a.S.archive.games.length,1);
+ down=false;await a.openPastReplay(8,'901');await settle();assert.equal(a.S.pinned,'901');assert.doesNotMatch(String(a.el('toast').textContent||''),/unavailable/);a.pool.destroy();
+});
+const listingFor=id=>{const g=archiveData.games.find(x=>x.id===id),slug=t=>t.name.toLowerCase().replace(/[^a-z0-9]+/g,'-');return {away:slug(g.teams[0]),home:slug(g.teams[1]),embed:'https://ok.ru/videoembed/777',page:'https://nfl-video.com/x'};};
+const week8Bare=()=>{const data=structuredClone(archiveData);data.week=8;data.title='Week 8';for(const g of data.games){delete g.embed;g.recordingDuration=0;g.anchors=[];}return JSON.stringify(data);};
+test('Replay week: a listing that failed is asked again on the way back, says so, and never asks twice within minutes',async()=>{
+ const id=archiveData.games[0].id;let answer={games:[],error:'The replay listing is unavailable right now.'};const f=weekFetcher({replays:async()=>answer}),a=app(f.fetcher,{media:true});a.storage.set('fantasy-stream-archive-2026-w8',week8Bare());await a.loadReplayArchive();await settle();
+ await a.setMode('replay');await settle();assert.equal(a.S.archiveKey,'w8');assert.equal(a.S.archive.game(id).embed,undefined);assert.match(a.el('toast').textContent,/replay videos for Week 8/);
+ const asked=()=>f.calls.filter(u=>u.startsWith('/api/nfl-replays')).length;assert.equal(asked(),1);
+ await a.setMode('live');await a.setMode('replay');await settle();assert.equal(asked(),1,'not again straight away');
+ a.S.weekVideos.get(8).at-=121000;answer={games:[]};await a.setMode('live');await a.setMode('replay');await settle();assert.equal(asked(),2,'a failure is asked again within minutes');
+ await a.setMode('live');await a.setMode('replay');await settle();assert.equal(asked(),2);
+ a.S.weekVideos.get(8).at-=121000;await a.setMode('live');await a.setMode('replay');await settle();assert.equal(asked(),2,'an answer with games still missing waits longer');
+ a.S.weekVideos.get(8).at-=180000;answer={games:[listingFor(id)]};a.el('weekSelect').onchange({target:{value:'w7'}});await settle();a.el('weekSelect').onchange({target:{value:'w8'}});await settle();
+ assert.equal(asked(),3,'choosing the week asks too');assert.equal(a.S.archiveKey,'w8');assert.equal(a.S.archive.game(id).embed,'https://ok.ru/videoembed/777');assert.equal(a.S.archives.get('w8').games.find(g=>g.id===id).embed,'https://ok.ru/videoembed/777');assert.equal(a.picture(id),'video','the game gets its video back');a.pool.destroy();
+});
+test('Replay week: a week with every video has nothing to ask again',async()=>{
+ const f=weekFetcher(),a=app(f.fetcher,{media:true});a.storage.set('fantasy-stream-archive-2026-w8',week8());await a.loadReplayArchive();await settle();await a.setMode('replay');await settle();assert.equal(a.S.archiveKey,'w8');
+ a.S.weekVideos.get(8).at=0;await a.setMode('live');await a.setMode('replay');await settle();assert.equal(f.calls.filter(u=>u.startsWith('/api/nfl-replays')).length,1);a.pool.destroy();
+});
+test('Replay week: a video removed for good is replaced when the listing has another',async()=>{
+ const id=archiveData.games[0].id,f=weekFetcher({replays:async()=>({games:[listingFor(id)]})}),a=app(f.fetcher,{media:true});const data=JSON.parse(week8Bare());data.games[0].embed='https://ok.ru/videoembed/111';a.storage.set('fantasy-stream-archive-2026-w8',JSON.stringify(data));await a.loadReplayArchive();await settle();await a.setMode('replay');await settle();
+ a.S.deadEmbeds.add('https://ok.ru/videoembed/111');assert.equal(a.picture(id),'data');a.S.weekVideos.get(8).at=0;a.el('weekSelect').onchange({target:{value:'w7'}});await settle();a.el('weekSelect').onchange({target:{value:'w8'}});await settle();
+ assert.equal(a.S.archive.game(id).embed,'https://ok.ru/videoembed/777');assert.equal(a.picture(id),'video');a.pool.destroy();
+});
+test('Replay week: changing week while playing keeps playing, and nothing says the video failed',async()=>{
+ const f=weekFetcher(),a=app(f.fetcher,{media:true});a.storage.set('fantasy-stream-archive-2026-w8',week8());await a.loadReplayArchive();await settle();await a.setMode('replay');a.el('ovButton').onclick();await settle();assert.equal(a.S.playing,true);
+ a.el('weekSelect').onchange({target:{value:'w8'}});await settle();a.render();assert.equal(a.S.archiveKey,'w8');assert.equal(a.S.playing,true);assert.equal(a.S.program.kind,'game','straight to the next picture, in the same breath');assert.equal(a.el('overlay').hidden,true);a.pool.destroy();
+});
+test('Replay week: paused on standby is a ready state with a Watch button, not a failure',async()=>{
+ const f=weekFetcher(),a=app(f.fetcher,{media:true});a.storage.set('fantasy-stream-archive-2026-w8',week8());await a.loadReplayArchive();await settle();await a.setMode('replay');a.useRoster(roster.SAMPLE,{teamName:'Replay'});a.el('ovButton').onclick();await settle();
+ a.setPlaying(false);a.el('weekSelect').onchange({target:{value:'w8'}});await settle();a.render();assert.equal(a.S.playing,false);assert.equal(a.S.program.kind,'standby');assert.ok(a.S.games.some(g=>g.state==='in'));
+ assert.equal(a.el('ovButton').textContent,'Watch');assert.notEqual(a.el('ovEyebrow').textContent,'VIDEO UNAVAILABLE');assert.equal(a.el('ovButton').dataset.action,'start');a.el('ovButton').onclick();assert.equal(a.S.playing,true);a.pool.destroy();
+});
+test('Replay week: a week that cannot load says so, whenever it is chosen',async()=>{
+ const f=weekFetcher(),a=app(async url=>{if(String(url).includes('scoreboard?dates='))return new Response('',{status:503});return f.fetcher(url);},{media:true});await a.loadReplayArchive();await settle();await a.setMode('replay');a.el('ovButton').onclick();await settle();
+ a.el('weekSelect').onchange({target:{value:'w3'}});await settle();assert.match(a.el('toast').textContent,/Week 3 isn’t available/);assert.equal(a.S.archiveKey,'w7');assert.equal(a.S.playing,true);a.pool.destroy();
+});
+test('Replay week: clicking Live while a past tile loads stays on Live',async()=>{
+ const held=deferred(),f=weekFetcher({replays:()=>held.promise}),a=app(f.fetcher,{media:true});a.storage.set('fantasy-stream-archive-2026-w8',week8());await a.loadReplayArchive();await settle();
+ const thursday=archiveData.games.find(g=>new archive.ReplayArchive(archiveData).sessions[0].gameIds.includes(g.id)).id,opening=a.openPastReplay(8,thursday);await settle();assert.equal(a.S.mode,'replay');
+ await a.setMode('live');held.resolve({games:[]});await opening;await settle();
+ assert.equal(a.S.mode,'live');assert.equal(a.S.started,false);assert.equal(a.S.playing,false);assert.equal(a.S.pinned,null);assert.equal(a.S.seekHold,false);assert.equal(a.S.archiveKey,'w7');assert.equal(a.S.weekChosen,false,'the week was never reached');a.pool.destroy();
+});
+test('Replay week: the later of two past tiles wins, whichever week loads last',async()=>{
+ const first=deferred(),f=weekFetcher({replays:()=>first.promise}),a=app(f.fetcher,{media:true});a.storage.set('fantasy-stream-archive-2026-w8',week8());await a.loadReplayArchive();await settle();
+ const days=new archive.ReplayArchive(archiveData).sessions,early=days[0].gameIds[0],late=days[1].gameIds[0],older=a.openPastReplay(8,early);await settle();
+ await a.openPastReplay(7,late);await settle();assert.equal(a.S.archiveKey,'w7');assert.equal(a.S.pinned,late);
+ first.resolve({games:[]});await older;await settle();assert.equal(a.S.archiveKey,'w7','the older load cannot take the stage');assert.equal(a.S.pinned,late);assert.equal(a.S.weekChosen,true);a.pool.destroy();
+});
+test('Replay week: a past tile that failed does not stop Replay landing on the latest week',async()=>{
+ let down=true;const f=weekFetcher(),a=app(async url=>{if(down&&String(url).includes('week=3'))return new Response('',{status:503});return f.fetcher(url);},{media:true});a.storage.set('fantasy-stream-archive-2026-w8',week8());await a.loadReplayArchive();await settle();
+ await a.openPastReplay(3,'nope');await settle();assert.equal(a.S.mode,'replay');assert.match(a.el('toast').textContent,/Week 3's replay is unavailable/);assert.equal(a.S.weekChosen,false);
+ await a.setMode('live');await a.setMode('replay');await settle();assert.equal(a.S.archiveKey,'w8');a.pool.destroy();
+});
+test('Replay week: a past tile refused because the archive is down leaves the choice open too',async()=>{
+ const a=app(async url=>String(url).includes('week7')?new Response('',{status:503}):Response.json({events:[]}),{media:true});await a.openPastReplay(3,'nope');await settle();assert.equal(a.S.mode,'live');assert.equal(a.S.weekChosen,false);
+});
+// An ESPN-connected viewer: the lineup answer depends on the week asked for.
+function connected(f,{slow=null}={}){
+ const asked=[],stored={leagueId:'123',teamId:'1',teamName:'Mine',lineupReady:true,roster:[{name:'Stale Week Seven',team:'CIN',position:'QB'}]};
+ const a=app(async(url,options)=>{if(String(url)!=='/api/league')return f.fetcher(url,options);const week=JSON.parse(options.body).week;asked.push(week);if(slow)await slow;return Response.json({leagueId:'123',ownedTeamId:'1',teams:[{id:'1',name:'Mine',players:[week===8?{name:'Jonathan Taylor',team:'IND',position:'RB'}:{name:'Joe Burrow',team:'CIN',position:'QB'}]}]});},{media:true,stored});
+ return {a,asked};
+}
+test('Replay week: landing on the latest week asks for that week\'s lineup, once',async()=>{
+ const f=weekFetcher(),{a,asked}=connected(f);a.storage.set('fantasy-stream-archive-2026-w8',week8());await a.loadReplayArchive();await settle();
+ await a.setMode('replay');await settle();assert.equal(a.S.archiveKey,'w8');assert.deepEqual(asked,[8],'Week 7 is never asked for on the way');assert.equal(a.saved.roster[0].name,'Jonathan Taylor');
+ const d=a.S.archive.sessions[a.S.day],first=team=>{for(let at=d.start;at<d.end;at+=30)if(director.rank(a.S.archive.sample(at,d.gameIds),[{name:'x',team,position:'RB'}],{includeDefense:false}).length)return at-20;return null;};
+ assert.equal(a.S.at,first('IND'),'and it opens where that lineup first plays');assert.notEqual(first('IND'),first('CIN'));a.pool.destroy();
+});
+test('Replay week: a landing that fails, or has nothing to do, still asks for the lineup of the week on stage',async()=>{
+ const f=weekFetcher(),down=app;const failing={fetcher:async url=>String(url).includes('scoreboard?dates=')?new Response('',{status:503}):f.fetcher(url)},{a,asked}=connected(failing);await a.loadReplayArchive();await settle();
+ await a.setMode('replay');await settle();assert.equal(a.S.archiveKey,'w7');assert.deepEqual(asked,[7]);assert.equal(a.saved.roster[0].name,'Joe Burrow');
+ const list=deferred(),g=weekFetcher({board:()=>list.promise}),b=connected(g);await b.a.loadReplayArchive();await b.a.setMode('replay');await flush();assert.equal(b.a.S.weeks.landing,-1);assert.deepEqual(b.asked,[]);
+ list.resolve({season:{year:2026},week:{number:7},events:[{competitions:[{status:{type:{completed:true}}}]}]});await settle();assert.equal(b.a.S.archiveKey,'w7');assert.deepEqual(b.asked,[7],'the latest week is the one on stage');
+});
+test('Replay week: Watch this week, during a landing, asks for this week\'s lineup at once',async()=>{
+ const held=deferred(),f=weekFetcher({replays:()=>held.promise}),{a,asked}=connected(f);a.storage.set('fantasy-stream-archive-2026-w8',week8());await a.loadReplayArchive();await settle();
+ await a.setMode('replay');await settle();assert.equal(a.S.weeks.landing,8);assert.deepEqual(asked,[]);a.el('ovButton').onclick();await settle();assert.deepEqual(asked,[7]);assert.equal(a.saved.roster[0].name,'Joe Burrow');
+ held.resolve({games:[]});await settle();assert.equal(a.S.archiveKey,'w7');assert.deepEqual(asked,[7]);a.pool.destroy();
+});
+test('Replay week: a past tile on the week already on stage, or one that fails, still asks for that week\'s lineup',async()=>{
+ const f=weekFetcher(),{a,asked}=connected(f);a.storage.set('fantasy-stream-archive-2026-w8',week8());await a.loadReplayArchive();await settle();
+ await a.openPastReplay(7,archiveData.games[0].id);await settle();assert.equal(a.S.archiveKey,'w7');assert.deepEqual(asked,[7]);a.pool.destroy();
+ const g=weekFetcher(),b=connected({fetcher:async url=>String(url).includes('week=3')?new Response('',{status:503}):g.fetcher(url)});await b.a.loadReplayArchive();await settle();
+ await b.a.openPastReplay(3,'nope');await settle();assert.equal(b.a.S.archiveKey,'w7');assert.deepEqual(b.asked,[7]);b.a.pool.destroy();
+});
+test('Replay week: a past tile mid-play goes straight to its game, with no other game opened on the way',async()=>{
+ const opened=[],f=weekFetcher(),a=app(f.fetcher,{media:true});a.storage.set('fantasy-stream-archive-2026-w8',week8());await a.loadReplayArchive();await settle();await a.setMode('replay');a.useRoster(roster.SAMPLE,{teamName:'Replay'});a.el('ovButton').onclick();await settle();assert.equal(a.S.playing,true);
+ const open=a.pool.open.bind(a.pool);a.pool.open=(key,source)=>{opened.push(key);return open(key,source);};const id=new archive.ReplayArchive(archiveData).sessions[0].gameIds[0];await a.openPastReplay(8,id);
+ assert.deepEqual([...new Set(opened)],[id]);assert.equal(a.S.pinned,id);assert.equal(a.S.playing,true);a.pool.destroy();
+});
+test('Replay week: choosing a week follows its lineup too',async()=>{
+ const f=weekFetcher(),{a,asked}=connected(f);a.storage.set('fantasy-stream-archive-2026-w8',week8());await a.loadReplayArchive();await settle();await a.setMode('replay');await settle();assert.deepEqual(asked,[8]);
+ a.el('weekSelect').onchange({target:{value:'w7'}});await settle();assert.deepEqual(asked,[8,7]);assert.equal(a.saved.roster[0].name,'Joe Burrow');a.pool.destroy();
+});
+test('Replay week: a tab left open across a week change moves the strip and the list on',async()=>{
+ let week=9;const asked=[],a=app(async url=>{url=String(url);asked.push(url);if(url==='/week7.json')return Response.json(archiveData);if(url==='/nfl-highlights.json')return Response.json({clips:[]});if(url.includes('scoreboard?dates='))return Response.json({events:[]});if(url.includes('scoreboard'))return Response.json({season:{year:2026},week:{number:week},events:[]});return Response.json({events:[]});});
+ await a.loadReplayArchive();await settle();assert.equal(a.S.weeks.current,9);assert.equal(a.S.weeks.latest,8);
+ week=10;await a.pollLive(a.S.live.generation);await settle();assert.equal(a.S.weeks.current,10);assert.equal(a.S.weeks.latest,9);assert.match(a.el('weekSelect').innerHTML,/Week 9 · latest/);assert.ok(asked.some(u=>u.includes('week=9')),'the finished week joins the strip');
+ const lists=asked.length;await a.pollLive(a.S.live.generation);await settle();assert.equal(asked.filter(u=>u.includes('dates=')).length,asked.slice(0,lists).filter(u=>u.includes('dates=')).length,'and a steady week asks for nothing more');
+});

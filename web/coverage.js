@@ -30,7 +30,8 @@ export class Coverage{
  }
  // Reconcile an authoritative score list before settling new plays. Cosmetic
  // scoreboard/PAT edits update the same item; changed replay matches are retired.
- reconcile(game,previous,roster){
+ // `playing` is the replay on air: a wording edit of the same play lets it finish.
+ reconcile(game,previous,roster,{playing=null}={}){
   const current=new Map((game.scores||[]).map(s=>[s.id,s])),invalid=new Set();
   const entries=new Map([...this.log,...this.queue].filter(e=>e.gameId===game.id).map(e=>[e.id,e]));
   for(const old of previous){
@@ -39,8 +40,8 @@ export class Coverage{
    if(!score||entry&&!credits.length||changed){
     invalid.add(old.id);
     // A yardage edit does not make a watched touchdown unseen.
-    if(entry&&credits.length&&same&&(entry.seen||entry.status==='replayed')){
-     Object.assign(entry,{score,credits,at:score.at,watchUrl:null});continue;
+    if(entry&&credits.length&&same&&(entry.seen||entry.status==='replayed'||old.id===playing)){
+     Object.assign(entry,{score,credits,at:score.at,watchUrl:old.id===playing?entry.watchUrl:null});continue;
     }
     this.judged.delete(old.id);this.drop(old.id);this.log=this.log.filter(e=>e.id!==old.id);
    }else if(entry)Object.assign(entry,{score,credits,at:score.at});

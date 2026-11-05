@@ -66,8 +66,8 @@ export class PlayerPool{
  }
  hide(){for(const s of this.slots.values()){s.player.element.classList.remove('on');s.player.element.setAttribute('aria-hidden','true');s.player.element.tabIndex=-1;s.player.muted=true;s.player.setVisible?.(false);}this.visible=null;}
  setMuted(value){this.muted=!!value;const slot=this.slots.get(this.visible);if(slot)slot.player.muted=this.muted;}
- // The viewer asked for sound on the visible player (inside their gesture): try the unmute again.
- retryAudio(){const p=this.current;if(!p||this.muted)return false;p.audioLocked=false;p.muted=false;return true;}
+ // The viewer asked for sound on the visible player (inside their gesture): try the unmute again, and start a video whose muted autoplay was refused too.
+ retryAudio(){const p=this.current;if(!p||this.muted)return false;p.audioLocked=false;p.muted=false;if(p.kind==='native'&&p.wantPlay&&p.element.paused)p.play();return true;}
  setRunning(value,{resumeVisible=true}={}){this.running=!!value;if(!value)for(const s of this.slots.values())s.player.pause();else if(this.visible&&resumeVisible)this.slots.get(this.visible)?.player.play();}
  // Release players nobody wants; never the visible one. Providers keep
  // playing muted meanwhile, since a paused provider restarts from its own
@@ -80,8 +80,10 @@ export class PlayerPool{
  destroy(){for(const key of [...this.slots.keys()])this.close(key);}
  get current(){return this.slots.get(this.visible)?.player||null;}
 }
+// Did the page's own host answer? The response is opaque and unread: it only tells a held load event from a dead host.
+const answers=url=>fetch(url,{method:'HEAD',mode:'no-cors',cache:'no-store',credentials:'omit',signal:AbortSignal.timeout(8000)});
 export function createPlayer(source){
  if(source.type==='provider/ok')return new ProviderPlayer(source.url,{duration:source.duration});
- if(source.type==='embed/page')return new EmbedPlayer(source.url,{autoReconnect:source.autoReconnect});
+ if(source.type==='embed/page')return new EmbedPlayer(source.url,{autoReconnect:source.autoReconnect,probe:answers});
  return new NativePlayer(source);
 }

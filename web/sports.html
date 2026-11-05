@@ -1,5 +1,6 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#090c12"><meta name="color-scheme" content="dark"><meta name="description" content="Your sports, your streams, your fantasy matchup. Watch NBA, NHL and MLB games in one viewing room."><title>Fantasy Stream · Live sports</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@600;700&family=Inter:wght@400;500;600;700;800&display=swap"><link rel="stylesheet" href="/style.css"></head><body class="sports" data-mode="live">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#090c12"><meta name="color-scheme" content="dark"><meta name="description" content="Your sports, your streams, your fantasy matchup. Watch NBA, NHL and MLB games in one viewing room."><title>Fantasy Stream · Live sports</title><link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="preconnect" href="https://site.api.espn.com"><link rel="preconnect" href="https://a.espncdn.com"><link rel="dns-prefetch" href="https://ok.ru"><link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@600;700&family=Inter:wght@400;500;600;700;800&display=swap" onload="this.onload=null;this.rel='stylesheet'"><noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@600;700&family=Inter:wght@400;500;600;700;800&display=swap"></noscript><link rel="stylesheet" href="/style.css">
+<link rel="modulepreload" href="/chat.js"><link rel="modulepreload" href="/director.js"><link rel="modulepreload" href="/embed-player.js"><link rel="modulepreload" href="/highlights.js"><link rel="modulepreload" href="/native-player.js"><link rel="modulepreload" href="/players.js"><link rel="modulepreload" href="/provider-player.js"><link rel="modulepreload" href="/roster.js"><link rel="modulepreload" href="/scoreboard.js"><link rel="modulepreload" href="/scoring.js"><link rel="modulepreload" href="/sports-data.js"><link rel="modulepreload" href="/stream-finder.js"><link rel="modulepreload" href="/stream-html.js"><link rel="modulepreload" href="/stream-loader.js"></head><body class="sports" data-mode="live">
 <a class="skip-link" href="#room">Skip to your channel</a>
 <header class="bar"><div class="bar-inner">
  <a href="/" class="brand" aria-label="Fantasy Stream home"><span class="brand-dot" aria-hidden="true"></span><span class="brand-name">Fantasy<b>Stream</b></span></a>
@@ -37,7 +38,7 @@
      <span class="eyebrow" id="ovEyebrow">YOUR VIEWING ROOM</span>
      <h2 id="ovTitle">Every game. Your way.</h2>
      <p id="ovText">Choose a game above. Connect ESPN to follow your fantasy players.</p>
-     <div class="overlay-actions"><button id="addFirstStream" class="primary big">Add a stream</button><button id="connectFirst" class="ghost big">Connect ESPN</button></div>
+     <div class="overlay-actions"><a id="ovOpen" class="primary big overlay-link" href="#" target="_blank" rel="noopener noreferrer" hidden>Watch replay ↗</a><button id="addFirstStream" class="primary big">Add a stream</button><button id="connectFirst" class="ghost big">Connect ESPN</button></div>
     </div></div>
     <button id="unmute" class="unmute" hidden>Tap for sound</button>
    </div>
@@ -103,20 +104,8 @@
   <div class="stream-group" id="savedStreams"></div>
   <details class="plain stream-help"><summary>A stream won’t play?</summary><p>Fantasy Stream doesn’t supply broadcasts; it plays links you can already watch. Direct video and .m3u8 links work best. If a site blocks playing here, use Open stream under the player or pick another source.</p></details>
  </section>
- <div class="dialog-actions"><button type="button" id="doneStreams" class="primary">Done</button></div>
+ <div class="dialog-actions"><p class="error" id="streamsError" role="alert"></p><button type="button" id="doneStreams" class="primary">Done</button></div>
 </div></dialog>
-
-<dialog id="streamDialog" aria-labelledby="streamTitle"><form id="streamForm">
- <div class="dialog-head"><div><h2 id="streamTitle">Stream for this game</h2></div><button type="button" id="closeStream" class="icon-button" aria-label="Close stream setup">✕</button></div>
- <section class="dialog-body">
-  <label>Game<select id="streamGame" required></select></label>
-  <div class="stream-source-options" id="streamSourceOptions"></div>
-  <label>Your link <span class="muted">optional, plays first</span><input id="streamURL" type="text" placeholder="Player URL, iframe code or .m3u8" autocomplete="off" spellcheck="false"></label>
-  <label>Backup link <span class="muted">optional</span><input id="backupURL" type="text" placeholder="Player URL, iframe code or .m3u8" autocomplete="off" spellcheck="false"></label>
-  <p id="streamError" class="error" role="alert"></p>
- </section>
- <div class="dialog-actions"><button type="submit" class="primary">Save</button></div>
-</form></dialog>
 
 <dialog class="team-dialog" id="leagueDialog" aria-labelledby="leagueTitle"><form id="leagueForm">
  <div class="dialog-head"><div><h2 id="leagueTitle">Fantasy team</h2><p class="dialog-sub" id="leagueSummary" role="status"></p></div><button type="button" id="closeLeague" class="icon-button" aria-label="Close fantasy team">✕</button></div>
