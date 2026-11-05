@@ -9,17 +9,17 @@
  <nav class="sport-nav" aria-label="Sport"><a href="/" aria-current="page">NFL</a><a href="/sports.html?sport=nba">NBA</a><a href="/sports.html?sport=nhl">NHL</a><a href="/sports.html?sport=mlb">MLB</a></nav>
  <div class="bar-actions">
   <a class="header-score" id="headerScore" href="#scoreboardTitle" hidden aria-label="Your matchup"></a>
-  <button id="gameTilesToggle" type="button" class="icon-button tiles-toggle" aria-label="Hide game tiles" title="Hide game tiles" aria-controls="gameTiles" aria-expanded="true"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="4.5" width="6" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="11.5" y="4.5" width="6" height="7" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/><path class="tiles-chevron" d="m7 16 3-3 3 3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
   <button id="streamsButton" class="ghost streams-button" aria-haspopup="dialog" aria-controls="streamsDetails"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="4" width="15" height="10" rx="2.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8.5 7.2v3.6L11.6 9z" fill="currentColor"/><path d="M6.5 16.5h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span class="label">Streams</span><span class="count" id="streamsCount"></span></button>
   <button id="lineupButton" class="primary" aria-controls="lineupDialog" aria-haspopup="dialog" aria-expanded="false">Fantasy team</button>
   <button id="settingsButton" class="icon-button" aria-label="Settings" title="Settings"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 6.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4Z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8.6 2.5h2.8l.5 2.1 1.6.9 2-.7 1.4 2.4-1.6 1.5v1.8l1.6 1.5-1.4 2.4-2-.7-1.6.9-.5 2.1H8.6l-.5-2.1-1.6-.9-2 .7-1.4-2.4 1.6-1.5V9.2L3.1 7.7l1.4-2.4 2 .7 1.6-.9z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
  </div>
 </div></header>
 
+<div class="game-guide">
 <section id="gameTiles" class="games-strip" aria-label="Game guide">
  <div class="strip-inner">
   <h2 id="gamesHead" class="sr-only" tabindex="-1">Games <span id="gamesNote"></span></h2>
-  <span class="sr-only" id="scoreboardUpdated">Connecting…</span><button type="button" class="strip-refresh" id="refreshScoreboard" title="Refresh scores and your matchup" aria-label="Refresh scores and your matchup"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.5 8A6 6 0 1 0 16 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M16 3.5V8h-4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+  <span class="sr-only" id="scoreboardUpdated">Connecting…</span>
   <div class="strip-scroller">
    <button class="strip-arrow prev" id="stripPrev" aria-label="Earlier games" tabindex="-1">‹</button>
    <ol class="games" id="games" aria-label="Choose a game"></ol>
@@ -28,6 +28,8 @@
   <p class="sr-only" id="scoreboardCaption"></p>
  </div>
 </section>
+<button id="gameTilesToggle" type="button" class="tiles-toggle" aria-label="Hide game tiles" title="Hide game tiles" aria-controls="gameTiles" aria-expanded="true"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 10 4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+</div>
 
 <main class="room" id="room" tabindex="-1">
  <p id="storageNotice" class="error notice" role="status" hidden>This browser couldn’t save your changes. They will last only until you close or reload this page.</p>
@@ -89,10 +91,13 @@
  </section>
 
  <aside class="rail" aria-label="Your matchup and highlights">
+  <div class="rail-head">
   <div class="rail-tabs" role="tablist" aria-label="Side panel">
    <button id="matchupTab" role="tab" aria-selected="true" aria-controls="matchupPanel">Matchup</button>
    <button id="scoresTab" role="tab" aria-selected="false" aria-controls="scoresPanel" tabindex="-1">Highlights <span class="count" id="scoreCount"></span></button>
    <button id="chatTab" hidden role="tab" aria-selected="false" aria-controls="chatPanel" tabindex="-1">Chat <span class="count chat-count" id="chatCount"></span></button>
+  </div>
+  <button type="button" class="matchup-refresh" id="refreshScoreboard" title="Refresh scores and your matchup" aria-label="Refresh scores and your matchup"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M15.5 8A6 6 0 1 0 16 11" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M16 3.5V8h-4.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
   </div>
   <section id="matchupPanel" class="rail-panel" role="tabpanel" aria-labelledby="matchupTab">
    <div class="score-center mu-fold" id="scoreboard">
