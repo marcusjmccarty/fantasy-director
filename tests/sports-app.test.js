@@ -507,6 +507,6 @@ test('hidden Chat is skipped by keyboard navigation on league pages',()=>{
 test('game tile visibility is restored across sports and toggles without restarting playback',async()=>{
  for(const sport of ['nba','nhl','mlb']){
   const a=app(async()=>Response.json(games(sport)),{sport,stored:{'fantasy-stream-hide-tiles':'true'}});assert.equal(a.el('gameTiles').hidden,true);assert.equal(a.el('gameTilesToggle')['aria-label'],'Show game tiles');
-  await ready(a);const before=a.pool.current;a.el('gameTilesToggle').onclick();assert.equal(a.el('gameTiles').hidden,false);assert.equal(a.pool.current,before);assert.equal(a.storage.get('fantasy-stream-hide-tiles'),'false');
+  await a.loadGames();a.saved.streams[a.S.games[0].key]={primary:'https://example.test/live.m3u8',backup:''};a.selectGame('1');const before=a.pool.current;assert.ok(before);a.el('gameTilesToggle').onclick();assert.equal(a.el('gameTiles').hidden,false);assert.equal(a.pool.current,before);assert.equal(a.storage.get('fantasy-stream-hide-tiles'),'false');
  }
 });
