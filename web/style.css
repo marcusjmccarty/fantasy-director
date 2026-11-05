@@ -66,10 +66,9 @@ input.switch{appearance:none;flex:none;width:40px;height:23px;min-height:0;paddi
 /* ---------- the game strip: every game as a tile you can watch ---------- */
 .games-strip{border-bottom:1px solid var(--line);background:linear-gradient(180deg,rgba(14,19,29,.7),rgba(10,13,20,.55))}
 .strip-inner{position:relative;max-width:1680px;margin:auto;padding:8px 24px;display:flex;align-items:stretch;gap:0}
-.game-guide{position:relative;min-height:18px;flex:none}
-.tiles-toggle{position:absolute;right:5px;bottom:2px;z-index:6;width:22px;min-width:22px;height:22px;min-height:0;padding:0;border:0;border-radius:5px;background:transparent;color:var(--muted)}.tiles-toggle svg{width:12px;height:12px}.tiles-toggle:hover{color:var(--gold);background:var(--panel-2)}
-.tiles-toggle[aria-expanded="false"]{bottom:0;height:18px}.tiles-toggle[aria-expanded="false"] svg{transform:rotate(180deg)}
-.matchup-refresh{flex:none;min-height:28px;width:28px;padding:0;border:0;background:transparent;color:var(--faint);border-radius:6px}.matchup-refresh svg{width:13px;height:13px}.matchup-refresh:hover{color:var(--text);background:var(--panel-2)}
+.game-guide{position:relative;padding-bottom:20px;flex:none}
+.tiles-toggle{position:absolute;right:5px;bottom:0;z-index:6;width:22px;min-width:22px;height:20px;min-height:0;padding:0;border:0;border-radius:5px;background:transparent;color:var(--muted)}.tiles-toggle svg{width:12px;height:12px}.tiles-toggle:hover{color:var(--gold);background:var(--panel-2)}
+.tiles-toggle[aria-expanded="false"] svg{transform:rotate(180deg)}
 .strip-day{position:absolute;left:24px;top:-1px;z-index:4;margin:0;padding:2px 9px;border-radius:0 0 8px 8px;background:var(--gold);color:var(--gold-ink);font-size:10.5px;font-weight:800;letter-spacing:.4px}.strip-day:empty{display:none}
 .week-label{flex:none;align-self:stretch;display:flex;align-items:center;justify-content:center;width:32px;margin-right:2px;border-radius:9px;background:rgba(255,255,255,.035);color:var(--faint);font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;writing-mode:vertical-rl;transform:rotate(180deg);list-style:none}
 .tile.past .team-logo{opacity:.75}.tile.past::before{opacity:.35}.tile.past:hover .team-logo{opacity:1}.tile.past .g-cta{color:var(--muted)}
@@ -179,7 +178,7 @@ body[data-mode=replay] :is(.stream-health,.embed-help){order:10;flex-basis:100%}
 /* ---------- the rail: matchup and highlights, as tall as the picture ---------- */
 /* Starters fill the first panel view. The bench follows inside the same scroll. */
 .rail{display:flex;flex-direction:column;align-self:stretch;height:0;min-height:100%;overflow:hidden;container-type:inline-size}
-#matchupPanel{display:flex;flex-direction:column}#matchupPanel .mu-fold{flex:none;min-height:100%}#matchupPanel:has(.score-center[data-connect=true]) .mu-fold{justify-content:center}
+#matchupPanel{display:flex;flex-direction:column}#matchupPanel .mu-fold{flex:none}#matchupPanel:has(.score-center[data-connect=true]) .mu-fold{justify-content:center}
 .rail-head{flex:none;display:flex;align-items:center;gap:4px;padding-right:6px;border-bottom:1px solid var(--line)}
 .rail-tabs{flex:1;min-width:0;display:flex;gap:4px;padding:3px 6px 0}
 .rail-tabs button{position:relative;flex:1;min-height:38px;border:0;border-radius:9px 9px 0 0;background:transparent;color:var(--muted);font-size:13.5px;font-weight:700;padding:0 10px}.rail-tabs button:hover{color:var(--text);background:var(--panel-2)}.rail-tabs button[aria-selected=true]{color:var(--text)}.rail-tabs button[aria-selected=true]::after{content:'';position:absolute;left:14px;right:14px;bottom:-1px;height:2px;border-radius:2px;background:var(--gold)}#scoresTab .count{background:#ffffff10;color:var(--muted)}
@@ -208,7 +207,7 @@ body[data-mode=replay] :is(.stream-health,.embed-help){order:10;flex-basis:100%}
 
 /* ---------- your matchup: a scorebug for two fantasy teams, then slot by slot ---------- */
 .score-center{display:flex;flex-direction:column;gap:6px}
-.h2h-fill{flex:1 1 auto;display:flex;flex-direction:column;min-height:0;min-width:0}.h2h-fill>.h2h{flex:1 1 auto;height:100%}
+.h2h-fill{flex:1 1 auto;display:flex;flex-direction:column;min-height:min-content;min-width:0}.h2h-fill>.h2h{flex:1 1 auto;height:100%}
 .h2h.bench{margin-top:0}.h2h.bench tr.bench td{height:40px}.h2h.bench .h2h-player b{font-weight:600;color:#cfd6e2}.h2h.bench td.h2h-pts{color:var(--faint)}.h2h.bench .h2h-slot span{background:transparent;color:var(--faint)}
 .h2h tr.h2h-divider td{height:22px;padding:4px 5px 2px;border-bottom:1px solid var(--line)}.h2h tr.h2h-divider span{font-size:9.5px;font-weight:850;letter-spacing:1px;text-transform:uppercase;color:var(--faint)}
 .score-center[data-empty=true]+.bench,.score-center[data-connect=true]+.bench{display:none}
@@ -386,7 +385,7 @@ dialog{border-radius:20px;border-color:rgba(255,255,255,.09);box-shadow:0 50px 1
 @media(max-width:960px){input:not([type=range],[type=checkbox]),select,textarea{font-size:16px!important}}
 /* Keep the icons small, with a larger touch target on phones. */
 @media(pointer:coarse){
- .tiles-toggle{width:30px;height:30px}.game-guide:has(#gameTiles[hidden]){min-height:30px}.tiles-toggle[aria-expanded="false"]{height:30px}.matchup-refresh{width:36px;min-height:36px}
+ .tiles-toggle{width:30px;height:30px}.game-guide{padding-bottom:30px}
  .g-stream{min-height:32px;margin-top:2px}.seg button,.stream-source-options .seg button{min-height:40px}.chat-quick button{min-height:40px;padding:2px 12px}.modes button,.modes a{min-height:40px}.channel-actions button{min-height:40px}
 }
 
@@ -408,6 +407,24 @@ dialog{border-radius:20px;border-color:rgba(255,255,255,.09);box-shadow:0 50px 1
  .stage:not(:fullscreen,:-webkit-full-screen,.theater) .screen{flex:1;min-height:0;aspect-ratio:auto}
  .player-frame>:not(.screen){flex-shrink:0}
  .rail{height:100%;min-height:0}.rail-tabs button{min-height:34px}
+ /* Flex rows fill the starter area in Safari as well as Chromium. */
+ #matchupPanel .mu-fold{height:100%;min-height:min-content}
+ #matchupPanel .mu-fold>:not(.h2h-fill){flex-shrink:0}
+ #matchupPanel>.bench{flex:none}
+ .h2h-fill>.h2h{display:flex;flex-direction:column;height:auto;min-height:min-content}
+ .h2h-fill>.h2h>colgroup{display:none}
+ .h2h-fill>.h2h>thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+ .h2h-fill>.h2h>tbody{display:flex;flex-direction:column;flex:1;min-height:min-content}
+ .h2h-fill>.h2h>tbody>tr{display:grid;grid-template-columns:minmax(0,1fr) 49px 40px 49px minmax(0,1fr);flex:1;min-height:40px}
+ .h2h-fill>.h2h>tbody>tr>td{display:flex;align-items:center;min-width:0;width:auto;height:auto}
+ .h2h-fill .h2h-pts.mine,.h2h-fill .h2h-name.theirs{justify-content:flex-end}
+ .h2h-fill .h2h-slot{justify-content:center}
+ .h2h-fill>.h2h.solo>tbody>tr{grid-template-columns:minmax(0,1fr) 58px 40px}
+ .h2h-fill>.h2h.nopoints>tbody>tr{grid-template-columns:minmax(0,1fr) 0 40px 0 minmax(0,1fr)}
+ .h2h-fill>.h2h.solo.nopoints>tbody>tr{grid-template-columns:minmax(0,1fr) 0 40px}
+ .h2h-fill>.h2h.solo>tbody>tr>.theirs{display:none}
+ /* With the guide hidden, use the panel for starters and bench together. */
+ body:has(#gameTiles[hidden]) #matchupPanel .mu-fold{height:auto;flex:1 0 auto}
  .now-watching{padding:6px 12px;gap:4px 12px}.transport{padding:8px 10px}.direction-controls{padding:6px 12px;gap:6px 10px}
  .overlay{padding:18px}.overlay h2{font-size:clamp(24px,2.5vw,36px)}.overlay p{margin-bottom:16px}.screen-emblem{margin-bottom:10px}
 }
