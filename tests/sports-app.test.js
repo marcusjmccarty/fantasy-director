@@ -17,7 +17,7 @@ function app(fetcher,{sport='nba',stored={}}={}){const elements=new Map([...html
  elements.get('games').addEventListener=function(name,fn){(this.listeners??={})[name]=fn;};
  const document={getElementById:id=>{assert.ok(elements.has(id),id);return elements.get(id);},querySelector:()=>stage,addEventListener:(n,fn)=>events.set(n,fn),visibilityState:'visible'};
  const ctx={StreamFinder,refusesFrame,stripEnds,stripTabStop,stripKeys,forgetESPN,...data,esc:data.escapeHTML,safeVideo,streamType,teamColor,teamLogo,headToHead,benchRows,matchupColumns,nearStart,mountChat,chatRoomFor,normalizeHighlights,mergeHighlights,highlightView,playable,PlayerPool:Pool,document,location:{search:'?sport='+sport},URLSearchParams,AbortController,AbortSignal,Response,Date,console,fetch:fetcher,window:{addEventListener(){}},navigator:{onLine:true},localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},setTimeout:(fn,ms)=>{timers.set(++timer,{fn,ms});return timer;},clearTimeout:id=>timers.delete(id)};
- vm.createContext(ctx);vm.runInContext(source+'\nglobalThis.app={S,pool,streamFinder,refreshStreamLinks,loadGames,loadLeague,renderGuide,renderFantasy,renderTransport,selectGame,setPlaying,direct,changeDate,rotateSource,tick,saveStreamLink,openStream,selectReplay,setMode,playClip,leaveClip,get saved(){return saved;}};',ctx);return {...ctx.app,el:id=>elements.get(id),stage,document,events,storage,timers};}
+ vm.createContext(ctx);vm.runInContext(source+'\nglobalThis.app={S,pool,streamFinder,refreshStreamLinks,loadGames,loadLeague,renderGuide,renderFantasy,renderTransport,selectGame,setPlaying,direct,changeDate,rotateSource,tick,saveStreamLink,openStream,selectReplay,setMode,playClip,leaveClip,get saved(){return saved;}};',ctx);return {...ctx.app,window:ctx.window,el:id=>elements.get(id),stage,document,events,storage,timers};}
 const event=(id='1')=>({id,date:'2026-11-01T22:00Z',shortName:'ATL @ BOS',competitions:[{status:{type:{state:'in',name:'STATUS_IN_PROGRESS',shortDetail:'3rd 2:00'}},competitors:[{homeAway:'away',team:{id:'1',abbreviation:'ATL',displayName:'Atlanta'},score:'80'},{homeAway:'home',team:{id:'2',abbreviation:'BOS',displayName:'Boston'},score:'81'}]}]});
 const games=(sport='nba',date=data.localDate())=>({sport,date,season:2027,events:[event()]});
 const league=(id='123')=>({leagueId:id,sport:'nba',season:2027,name:'League',isPoints:true,scoringType:'H2H_POINTS',scoringPeriod:13,ownedTeamId:'1',teams:[{id:'1',name:'My team',players:[{id:'1',name:'Starter one',team:'ATL',teamId:'1',active:true,points:10}]},{id:'2',name:'Other team',players:[{id:'2',name:'Starter two',team:'BOS',teamId:'2',active:true,points:20}]}],matchups:[{id:'2',home:{teamId:'1',points:50},away:{teamId:'2',points:60}}]});
@@ -489,4 +489,17 @@ test('a tile focused when the strip is rebuilt gets its focus back, across the s
 test('replay controls show only what works: no reload on a player that has none, and no channel chip while a replay is up',async()=>{
  const a=replayApp([{url:'https://ok.ru/videoembed/1',provider:'OK',type:'provider/ok'}]);a.setMode('replay');await settle();await a.selectReplay('g');a.pool.current.reload=undefined;a.renderTransport();assert.equal(a.el('reloadStream').hidden,true);assert.equal(a.el('autoChip').hidden,true);
  a.setMode('live');assert.equal(a.el('autoChip').hidden,false);
+});
+
+test('touch replay users get the external-player link immediately on every other league',async()=>{
+ const a=replayApp([{url:'https://ok.ru/videoembed/1',provider:'OK',type:'provider/ok'}]);
+ a.window.matchMedia=()=>({matches:true});a.setMode('replay');await settle();await a.selectReplay('g');
+ const p=a.pool.current;p.kind='provider';p.played=false;p.advances=0;a.S.replay.started=false;a.S.replay.waited=0;
+ a.renderTransport();assert.equal(a.el('frameHelp').hidden,false);assert.equal(a.el('frameOpen').href,'https://ok.ru/videoembed/1');
+});
+test('hidden Chat is skipped by keyboard navigation on league pages',()=>{
+ const a=app(async()=>Response.json(games()));a.el('chatTab').hidden=true;
+ a.el('highlightsTab').onkeydown({key:'ArrowRight',preventDefault(){}});
+ assert.equal(a.el('matchupPanel').hidden,false);assert.equal(a.el('chatPanel').hidden,true);
+ a.el('chatTab').onclick();assert.equal(a.el('chatPanel').hidden,true);
 });

@@ -9,7 +9,7 @@ export function matchStream(game,entries,sport){
 }
 const providerPage=url=>['ntv.st','streamcorner.st'].includes(new URL(url).hostname);
 // NTV answers a sandboxed frame with its own error page, so its games open on its own site in a new tab; our frames stay sandboxed.
-export function refusesFrame(url){try{return /(?:^|\.)ntv\.st$/i.test(new URL(url).hostname);}catch{return false;}}
+export function refusesFrame(url){try{return /(?:^|\.)ntv\.st$/i.test(new URL(url).hostname.replace(/\.$/,''));}catch{return false;}}
 export function needsPlayerResolution(url){try{const u=new URL(url);return !refusesFrame(url)&&streamType(url)==='embed/page'&&!/\/(?:embed|player|videoembed)(?:[/.]|$)/i.test(u.pathname);}catch{return false;}}
 export class StreamFinder{
  constructor({fetcher=fetch,now=()=>Date.now()}={}){this.fetcher=fetcher;this.now=now;this.matches=new Map();this.resolved=new Map();this.catalogs=new Map();this.generation=0;this.status='';this.enabled=true;this.pending=false;this.resolving=new Map();}

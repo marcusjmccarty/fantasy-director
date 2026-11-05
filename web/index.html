@@ -91,7 +91,7 @@
   <div class="rail-tabs" role="tablist" aria-label="Side panel">
    <button id="matchupTab" role="tab" aria-selected="true" aria-controls="matchupPanel">Matchup</button>
    <button id="scoresTab" role="tab" aria-selected="false" aria-controls="scoresPanel" tabindex="-1">Highlights <span class="count" id="scoreCount"></span></button>
-   <button id="chatTab" role="tab" aria-selected="false" aria-controls="chatPanel" tabindex="-1">Chat <span class="count chat-count" id="chatCount"></span></button>
+   <button id="chatTab" hidden role="tab" aria-selected="false" aria-controls="chatPanel" tabindex="-1">Chat <span class="count chat-count" id="chatCount"></span></button>
   </div>
   <section id="matchupPanel" class="rail-panel" role="tabpanel" aria-labelledby="matchupTab">
    <div class="score-center mu-fold" id="scoreboard">
@@ -114,7 +114,7 @@
   </section>
   <section id="scoresPanel" class="rail-panel" role="tabpanel" aria-labelledby="scoresTab" hidden><h2 id="scoresHead" class="sr-only" tabindex="-1">Scores and highlights</h2><p class="panel-note" id="scoresNote"></p><ul class="scores" id="scores" aria-label="Scores by your starters"></ul></section>
   <section id="chatPanel" class="rail-panel chat-panel" role="tabpanel" aria-labelledby="chatTab" hidden>
-   <div class="chat-head"><div class="chat-room"><b id="chatRoomName">Chat</b><small id="chatPresence"></small><small class="chat-note" id="chatNote" hidden>Open room: anyone with this league ID can read and post. Names aren’t verified.</small></div><button type="button" id="chatNameButton" class="link">Set your name</button></div>
+   <div class="chat-head"><div class="chat-room"><b id="chatRoomName">Chat</b><small id="chatPresence"></small><small class="chat-note" id="chatNote" hidden>Open room: anyone with this league ID can read and post. Names aren’t verified. Messages expire after 24 hours.</small></div><button type="button" id="chatNameButton" class="link">Set your name</button></div>
    <ol class="chat-log" id="chatLog" aria-live="polite" aria-relevant="additions"></ol>
    <p class="chat-state" id="chatState" role="status" hidden></p>
    <form class="chat-form" id="chatForm">
@@ -122,6 +122,12 @@
     <div class="chat-quick" id="chatQuick"><button type="button" data-say="🔥">🔥</button><button type="button" data-say="😤">😤</button><button type="button" data-say="😂">😂</button><button type="button" data-say="🙏">🙏</button><button type="button" data-say="Let’s go!">Let’s go!</button></div>
     <div class="chat-row"><label for="chatInput" class="sr-only">Message</label><input id="chatInput" maxlength="400" placeholder="Say something to the room…" autocomplete="off"><button type="submit" id="chatSend" class="primary">Send</button></div>
    </form>
+   <details class="chat-moderation">
+    <summary>Moderate</summary>
+    <p>Site owner only. Unlock to remove messages for everyone.</p>
+    <div class="chat-row"><label for="chatModeratorKey" class="sr-only">Moderator key</label><input id="chatModeratorKey" type="password" maxlength="256" autocomplete="off" placeholder="Moderator key"><button id="chatModeratorUnlock" type="button">Unlock</button><button id="chatModeratorLock" type="button" hidden>Lock</button><button id="chatClear" type="button" hidden>Clear room</button></div>
+    <div id="chatClearConfirm" hidden><p>Remove every message in this room?</p><button id="chatClearYes" type="button">Clear messages</button> <button id="chatClearCancel" type="button">Cancel</button></div>
+   </details>
   </section>
  </aside>
 </main>
@@ -133,7 +139,7 @@
   <section class="stream-group mine"><h3 id="streamGroupTitle">Your games</h3><div id="streamInputs"></div></section>
   <section id="backupStreams" class="stream-group others"><h3 id="allStreamsTitle">Other games</h3><div id="backupInputs"></div></section>
   <p id="streamsModeNote" class="muted small"></p>
-  <details class="plain stream-help"><summary>A stream won’t play?</summary><p id="streamsHelp"></p><p>Fantasy Stream doesn’t supply broadcasts; it plays links you can already watch. If a site blocks playing here, use Open stream under the video or pick another source.</p></details>
+  <details class="plain stream-help"><summary>A stream won’t play?</summary><p id="streamsHelp"></p><p>Fantasy Stream finds third-party video links; it doesn’t host video and isn’t affiliated with ESPN or any sports league. Availability, permission to watch, and playback depend on the provider. NTV opens in a new tab; scores and the game tracker stay here. Automatic video switching works with playable replays and direct video links, not a separate tab.</p><p>Third-party sites may show ads. Don’t install anything they ask for, and close the tab if it looks wrong. Connecting a private ESPN league needs a computer.</p></details>
  </section>
  <div class="dialog-actions"><p class="error" id="streamsError" role="alert"></p><span class="dialog-status" id="streamsStatus" role="status"></span><button type="button" id="saveStreams" class="primary">Done</button></div>
 </div></dialog>

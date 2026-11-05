@@ -124,7 +124,7 @@ test('a provider outage does not discard a working independent catalog',async()=
  const data=await response.json();assert.equal(response.status,200);assert.equal(data.entries[0].provider,'StreamCorner');assert.equal(data.providers[0].available,false);
 });
 test('NTV opens in a new tab: every spelling of its links is caught, none costs a lookup, and other hosts are left alone',async()=>{
- for(const url of [page,embed,'https://www.ntv.st/embed?t=x'])assert.equal(refusesFrame(url),true,url);
+ for(const url of [page,embed,'https://www.ntv.st/embed?t=x','https://NTV.ST./embed?t=x'])assert.equal(refusesFrame(url),true,url);
  for(const url of ['https://notntv.st/embed','https://streamcorner.st/watch/a','https://ntv.st.example/embed','not a url',''])assert.equal(refusesFrame(url),false,url);
  let lookups=0;const f=new StreamFinder({fetcher:async url=>{if(url.includes('/resolve?'))lookups++;return Response.json({sport:'nfl',entries:[entry]});}});
  await f.refresh([game],'nfl');assert.equal(lookups,0);assert.deepEqual(f.urls(game),entry.sources);assert.equal(f.original(page),page);

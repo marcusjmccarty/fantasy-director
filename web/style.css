@@ -386,3 +386,6 @@ dialog{border-radius:20px;border-color:rgba(255,255,255,.09);box-shadow:0 50px 1
  .strip-refresh{position:static;align-self:flex-end;width:36px;min-width:36px;height:36px;opacity:1;color:var(--muted)}.strip-refresh svg{width:16px;height:16px}
  .g-stream{min-height:32px;margin-top:2px}.seg button,.stream-source-options .seg button{min-height:40px}.chat-quick button{min-height:40px;padding:2px 12px}.modes button,.modes a{min-height:40px}.channel-actions button{min-height:40px}
 }
+
+/* Moderator controls stay compact; keys are never saved by the app. */
+.chat-moderation{flex:none;padding:8px 12px;border-top:1px solid var(--line);font-size:12px}.chat-moderation p{margin:7px 0;color:var(--muted)}.chat-moderation summary{cursor:pointer;color:var(--muted)}.chat-remove{grid-column:1/-1;justify-self:end;font-size:11px;min-height:28px;padding:2px 6px}.chat-event .chat-remove{flex:none}

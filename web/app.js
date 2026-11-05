@@ -699,8 +699,8 @@ function renderScreen(){
  const starting=!overlay&&!switching&&S.playing&&p.kind==='game'&&pool.visible===p.id&&pool.current?.kind==='provider'&&!(pool.current.advances>0);
  $('switching').hidden=!switching&&!starting;
  if(switching)setText('switching',`Up next · ${pend.name}`);else if(starting)setText('switching',S.unmuteHint?'Loading the replay video · if it waits, press play inside it':'Loading the replay video…');
- // Twenty seconds in with no footage, the page offers a way out without covering the video a tap could still start.
- const openedAt=starting?pool.get(p.id)?.openedAt:null,stuck=starting&&pool.current.played===false&&pool.now()-openedAt>LOAD_LIMIT;
+ // Touch devices get the outside link immediately; desktop gets it after twenty seconds without footage.
+ const openedAt=starting?pool.get(p.id)?.openedAt:null,stuck=starting&&pool.current.played===false&&(touch()||pool.now()-openedAt>LOAD_LIMIT);
  $('frameHelp').hidden=!stuck;if(stuck)$('frameOpen').href=archiveGame(p.id)?.embed||'#';
  // a website player stays up through the break, dimmed, with a word on why
  const dimmed=!overlay&&S.dimmed&&pool.visible===S.dimmed.id&&p.kind==='game'&&p.id===S.dimmed.id;
@@ -759,10 +759,11 @@ function streamChip(g){
 }
 const RAIL=[['matchup','matchupTab','matchupPanel'],['scores','scoresTab','scoresPanel'],['chat','chatTab','chatPanel']];
 function showPanel(tab){
+ if(tab==='chat'&&$('chatTab').hidden)tab='matchup';
  for(const [name,tabId,panelId] of RAIL){const on=name===tab;$(tabId).setAttribute('aria-selected',String(on));$(tabId).tabIndex=on?0:-1;$(panelId).hidden=!on;}
  if(tab==='chat')S.chat?.markRead();
 }
-for(const [name,tabId] of RAIL){$(tabId).onclick=()=>showPanel(name);$(tabId).onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const i=RAIL.findIndex(r=>r[1]===tabId),next=e.key==='Home'?0:e.key==='End'?RAIL.length-1:(i+(e.key==='ArrowRight'?1:-1)+RAIL.length)%RAIL.length;showPanel(RAIL[next][0]);$(RAIL[next][1]).focus?.();};}
+for(const [name,tabId] of RAIL){$(tabId).onclick=()=>showPanel(name);$(tabId).onkeydown=e=>{if(!['ArrowLeft','ArrowRight','Home','End'].includes(e.key))return;e.preventDefault();const visible=RAIL.filter(r=>!$(r[1]).hidden),i=visible.findIndex(r=>r[1]===tabId),next=e.key==='Home'?0:e.key==='End'?visible.length-1:(i+(e.key==='ArrowRight'?1:-1)+visible.length)%visible.length;showPanel(visible[next][0]);$(visible[next][1]).focus?.();};}
 // The strip scrolls sideways: arrows, and the mouse wheel over it.
 // Quick clicks chain from the last target while its scroll is moving. The target expires by time, since not every browser has scrollend.
 const stripStep=dir=>{const list=$('games');if(!list.scrollTo)return;const max=Math.max(0,list.scrollWidth-list.clientWidth),moving=S.stripTarget!==null&&Date.now()-S.stripStartedAt<700&&Math.abs(S.stripTarget-list.scrollLeft)>8,from=moving?Math.min(max,S.stripTarget):list.scrollLeft;S.stripStartedAt=Date.now();S.stripTarget=Math.max(0,Math.min(max,from+dir*Math.max(240,(list.clientWidth||800)*.8)));list.scrollTo({left:S.stripTarget,behavior:'smooth'});};
@@ -1194,8 +1195,8 @@ $('refreshScoreboard').onclick=()=>{fantasyFeed.next=0;renderScoreboard();if(S.m
 $('connectFromBoard').onclick=()=>openESPNConnection();
 $('retryFantasy').onclick=()=>{if(fantasyFeed.needsConnection||!saved.leagueId){openESPNConnection();return;}fantasyFeed.next=0;renderScoreboard();};
 $('lineupForm').onsubmit=e=>{e.preventDefault();$('saveRoster').click();};
-// The room follows the connected league; before one is connected, the sport's public lounge.
-function chatRoom(){if(!S.chat)return;const league=saved.leagueId?saved.league:null;S.chat.setRoom(chatRoomFor('nfl',saved.leagueId),saved.leagueId?`${league?.name||'Your league'} room`:'NFL lounge');}
+// No public lounge: a connected league selects the open room.
+function chatRoom(){if(!S.chat)return;const room=chatRoomFor('nfl',saved.leagueId);if(!room&&!$('chatPanel').hidden)showPanel('matchup');S.chat.setRoom(room,room?`${saved.league?.name||'Your league'} room`:'');}
 // ---------- replay weeks: the calibrated Week 7 and the latest completed week from ESPN ----------
 function applyReplayLinks(data){for(const g of data.games){if(g.id in saved.replayLinks)g.embed=saved.replayLinks[g.id];if(saved.replayDurations[g.id]&&saved.replayDurationEmbeds[g.id]===g.embed){g.recordingDuration=saved.replayDurations[g.id];g.durationGuessed=false;}}}
 // Every completed week of the season is a replay. Week 7 ships calibrated; the
