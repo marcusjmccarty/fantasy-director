@@ -548,6 +548,27 @@ test('LiveFeed.view: a fresh score stays on screen for CELEBRATION seconds (no o
  // The extra point at 15 did not restart the celebration.
  assert.equal(f.view(5+CELEBRATION+5,0)[0].phase,'break');
 });
+test('LiveFeed: an overturned score ends its celebration only when the delayed picture reaches the correction',()=>{
+ const f=new LiveFeed();
+ f.push([liveGame('g',{score:[7,3],lastPlayId:'before'})],0);
+ f.push([liveGame('g',{score:[13,3],lastPlayId:'td'})],5);
+ f.push([liveGame('g',{score:[7,3],lastPlayId:'td',down:3,possession:0})],10);
+ assert.equal(f.view(10,0)[0].celebrating,undefined,'the overturned touchdown no longer hides the real possession');
+ assert.equal(f.view(10,0)[0].possession,0);
+ assert.equal(f.view(10,5)[0].celebrating,true,'the delayed view still sees the original score until the correction');
+ assert.equal(f.view(15,5)[0].celebrating,undefined);
+ f.push([liveGame('g',{score:[9,3],lastPlayId:'safety'})],15);
+ assert.equal(f.view(15,0)[0].celebrating,true,'a new score cannot be treated as the cancelled touchdown’s try');
+});
+test('LiveFeed: missing scores and a corrected extra point do not erase a valid touchdown celebration',()=>{
+ for(const [score,scoreKnown] of [[[0,0],false],[[13,3],true]]){
+  const f=new LiveFeed();f.push([liveGame('g',{score:[7,3]})],0);
+  f.push([liveGame('g',{score:[13,3],lastPlayId:'td'})],5);
+  f.push([liveGame('g',{score:[14,3],lastPlayId:'pat'})],8);
+  f.push([liveGame('g',{score,scoreKnown,lastPlayId:'pat'})],10);
+  assert.equal(f.view(10,0)[0].celebrating,true);
+ }
+});
 test('LiveFeed.view: a possession missing for less than STOPPAGE_GRACE keeps the last known situation instead of calling a stoppage',()=>{
  const f=new LiveFeed();
  f.push([liveGame('g',{lastPlayId:'p1',possession:1,down:2,distance:7,yardsToGoal:33,downDistance:'2nd & 7'})],0);
