@@ -89,6 +89,14 @@ test('release: incomplete scoreboard responses cannot reopen a scoring commercia
  push([7,0],'next-drive',1040);assert.equal(a.pool.visible,null,'a brand-new play is not trusted until it has settled (the stream may run further behind than the delay)');
  push([7,0],'next-drive',1052);assert.equal(a.pool.visible,'A');
 });
+test('corrections: an overturned touchdown restores the live drive without releasing the viewer’s game',()=>{
+ const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.saved.delay=0;a.setPlaying(true);a.selectGame('A');
+ const push=(score,at)=>{a.S.live.feed.push([{...game,score,lastPlayId:'td',down:3,yardsToGoal:4}],at);a.S.at=at;a.step(a.time.now+=250);};
+ push([6,0],1005);assert.equal(a.S.games[0].celebrating,true);assert.equal(a.pool.visible,'A');
+ push([0,0],1010);assert.equal(a.S.games[0].celebrating,undefined);assert.equal(a.S.games[0].possession,0);
+ assert.equal(a.S.detectedBreaks.has('A'),false);assert.equal(a.S.pinned,'A');assert.equal(a.pool.visible,'A');
+ push([0,0],1030);assert.equal(a.S.detectedBreaks.has('A'),false,'the cancelled score cannot create a commercial later');
+});
 test('release: slow summaries cannot delay scoreboard polling or commercial detection',async()=>{
  const summary=deferred();let requests=0;
  const a=app(url=>String(url).includes('scoreboard')?Promise.resolve(Response.json({events:[feedEvent('A','IND',{possession:'11',down:1,lastPlay:{id:String(++requests),type:{text:requests===1?'Rush':'Timeout'}}})]})):summary.promise,{media:true});

@@ -74,11 +74,15 @@ export class LiveFeed{
    // Nor does the first snapshot after a long gap: what changed happened sometime in the gap, not now, and old plays must not read as a stall.
    if(gap){for(const map of [this.logged,this.resumed,this.lost])map.delete(g.id);continue;}
    if(g.lastPlayId&&prev.lastPlayId!==g.lastPlayId)note(this.logged,g.id,{at,playId:g.lastPlayId});
+   // Keep the correction's time: delayed viewers must not lose a celebration
+   // before their picture reaches the overturned score. A PAT edit is not a TD reversal.
+   const score=this.scored.get(g.id)?.at(-1);
+   if(g.scoreKnown!==false&&score?.before?.length&&score.before.length===g.score?.length&&g.score.every((n,i)=>Number(n)<=Number(score.before[i])))score.cancelledAt??=at;
    // A score increase starts the celebration; the one try that follows a touchdown does not start another.
    const gained=(g.score||[]).reduce((sum,n,i)=>sum+Math.max(0,Number(n)-Number(prev.score?.[i]??n)),0);
    if(g.scoreKnown!==false&&prev.scoreKnown!==false&&gained>0){
-    const score=this.scored.get(g.id)?.at(-1),isTry=gained<=2&&score?.gained===6&&!score.tried&&at-score.at<TRY_WINDOW;
-    if(isTry)score.tried=true;else note(this.scored,g.id,{at,gained},40);
+    const isTry=gained<=2&&score?.gained===6&&score.cancelledAt==null&&!score.tried&&at-score.at<TRY_WINDOW;
+    if(isTry)score.tried=true;else note(this.scored,g.id,{at,gained,before:[...(prev.score||[])]},40);
    }
    // The clock ran down within the same period while no new play was logged: football is back after a stoppage.
    const was=clockSeconds(prev.clock),now=clockSeconds(g.clock);
@@ -102,7 +106,7 @@ export class LiveFeed{
    const logged=before(this.logged,g.id),since=logged?t-logged.at:null,out={...g,sinceLogged:since};
    // A fresh score is still on screen: the celebration, the replay, the try. Nobody's offense is on the field, and it is not a break yet.
    const score=before(this.scored,g.id);
-   if(score&&t-score.at<CELEBRATION)return {...out,phase:'live',breakKind:null,celebrating:true,possession:-1,special:true};
+   if(score&&!(score.cancelledAt<=t)&&t-score.at<CELEBRATION)return {...out,phase:'live',breakKind:null,celebrating:true,possession:-1,special:true};
    // A kickoff or punt is the last play logged: the broadcast is in its break
    // (the one after a score comes twice) until the clock moves for the first snap.
    if(g.kick&&logged?.playId===g.lastPlayId){
