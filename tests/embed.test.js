@@ -8,7 +8,7 @@ function harness(options={}){
  // harness compatible so failures exercise behavior, not injection support.
  const previous=globalThis.document;let p;
  globalThis.document={createElement:createFrame};
- try{p=new EmbedPlayer('https://ntv.st/game/example',{now:()=>now,createFrame,...options});}finally{globalThis.document=previous;}
+ try{p=new EmbedPlayer(options.url||'https://ntv.st/game/example',{now:()=>now,createFrame,...options});}finally{globalThis.document=previous;}
  return {p,get frame(){return p.element;},frames,navigations,load:(frame=p.element)=>frame.events.get('load')(),tick:value=>{now=value;}};
 }
 test('embed safety: every stream navigation is sandboxed before loading, including returns and reloads',()=>{
@@ -154,4 +154,18 @@ test('embed probe: the request only asks whether the host answers: no cookies, n
   assert.equal(calls.length,1);assert.equal(calls[0].url,'https://ntv.st/game/example','only the host the frame already loads');
   const {init}=calls[0];assert.equal(init.mode,'no-cors');assert.equal(init.credentials,'omit');assert.equal(init.method,'HEAD');assert.equal(init.headers,undefined);assert.equal(init.referrer,undefined);assert.equal(init.referrerPolicy,undefined);assert.ok(init.signal);
  }finally{globalThis.fetch=previous.fetch;globalThis.document=previous.document;}
+});
+
+test('published NTV embeds remain inline without a sandbox across reload, pause and returns',()=>{
+ for(const url of ['https://ntv.st/embed?t=published','https://www.ntv.st/embed?t=published','https://NTV.ST./embed?t=published']){
+  const h=harness({url}),{p}=h;p.setVisible(true);p.play();assert.equal(p.url,'https://ntv.st/embed?t=published');
+  p.reload();p.pause();p.play();p.setVisible(false);p.setVisible(true);
+  for(const navigation of h.navigations)assert.equal(navigation.sandbox,undefined);
+  assert.match(h.frame.allow,/fullscreen/);p.destroy();
+ }
+});
+test('the NTV exception cannot remove the sandbox from other pages or hosts',()=>{
+ for(const url of ['https://ntv.st/watch/raptor/game','https://ntv.st/embed','https://ntv.st/embed?t=','https://ntv.st/embed?t=%20','http://ntv.st/embed?t=x','https://user:secret@ntv.st/embed?t=x','https://ntv.st:8443/embed?t=x','https://ntv.st.evil.test/embed?t=x','https://other.ntv.st/embed?t=x','https://ok.ru/videoembed/123']){
+  const h=harness({url});h.p.setVisible(true);h.p.play();assert.ok(h.navigations[0].sandbox,url);h.p.reload();assert.ok(h.navigations.at(-1).sandbox,url);h.p.destroy();
+ }
 });

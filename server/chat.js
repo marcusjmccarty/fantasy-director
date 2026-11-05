@@ -2,7 +2,7 @@
 // League IDs select rooms; they do not authenticate league membership.
 import {sameSite} from './api.js';
 const CHAT_ROOM=/^(nfl|nba|nhl|mlb):(league:\d{1,12}|lounge)$/;
-export const CHAT_TTL=24*60*60*1000;
+export const CHAT_TTL=60*60*1000;
 const CHAT_KEEP=300,CHAT_PAGE=120,NAME_MAX=24,TEXT_MAX=400,KEY_MAX=80;
 const RATE_WINDOW=60000,RATE_MAX=30,RATE_GAP=1000;
 const chatJSON=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});

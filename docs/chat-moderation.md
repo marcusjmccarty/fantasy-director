@@ -2,7 +2,7 @@
 
 Chat appears only after a league has been connected. Public lounges return HTTP 410 for reading, posting, and WebSocket upgrades. League rooms remain open to anyone who knows the league ID; ESPN membership and names are not verified.
 
-Rooms keep at most 300 messages. Messages expire 24 hours after posting. SQLite rows are pruned before reads/posts and by a Durable Object alarm, including when nobody is watching. Live clients receive removal notices; polling and reconnects replace their history with the server snapshot.
+Rooms keep at most 300 messages. Messages expire one hour after posting. SQLite rows are pruned before reads/posts and by a Durable Object alarm, including when nobody is watching. Live clients receive removal notices; polling and reconnects replace their history with the server snapshot.
 
 ## Enable moderation
 

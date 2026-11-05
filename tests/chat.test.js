@@ -132,7 +132,8 @@ test('public lounges are closed over GET, POST and WebSocket, even with a Durabl
  }
  assert.equal(routed,0);
 });
-test('retention deletes at 24 hours, even before a new post, without resetting message IDs',()=>{
+test('retention deletes at one hour, even before a new post, without resetting message IDs',()=>{
+ assert.equal(CHAT_TTL,3600000);
  let now=1000;const store=new MemoryChatStore(),core=new ChatRoomCore(store,{now:()=>now});
  const first=core.post({name:'A',text:'old'},'a').message;now+=5000;
  const second=core.post({name:'B',text:'recent'},'b').message;

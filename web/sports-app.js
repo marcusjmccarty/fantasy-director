@@ -1,7 +1,7 @@
 import {StreamFinder,refusesFrame} from './stream-finder.js';
 import {PlayerPool} from './players.js';
 import {safeVideo,streamType,teamColor,teamLogo,forgetESPN} from './roster.js';
-import {stripEnds,stripTabStop,stripKeys} from './strip.js';
+import {stripEnds,stripTabStop,stripKeys,mountGameTiles} from './strip.js';
 import {headToHead,benchRows,matchupColumns,nearStart} from './scoreboard.js';
 import {mountChat,chatRoomFor} from './chat.js';
 import {normalizeHighlights,mergeHighlights,highlightView,playable} from './highlights.js';
@@ -293,6 +293,7 @@ $('refreshStreams').onclick=()=>{streamFinder.cancel();loadGames();};
 // Quick clicks chain from the last target while its scroll is moving. The target expires by time, since not every browser has scrollend.
 const stripStep=dir=>{const list=$('games');if(!list.scrollTo)return;const max=Math.max(0,list.scrollWidth-list.clientWidth),moving=S.stripTarget!==null&&Date.now()-S.stripStartedAt<700&&Math.abs(S.stripTarget-list.scrollLeft)>8,from=moving?Math.min(max,S.stripTarget):list.scrollLeft;S.stripStartedAt=Date.now();S.stripTarget=Math.max(0,Math.min(max,from+dir*Math.max(240,(list.clientWidth||800)*.8)));list.scrollTo({left:S.stripTarget,behavior:'smooth'});};
 for(const name of ['scrollend','pointerdown','touchstart'])$('games').addEventListener?.(name,()=>{S.stripTarget=null;},{passive:true});
+mountGameTiles({$,storage:localStorage});
 $('stripPrev').onclick=()=>stripStep(-1);$('stripNext').onclick=()=>stripStep(1);$('games').addEventListener?.('scroll',()=>stripEnds($('games'),$('stripPrev'),$('stripNext')),{passive:true});
 $('games').addEventListener?.('wheel',e=>{S.stripTarget=null;const list=$('games');if(Math.abs(e.deltaY)<=Math.abs(e.deltaX)||list.scrollWidth<=list.clientWidth)return;e.preventDefault();list.scrollLeft+=e.deltaY;},{passive:false});
 const RAIL=[['matchup','matchupTab','matchupPanel'],['highlights','highlightsTab','highlightsPanel'],['chat','chatTab','chatPanel']];

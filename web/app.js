@@ -9,7 +9,7 @@ import {NFLSourceCatalog} from './nfl-sources.js';
 import {liveGames,liveScores,LiveFeed} from './live.js';
 import {alias,describeScore,rosterCredit} from './scoring.js';
 import {SAMPLE,TEAMS,POSITIONS,parseRoster,formatRoster,safeVideo,streamType,gameKey,teamColor,teamLogo,forgetESPN} from './roster.js';
-import {stripEnds,stripTabStop,stripKeys} from './strip.js';
+import {stripEnds,stripTabStop,stripKeys,mountGameTiles} from './strip.js';
 import {normalizeHighlights,playable} from './highlights.js';
 import {normalizePreferences} from './preferences.js';
 import {liveClipCandidates,highlightPage,canRetryReplay,REPLAY_RETRY_MS,REPLAY_WAIT_SECONDS} from './live-highlights.js';
@@ -770,6 +770,7 @@ for(const [name,tabId] of RAIL){$(tabId).onclick=()=>showPanel(name);$(tabId).on
 // Quick clicks chain from the last target while its scroll is moving. The target expires by time, since not every browser has scrollend.
 const stripStep=dir=>{const list=$('games');if(!list.scrollTo)return;const max=Math.max(0,list.scrollWidth-list.clientWidth),moving=S.stripTarget!==null&&Date.now()-S.stripStartedAt<700&&Math.abs(S.stripTarget-list.scrollLeft)>8,from=moving?Math.min(max,S.stripTarget):list.scrollLeft;S.stripStartedAt=Date.now();S.stripTarget=Math.max(0,Math.min(max,from+dir*Math.max(240,(list.clientWidth||800)*.8)));list.scrollTo({left:S.stripTarget,behavior:'smooth'});};
 for(const name of ['scrollend','pointerdown','touchstart'])$('games').addEventListener?.(name,()=>{S.stripTarget=null;},{passive:true});
+mountGameTiles({$,storage:localStorage});
 $('stripPrev').onclick=()=>stripStep(-1);$('stripNext').onclick=()=>stripStep(1);$('games').addEventListener?.('scroll',()=>stripEnds($('games'),$('stripPrev'),$('stripNext')),{passive:true});$('games').addEventListener?.('keydown',e=>stripKeys(e,$('games')));
 $('games').addEventListener?.('wheel',e=>{S.stripTarget=null;const list=$('games');if(Math.abs(e.deltaY)<=Math.abs(e.deltaX)||list.scrollWidth<=list.clientWidth)return;e.preventDefault();list.scrollLeft+=e.deltaY;},{passive:false});
 function renderRail(){

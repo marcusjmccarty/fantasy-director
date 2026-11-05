@@ -1,3 +1,11 @@
+# NTV playback update — November 5, 2026
+
+NTV's official HTTPS `/embed?t=…` player now runs inside the channel without an iframe sandbox, because NTV refuses sandboxed playback. The exception is limited to the exact NTV host (normalizing `www` and a trailing dot), HTTPS, standard port, no credentials, and a nonempty token. Watch pages resolve through NTV's published API first. Unresolved pages keep the outside-player fallback. Other providers retain their sandbox across reloads and switches.
+
+This enables the embed and removes our sandbox-related rejection; it does not prove NTV serves working video. NTV and its nested player can open pop-up ads or attempt navigation after a click. Browser popup protections may still apply. The site cannot inspect cross-origin playback or guarantee seamless starts. Reload, Pause and fullscreen remain available.
+
+The historical verification below describes the earlier blanket sandbox policy and does not apply to the NTV exception.
+
 # Embedded stream containment — November 1, 2026
 
 Based on GitHub main `043f7285398343c8ecb19b535ef6ddf7c014b7f9`, including the recovered Sunday logic release. Changes are confined to the live page adapter, its reload control, and resetting recovery timing when a new game is shown. The director's ranking, commercial detection, roster import, schedule, and replay adapters are unchanged.
