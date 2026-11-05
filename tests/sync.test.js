@@ -330,11 +330,11 @@ test('addMark keeps marks sorted by game time and replaces a mark within 5 secon
 
 test('addMark refuses a mark that would make the recording run backwards',()=>{
  const marks=[{wall:100,media:50},{wall:300,media:200}];
- assert.throws(()=>addMark(marks,200,50),/move forward/,'equal media is not forward');
- assert.throws(()=>addMark(marks,200,20),/move forward/);
- assert.throws(()=>addMark(marks,200,200),/move forward/);
- assert.throws(()=>addMark(marks,50,150),/move forward/,'an earlier moment cannot be later in the file');
- assert.throws(()=>addMark(marks,400,199),/move forward/);
+ assert.throws(()=>addMark(marks,200,50),/out of order/,'equal media is not forward');
+ assert.throws(()=>addMark(marks,200,20),/out of order/);
+ assert.throws(()=>addMark(marks,200,200),/out of order/);
+ assert.throws(()=>addMark(marks,50,150),/out of order/,'an earlier moment cannot be later in the file');
+ assert.throws(()=>addMark(marks,400,199),/out of order/);
  assert.deepEqual(marks,[{wall:100,media:50},{wall:300,media:200}],'nothing changed after a refusal');
  assert.deepEqual(addMark(marks,301,100),[{wall:100,media:50},{wall:301,media:100}],'replacing the offending mark resolves the order');
  assert.deepEqual(addMark(marks,200,120),[{wall:100,media:50},{wall:200,media:120},{wall:300,media:200}]);

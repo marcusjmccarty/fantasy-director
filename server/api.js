@@ -10,9 +10,9 @@ function isOwner(request,env){
 export function ownCookies(data){
  const swid=String(data.swid||'').trim(),s2=String(data.s2||'').trim();
  if(!swid&&!s2)return null;
- if(!swid||!s2)throw new Error('Paste both SWID and espn_s2, or leave both blank for a public league.');
+ if(!swid||!s2)throw new Error('Copy both values, or leave both blank for a public league.');
  const guid=swid.startsWith('{')&&swid.endsWith('}')?swid.slice(1,-1):swid;
- if(!/^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/.test(guid)||s2.length>2048||/[\s;]/.test(s2))throw new Error('The ESPN cookies look wrong: SWID is a {GUID} and espn_s2 is one long token.');
+ if(!/^[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}$/.test(guid)||s2.length>2048||/[\s;]/.test(s2))throw new Error('Those ESPN values don’t look right. Copy them again: SWID starts with { and espn_s2 is one long line.');
  return {swid:`{${guid}}`,s2};
 }
 // Same origin, treating the loopback names as one host for local previews.
@@ -62,7 +62,7 @@ export async function leagueAPI(request,env={},fetcher=fetch){
  let data;try{if(Number(request.headers.get('Content-Length')||0)>4096)return json({error:'Request too large.'},413);const text=await request.text();if(text.length>4096)return json({error:'Request too large.'},413);data=JSON.parse(text);}catch{return json({error:'Enter a valid league ID.'},400);}
  if(!data||typeof data!=='object'||Array.isArray(data))return json({error:'Enter a valid league ID.'},400);
  const id=String(data.leagueId||'');const now=new Date();const season=now.getUTCFullYear()-(now.getUTCMonth()<5?1:0);const year=Number(data.season||season);
- if(!/^\d{1,12}$/.test(id)||!Number.isInteger(year)||year<2018||year>season+1)return json({error:'Enter a numeric ESPN league ID.'},400);
+ if(!/^\d{1,12}$/.test(id)||!Number.isInteger(year)||year<2018||year>season+1)return json({error:'Paste your ESPN league link, or type its ID number.'},400);
  const week=data.week==null?null:Number(data.week);
  if(week!==null&&(!Number.isInteger(week)||week<1||week>25))return json({error:'Choose a valid scoring week.'},400);
  let own;try{own=ownCookies(data);}catch(error){return json({error:error.message},400);}
@@ -74,8 +74,8 @@ export async function leagueAPI(request,env={},fetcher=fetch){
  const signedIn=!!(own||useSaved);
  // Workers throws synchronously for redirect:'error'. Manual also prevents cookie forwarding.
  try{const response=await fetcher(`https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/${year}/segments/0/leagues/${id}?view=mRoster&view=mTeam&view=mSettings&view=mLiveScoring&view=mMatchup&view=mMatchupScore${week===null?'':'&scoringPeriodId='+week}`,{headers,redirect:'manual',signal:AbortSignal.timeout(12000)});
- if(response.status>=300&&response.status<400)return json({error:'ESPN redirected the roster request. Your saved ESPN login may need refreshing.',code:'ESPN_REDIRECT'},502);
- if([401,403,404].includes(response.status))return json({error:response.status===404?'ESPN has no league with that ID for this season.':signedIn?'ESPN would not open this league with those cookies. Copy fresh SWID and espn_s2 values from a browser where you are signed in to ESPN.':'This league is private. Paste your ESPN SWID and espn_s2 cookies below the league ID to import it.',code:signedIn?'ESPN_DENIED':'LEAGUE_PRIVATE'},response.status===404?404:401);
+ if(response.status>=300&&response.status<400)return json({error:'ESPN wouldn’t open your league. Your private league steps may need copying again.',code:'ESPN_REDIRECT'},502);
+ if([401,403,404].includes(response.status))return json({error:response.status===404?'ESPN has no league with that ID for this season.':signedIn?'ESPN wouldn’t open this league with those values. Copy them again from a browser where you’re signed in to ESPN.':'That league is private. Follow the steps below to connect it.',code:signedIn?'ESPN_DENIED':'LEAGUE_PRIVATE'},response.status===404?404:401);
  if(!response.ok)return json({error:'ESPN is temporarily unavailable. Please try again.'},502);
  const raw=await response.json();if(!raw.teams?.length)return json({error:signedIn?'ESPN did not return your roster. The cookies may have expired.':'ESPN did not return this league. Check the ID and league visibility.'},422);
  return json({...normalizedLeague(raw,own?own.swid:useSaved?env.ESPN_SWID:''),scoring:fantasyScores(raw),leagueId:id,season:year});

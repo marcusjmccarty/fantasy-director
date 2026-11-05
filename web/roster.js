@@ -24,6 +24,13 @@ export function parseRoster(value){
 }
 export const formatRoster=roster=>roster.map(p=>`${p.name}, ${p.team}, ${p.position}`).join('\n');
 // A stream can be a direct video file, an HLS playlist, or any https page to embed.
+// A saved ESPN login lives under each league page's own key, so forgetting it means all four.
+export function forgetESPN(storage){
+ for(const key of ['fantasy-stream-v3','fantasy-stream-nba-v1','fantasy-stream-nhl-v1','fantasy-stream-mlb-v1'])try{
+  const saved=JSON.parse(storage.getItem(key)||'null');if(!saved||typeof saved!=='object')continue;
+  Object.assign(saved,key==='fantasy-stream-v3'?{espn:{swid:'',s2:''},leagueId:'',teamId:'',league:null}:{swid:'',s2:'',leagueId:'',teamId:'',leagueSeason:null});storage.setItem(key,JSON.stringify(saved));
+ }catch{}
+}
 export function safeVideo(value){
  if(!value)return '';
  value=String(value).trim();if(value.length>8192)throw new Error('That stream link is too long.');

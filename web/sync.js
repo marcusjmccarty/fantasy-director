@@ -84,7 +84,7 @@ function clamp(value,duration){return Math.max(0,duration>0?Math.min(duration-.5
 export function addMark(marks,wall,media){
  if(!Number.isFinite(wall)||!Number.isFinite(media)||media<0)throw new Error('Enter a valid video time.');
  const next=[...marks.filter(m=>Math.abs(m.wall-wall)>5),{wall,media}].sort((a,b)=>a.wall-b.wall);
- if(next.some((m,i)=>i&&m.media<=next[i-1].media))throw new Error('Sync marks must move forward in the recording.');
+ if(next.some((m,i)=>i&&m.media<=next[i-1].media))throw new Error('That mark is out of order with one you already saved. Check the quarter and clock, or reset your marks.');
  return next;
 }
 

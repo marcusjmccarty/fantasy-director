@@ -8,7 +8,9 @@ export function matchStream(game,entries,sport){
  return matches.length===1?matches[0]:null;
 }
 const providerPage=url=>['ntv.st','streamcorner.st'].includes(new URL(url).hostname);
-export function needsPlayerResolution(url){try{const u=new URL(url);return streamType(url)==='embed/page'&&!/\/(?:embed|player|videoembed)(?:[/.]|$)/i.test(u.pathname);}catch{return false;}}
+// NTV answers a sandboxed frame with its own error page, so its games open on its own site in a new tab; our frames stay sandboxed.
+export function refusesFrame(url){try{return /(?:^|\.)ntv\.st$/i.test(new URL(url).hostname);}catch{return false;}}
+export function needsPlayerResolution(url){try{const u=new URL(url);return !refusesFrame(url)&&streamType(url)==='embed/page'&&!/\/(?:embed|player|videoembed)(?:[/.]|$)/i.test(u.pathname);}catch{return false;}}
 export class StreamFinder{
  constructor({fetcher=fetch,now=()=>Date.now()}={}){this.fetcher=fetcher;this.now=now;this.matches=new Map();this.resolved=new Map();this.catalogs=new Map();this.generation=0;this.status='';this.enabled=true;this.pending=false;this.resolving=new Map();}
  cancel(){this.generation++;this.pending=false;this.matches.clear();}
@@ -68,7 +70,6 @@ export class StreamFinder{
    if(generation!==this.generation)return false;this.matches=next;
    const count=games.filter(g=>this.urls(g).length).length,fallback=manual.some(url=>this.resolved.get(url)?.kind==='page');
    this.status=this.enabled?(count?'Streams found for '+count+' game'+(count===1?'':'s')+'.':'No exact automatic matches yet.'):'Automatic lookup is off.';
-   if(providers.some(p=>p.name==='StreamCorner'&&!p.available))this.status+=' StreamCorner is unavailable; you can still add its game link.';
    if(fallback)this.status+=' A custom link uses its webpage because no accessible player was found.';
    return true;
   }catch{if(generation===this.generation)this.status='Automatic stream lookup is unavailable. Retrying; your links are kept.';return false;}

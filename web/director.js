@@ -136,7 +136,7 @@ export class Director{
    .sort((a,b)=>distance(a)-distance(b)||(b.id===current.id)-(a.id===current.id)||a.id.localeCompare(b.id));
   const best=candidates[0];if(!best)return null;
   const cur=candidates.find(g=>g.id===current.id),r=this.rules;
-  const choose=g=>({kind:'game',id:g.id,entry:{game:g,players:[],...rate(g,[])},reason:'RedZone mode · '+(distance(g)<100?`${g.name}, ${distance(g)} yards out`:'best available game')});
+  const choose=g=>({kind:'game',id:g.id,entry:{game:g,players:[],...rate(g,[])},reason:distance(g)<100?`Best chance to score · ${g.name}, ${distance(g)} yards out`:'Best available game'});
   if(!cur){this.challenger=null;return choose(best);}
   if(cur.id===best.id||current.protected||cur.phase==='play'||cur.nextSnapIn!=null&&cur.nextSnapIn<=r.preSnap||at-this.lastCut<r.dwell||distance(cur)-distance(best)<r.margin){this.challenger=null;return choose(cur);}
   if(this.challenger?.id!==best.id)this.challenger={id:best.id,since:at};

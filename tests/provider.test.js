@@ -175,7 +175,7 @@ test('constructor leaves no message listener behind when the URL is rejected',t=
 });
 
 // ---- handshake -------------------------------------------------------------
-test('commands issued before inited are queued and replayed by the handshake: unmute, volume, seek, then the bootstrap\'s play, all addressed to the provider origin',t=>{
+test('commands issued before inited are queued and replayed by the handshake: mute until footage moves, volume, seek, then the bootstrap\'s play, all addressed to the provider origin',t=>{
  const h=harness(t);const p=h.make();
  p.play();p.seek(615);p.muted=false;
  assert.equal(p.element.posted.length,0,'nothing is sent to a player that has not reported inited');
@@ -183,7 +183,7 @@ test('commands issued before inited are queued and replayed by the handshake: un
  assert.equal(h.intervals(),0,'no bootstrap before inited');
  h.msg(p,{event:'inited'});
  assert.equal(p.initialized,true);
- assert.deepEqual(posted(p),[{action:'unmute'},{action:'volume',value:1},{action:'seek',time:615},{action:'play'}],'volume state, the pending seek, then the bootstrap\'s first play (which does not repeat the volume just applied)');
+ assert.deepEqual(posted(p),[{action:'mute'},{action:'volume',value:0},{action:'seek',time:615},{action:'play'}],'muted until footage has moved, whatever is wanted: a wedged unmute could not be told from a slow start. Then the volume state, the pending seek, then the bootstrap\'s first play (which does not repeat the volume just applied)');
  assert.ok(p.element.posted.every(x=>x.targetOrigin===ORIGIN),'every message is posted to https://ok.ru, never *');
  assert.equal(h.intervals(),1,'inited with play wanted starts the bootstrap');
  clear(p);
@@ -201,6 +201,7 @@ test('the default handshake mutes the player at volume 0 and pauses it; seek/pla
  p.seek(42);assert.deepEqual(posted(p),[{action:'seek',time:42}]);clear(p);
  p.play();assert.deepEqual(posted(p),[{action:'play'}],'play asks for play at once; it repeats neither the volume state already applied nor a seek sent just now');clear(p);
  assert.equal(h.intervals(),1);
+ p.target=null;h.prime(p,42,7800);clear(p);
  p.muted=false;assert.deepEqual(posted(p),[{action:'unmute'},{action:'volume',value:1}]);clear(p);
  p.muted=true;assert.deepEqual(posted(p),[{action:'mute'},{action:'volume',value:0}]);clear(p);
  p.pause();assert.deepEqual(posted(p),[{action:'pause'}]);assert.equal(p.wantPlay,false);
@@ -300,18 +301,24 @@ test('kick() forgets the progress seen so far and bootstraps again until footage
  assert.equal(h.intervals(),1,'...the handshake starts the bootstrap');
 });
 
+test('the wanted sound arrives once footage moves, the watch for a wedged unmute starts then, and a slow load is not taken for an audio lock',t=>{
+ const h=harness(t);const p=h.init(h.make());p.play();p.muted=false;
+ assert.equal(p.played,false);h.tick(9000);assert.equal(p.audioLocked,false,'nine seconds of nothing is a slow start, not a refused unmute');assert.equal(p.muted,false,'and the viewer still wants sound');assert.equal(p.audioWatch,null,'no watch yet: it would mistake that slow start for a refused unmute');
+ clear(p);h.prime(p,10,7800);assert.equal(p.played,true);assert.ok(actions(p).includes('unmute'),'footage moved: sound on');assert.ok(p.audioWatch,'and only now is a wedged unmute watched for');p.destroy();
+});
 test('volume commands go out only when the wanted state changes; inited and started/resumed always re-send them',t=>{
  const h=harness(t);const p=h.make();
  p.muted=false;
  assert.deepEqual(posted(p),[],'not inited: nothing is sent yet');
  h.msg(p,{event:'inited'});
- assert.deepEqual(posted(p),[{action:'unmute'},{action:'volume',value:1},{action:'pause'}]);clear(p);
+ assert.deepEqual(posted(p),[{action:'mute'},{action:'volume',value:0},{action:'pause'}],'sound waits for moving footage');clear(p);
+ p.play();h.prime(p,10,7800);clear(p);
  p.muted=false;
- assert.deepEqual(posted(p),[],'already unmuted: not repeated (repeating audibly stutters the provider)');
+ assert.deepEqual(posted(p),[],'already unmuted once footage moved: not repeated (repeating audibly stutters the provider)');
  p.muted=true;
  assert.deepEqual(posted(p),[{action:'mute'},{action:'volume',value:0}]);clear(p);
  p.muted=true;assert.deepEqual(posted(p),[]);
- p.play();
+ p.pause();clear(p);p.play();
  assert.deepEqual(posted(p),[{action:'play'}],'the bootstrap does not repeat an applied volume state');
  clear(p);h.tick(2000);
  assert.deepEqual(distinct(p),['play'],'...on any tick');
@@ -560,13 +567,13 @@ test('error messages map provider codes to PROVIDER_<code> with a human message,
  const h=harness(t);const p=h.init(h.make());p.play();h.prime(p,10,7800);
  const errors=[];p.on('error',e=>errors.push(e));
  h.msg(p,{event:'error',code:101});
- assert.deepEqual(p.error,{code:'PROVIDER_101',message:'This recording was removed.'});
+ assert.deepEqual(p.error,{code:'PROVIDER_101',message:'This game’s video isn’t available.'});
  assert.deepEqual(errors,[p.error]);
  assert.equal(p.progressing,false);assert.equal(p.near(11),false);
- const cases={100:/still processing/,102:/blocked/,103:/could not find/,150:/restricted/,151:/denied access/,152:/disabled embedded playback/,153:/unavailable in your region/};
+ const cases={100:/still processing/,102:/isn’t available/,103:/isn’t available/,150:/isn’t available/,151:/isn’t available/,152:/isn’t available/,153:/isn’t available/};
  for(const [code,re] of Object.entries(cases)){const q=h.init(h.make());h.msg(q,{event:'error',code:Number(code)});assert.equal(q.error.code,'PROVIDER_'+code);assert.match(q.error.message,re);}
  const unknown=h.init(h.make());h.msg(unknown,{event:'error',code:999});
- assert.deepEqual(unknown.error,{code:'PROVIDER_999',message:'The replay provider could not start this recording.'});
+ assert.deepEqual(unknown.error,{code:'PROVIDER_999',message:'This game’s video isn’t available.'});
  const missing=h.init(h.make());h.msg(missing,{event:'error'});
  assert.equal(missing.error.code,'PROVIDER_0');
 });

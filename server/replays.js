@@ -1,8 +1,10 @@
-// Full-game replays for the NBA and MLB rooms: a listing of recent games from
+// Full-game replays for the NBA, NHL and MLB rooms: a listing of recent games from
 // the replay sites the owner chose, and the embedded players their game pages
 // carry. Public pages only, on an allowlist; no video is proxied or decoded.
 import {publicPlayerURL,decodeEmbedHTML} from '../web/stream-html.js';
-const REPLAY_SITES={nba:{host:'basketballreplays.net',home:'https://basketballreplays.net/',pages:['https://basketballreplays.net/','https://basketballreplays.net/?page2','https://basketballreplays.net/?page3']},mlb:{host:'mlblive.net',home:'https://mlblive.net/',pages:['https://mlblive.net/','https://mlblive.net/?page2','https://mlblive.net/?page3']}};
+const listingPages=(base,count)=>Array.from({length:count},(_,i)=>i?`${base}?page${i+1}`:base);
+// One network runs these sites, and each one's game pages reach an ok.ru player, the one kind we can play and drive.
+const REPLAY_SITES={nba:{host:'basketball-video.com',home:'https://basketball-video.com/',only:/-nba-/,pages:listingPages('https://basketball-video.com/2026-27',6)},nhl:{host:'hockeyreplays.com',home:'https://hockeyreplays.com/',pages:listingPages('https://hockeyreplays.com/',5)},mlb:{host:'mlblive.net',home:'https://mlblive.net/',pages:listingPages('https://mlblive.net/',3)}};
 const NFL_REPLAY_HOST='nfl-video.com',NFL_REPLAY_MAX_PAGE=20,nflListingPage=n=>n===1?'https://nfl-video.com/2026':'https://nfl-video.com/2026?page'+n;
 const MONTHS=['january','february','march','april','may','june','july','august','september','october','november','december'];
 const replayCache=new Map(),replayPending=new Map();
@@ -49,10 +51,10 @@ export function parseReplayListing(html,sport){
  const games=[],seen=new Set();
  for(const m of html.matchAll(/<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]{0,400}?)<\/a>/gi)){
   const href=decodeEmbedHTML(m[1]),text=decodeEmbedHTML(m[2].replace(/<[^>]+>/g,' ')).replace(/\s+/g,' ').trim();
-  if(!/full-game-replay/i.test(href)||!text||text.length<12)continue;
+  if(!/full-game-replay/i.test(href)||!text||text.length<12||site.only&&!site.only.test(href))continue;
   const url=publicPlayerURL(href,site.home);if(!url||new URL(url).hostname!==site.host||seen.has(url))continue;
   const slug=new URL(url).pathname.replace(/^\/+|\/+$/g,'');
-  const dateMatch=/-([a-z]+)-(\d{1,2})-(\d{4})$/i.exec(slug),month=dateMatch?MONTHS.indexOf(dateMatch[1].toLowerCase()):-1;
+  const dateMatch=/-([a-z]+)-(\d{1,2})-(\d{4})-*$/i.exec(slug),month=dateMatch?MONTHS.indexOf(dateMatch[1].toLowerCase()):-1;
   if(month<0)continue;
   const date=new Date(Date.UTC(Number(dateMatch[3]),month,Number(dateMatch[2]),17));
   const teams=/^(.+?)\s+(?:vs\.?|@|at)\s+(.+?)\s+-\s/i.exec(text);
@@ -75,10 +77,16 @@ export function parseReplayPlayers(html,page){
  }
  return [...out.filter(s=>s.type==='provider/ok'),...out.filter(s=>s.type!=='provider/ok')].slice(0,5);
 }
+// A game's players, ok.ru first: the page's own frames, its links, then the pages its Watch buttons open.
+export async function replaySourcesFrom(html,page,fetcher=fetch){
+ const sources=parseReplayPlayers(html,page.href),add=list=>{for(const s of list)if(!sources.some(x=>x.url===s.url))sources.push(s);};
+ const okSource=url=>({url,provider:'OK',type:'provider/ok'}),direct=okEmbedIn(html);if(direct)add([okSource(direct)]);
+ if(!sources.some(s=>s.type==='provider/ok'))for(const found of await Promise.all(parseWatchLinks(html,page.hostname).map(async link=>{try{const r=await fetcher(link,{redirect:'manual',signal:AbortSignal.timeout(10000),headers:{Accept:'text/html'}});if(!r.ok)return [];const text=(await r.text()).slice(0,400000),ok=okEmbedIn(text);return [...(ok?[okSource(ok)]:[]),...parseReplayPlayers(text,link)];}catch{return [];}})))add(found);   // in the page's order: its first server is the full game
+ return [...sources.filter(s=>s.type==='provider/ok'),...sources.filter(s=>s.type!=='provider/ok')].slice(0,5);
+}
 export async function replayCatalogAPI(request,fetcher=fetch){
  if(request.method!=='GET')return replayJSON({error:'Use GET.'},405);
  const sport=new URL(request.url).searchParams.get('sport');
- if(sport==='nhl')return replayJSON({sport,games:[],note:'No replay source for the NHL yet.'});
  const site=REPLAY_SITES[sport];if(!site)return replayJSON({error:'Choose a supported sport.'},400);
  try{const games=await cachedReplay('replays:'+sport,fetcher,replayListLife,async()=>{const pages=await Promise.allSettled(site.pages.map(url=>replayText(url,site.host,fetcher)));const html=pages.filter(p=>p.status==='fulfilled').map(p=>p.value).join('\n');if(!html)throw new Error(pages[0].reason?.message||'unavailable');return parseReplayListing(html,sport);});return replayJSON({sport,games,fetchedAt:Date.now()});}
  catch(error){return replayJSON({sport,games:[],error:'Replays are unavailable right now. '+(error.message||'')},502);}
@@ -87,7 +95,7 @@ export async function replayResolveAPI(request,fetcher=fetch){
  if(request.method!=='GET')return replayJSON({error:'Use GET.'},405);
  const input=new URL(request.url).searchParams.get('url')||'';let page;
  try{page=new URL(input);if(input.length>2048||page.protocol!=='https:'||!Object.values(REPLAY_SITES).some(s=>s.host===page.hostname))throw new Error();}catch{return replayJSON({error:'Use a replay page from a supported site.'},400);}
- try{const sources=await cachedReplay('replay-page:'+page.href,fetcher,replayPageLife,async()=>parseReplayPlayers(await replayText(page.href,page.hostname,fetcher),page.href));if(!sources.length)return replayJSON({page:page.href,sources:[],error:'That page has no player we can embed.'},404);return replayJSON({page:page.href,sources,resolvedAt:Date.now()});}
+ try{const sources=await cachedReplay('replay-page:'+page.href,fetcher,replayPageLife,async()=>replaySourcesFrom(await replayText(page.href,page.hostname,fetcher),page,fetcher));if(!sources.length)return replayJSON({page:page.href,sources:[],error:'No video found on that page.'},404);return replayJSON({page:page.href,sources,resolvedAt:Date.now()});}
  catch(error){return replayJSON({page:page.href,sources:[],error:'Could not read that replay page. '+(error.message||'')},502);}
 }
 
@@ -101,10 +109,12 @@ export function parseNFLReplayListing(html,week){
  }
  return out;
 }
-export function parseWatchLinks(html){
- const block=/id="video-player"[\s\S]{0,8000}/.exec(html)?.[0]||'';
- const links=[];for(const m of block.matchAll(/<a\b[^>]*href="(https:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)){const text=m[2].replace(/<[^>]+>/g,' ').trim();if(/watch/i.test(text))links.push(decodeEmbedHTML(m[1]));}
- return links.filter(u=>{try{const h=new URL(u).hostname;return h!==NFL_REPLAY_HOST&&!/\.(local|test|internal)$/.test(h);}catch{return false;}}).slice(0,3);
+// The Watch buttons on a game page. A page with a player block keeps them there; the others carry them in the article.
+export function parseWatchLinks(html,host=NFL_REPLAY_HOST){
+ const block=/id="video-player"[\s\S]{0,8000}/.exec(html)?.[0]||html;
+ // Each button's label sits between it and the button before; a condensed game or highlights is not the replay.
+ const links=[];let last=0;for(const m of block.matchAll(/<a\b[^>]*href="((?:https:)?\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi)){const text=m[2].replace(/<[^>]+>/g,' ').trim(),label=block.slice(last,m.index).replace(/<[^>]+>/g,' ');last=m.index+m[0].length;if(/^watch\b/i.test(text)&&!/condensed|highlight/i.test(label))links.push(decodeEmbedHTML(m[1]).replace(/^\/\//,'https://'));}
+ return [...new Set(links)].filter(u=>{try{const h=new URL(u).hostname;return h!==host&&!/\.(local|test|internal)$/.test(h);}catch{return false;}}).slice(0,4);
 }
 export const okEmbedIn=html=>{const m=/ok\.ru\/videoembed\/(\d{6,20})/.exec(html||'');return m?`https://ok.ru/videoembed/${m[1]}`:'';};
 export async function nflReplayWeekAPI(request,fetcher=fetch){

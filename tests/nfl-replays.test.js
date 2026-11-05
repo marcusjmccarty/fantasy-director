@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parseNFLReplayListing,parseWatchLinks,okEmbedIn,nflReplayWeekAPI,edgeCached} from '../server/replays.js';
+import {parseNFLReplayListing,parseWatchLinks,okEmbedIn,nflReplayWeekAPI,edgeCached,parseReplayListing,replaySourcesFrom,replayResolveAPI,replayCatalogAPI} from '../server/replays.js';
 
 const listing=`<a href="/chicago-bears-vs-seattle-seahawks-full-game-replay-nfl-week-08-november-2-2026">CHI vs SEA</a>
 <a href="https://nfl-video.com/miami-dolphins-vs-baltimore-ravens-full-game-replay-nfl-week-08-october-30-2026">MIA vs BAL</a>
@@ -17,7 +17,8 @@ test('parseNFLReplayListing keeps one game page per matchup for the padded week'
 });
 test('parseWatchLinks takes the Watch anchors inside the player block, off the listing site',()=>{
  assert.deepEqual(parseWatchLinks(gamePage),['https://nhlgamestoday.com/go/abc','https://nbaontv.com/go/def']);
- assert.deepEqual(parseWatchLinks('<a href="https://nhlgamestoday.com/x">Watch</a>'),[],'links outside the player block are ignored');
+ assert.deepEqual(parseWatchLinks('<a href="https://outside.example/x">Watch</a>'+gamePage),['https://nhlgamestoday.com/go/abc','https://nbaontv.com/go/def'],'links outside a player block are ignored');
+ assert.deepEqual(parseWatchLinks('<a href="https://nhlgamestoday.com/x"><span>Watch</span></a><a href="//ok.example/y">Watch</a><a href="https://b.example/z">Watch list</a><a href="https://c.example/">NBA</a>','basketball-video.com'),['https://nhlgamestoday.com/x','https://ok.example/y','https://b.example/z'],'a page without one carries them in the article');
 });
 test('okEmbedIn finds the ok.ru player wherever the page carries it',()=>{
  assert.equal(okEmbedIn(watchPage),'https://ok.ru/videoembed/1234567890');
@@ -139,4 +140,33 @@ test('a jump that lands past the week walks back from the top',async()=>{
  const {fetcher,asked}=walk({1:listed(9,11)+sidebar,2:listed(7,12)+sidebar,3:listed(6,12)+sidebar});
  const data=await (await nflReplayWeekAPI(new Request('https://x.test/api/nfl-replays?week=7'),fetcher)).json();
  assert.equal(data.games.length,12);assert.deepEqual(asked,[1,3,2,3]);
+});
+
+test('each league lists its own site: NBA drops the WNBA and trailing dashes, NHL reads its @ titles',()=>{
+ const nba=parseReplayListing('<a href="/miami-heat-vs-los-angeles-lakers-nba-full-game-replay-november-2-2026"></a><a href="/miami-heat-vs-los-angeles-lakers-nba-full-game-replay-november-2-2026">Miami Heat vs Los Angeles Lakers - NBA - Full Game Replay - November 2, 2026</a><a href="/boston-celtics-vs-houston-rockets-nba-full-game-replay-november-2-2026-">Boston Celtics vs Houston Rockets - NBA - Full Game Replay - November 2, 2026</a><a href="https://basketball-video.com/atlanta-dream-vs-golden-state-valkyries-wnba-finals-game-7-full-game-replay-october-31-2026-">Atlanta Dream vs. Golden State Valkyries - WNBA Finals Game 7 Full Game Replay - October 31, 2026</a>','nba');
+ assert.deepEqual(nba.map(g=>[g.away,g.home]).sort(),[['Boston Celtics','Houston Rockets'],['Miami Heat','Los Angeles Lakers']]);assert.ok(nba.every(g=>g.date.startsWith('2026-11-02')));assert.ok(nba.every(g=>g.page.startsWith('https://basketball-video.com/')));
+ const nhl=parseReplayListing('<a href="/anaheim-ducks-vancouver-canucks-nhl-regular-season-full-game-replay-november-3-2026">Anaheim Ducks @ Vancouver Canucks - NHL Regular Season - Full Game Replay - November 3, 2026</a>','nhl');
+ assert.deepEqual(nhl.map(g=>[g.away,g.home,g.context]),[['Anaheim Ducks','Vancouver Canucks','NHL Regular Season']]);
+});
+test('a game page gives its ok.ru player from a frame, a direct link or a Watch page, and plays that first',async()=>{
+ const page=new URL('https://hockeyreplays.com/g'),none=async()=>{throw new Error('no fetch expected');};
+ assert.deepEqual(await replaySourcesFrom('<a class="su-button" href="//ok.ru/videoembed/1234567?nochat=1&amp;autoplay=1">Watch</a>',page,none),[{url:'https://ok.ru/videoembed/1234567',provider:'OK',type:'provider/ok'}],'a direct link needs no second fetch');
+ const asked=[],html='<a href="https://first.example/a"><span>Watch</span></a><a href="https://second.example/b">Watch</a><a href="https://basketball-video.com/x">Watch</a>';
+ const sources=await replaySourcesFrom(html,new URL('https://basketball-video.com/g'),async url=>{asked.push(url);return new Response(url.includes('first')?'<iframe src="https://bysesukior.com/e/abc"></iframe>':'<iframe src="//ok.ru/videoembed/7654321"></iframe>',{status:200});});
+ assert.deepEqual(asked.sort(),['https://first.example/a','https://second.example/b'],'its own links are not Watch pages');
+ assert.deepEqual(sources.map(s=>s.type),['provider/ok','embed/page']);assert.equal(sources[0].url,'https://ok.ru/videoembed/7654321');
+});
+test('the replay routes accept every league and only their own sites',async()=>{
+ for(const [sport,host] of [['nba','basketball-video.com'],['nhl','hockeyreplays.com'],['mlb','mlblive.net']]){
+  const asked=[],r=await replayCatalogAPI(new Request('https://x.test/api/replays?sport='+sport),async url=>{asked.push(url);return new Response('',{status:200});});assert.ok(asked.length>=3,sport);assert.ok(asked.every(u=>new URL(u).hostname===host),sport);assert.deepEqual((await r.json()).games,[]);
+ }
+ assert.equal((await replayResolveAPI(new Request('https://x.test/api/replays/resolve?url='+encodeURIComponent('https://evil.example/g')),async()=>new Response(''))).status,400);
+ const ok=await replayResolveAPI(new Request('https://x.test/api/replays/resolve?url='+encodeURIComponent('https://hockeyreplays.com/g')),async()=>new Response('<a href="//ok.ru/videoembed/1234567">Watch</a>',{status:200}));assert.equal((await ok.json()).sources[0].provider,'OK');
+});
+
+test('the condensed game and highlights buttons are not the replay, and the first server wins whichever answers first',async()=>{
+ const html='<b>Server #1 (OK)</b><a href="https://a.example/1"><span>Watch</span></a><p>---</p><b>Server #2 (OK)</b><a href="https://b.example/2">Watch</a><p>---</p><b>Condensed Game</b><a href="https://c.example/3">Watch</a><b>Highlights</b><a href="https://d.example/4">Watch</a>';
+ assert.deepEqual(parseWatchLinks(html,'basketball-video.com'),['https://a.example/1','https://b.example/2']);
+ const sources=await replaySourcesFrom(html,new URL('https://basketball-video.com/g'),async url=>{if(url.includes('a.example'))await new Promise(r=>setTimeout(r,20));return new Response(`<iframe src="//ok.ru/videoembed/${url.includes('a.example')?1111111:2222222}"></iframe>`,{status:200});});
+ assert.deepEqual(sources.map(s=>s.url),['https://ok.ru/videoembed/1111111','https://ok.ru/videoembed/2222222']);
 });

@@ -49,8 +49,8 @@ export async function sportsLeagueAPI(request,fetcher=fetch){
  const headers={Accept:'application/json'};if(own)headers.Cookie=`SWID=${own.swid}; espn_s2=${own.s2}`;
  try{
   const response=await fetcher(`https://lm-api-reads.fantasy.espn.com/apis/v3/games/${config.fantasy}/seasons/${season}/segments/0/leagues/${id}?view=mTeam&view=mRoster&view=mSettings&view=mMatchup&view=mMatchupScore&view=mLiveScoring`,{headers,redirect:'manual',signal:AbortSignal.timeout(12000)});
-  if(response.status>=300&&response.status<400)return sportJSON({error:'Reconnect ESPN with fresh credentials.',code:'ESPN_REDIRECT'},401);
-  if([401,403,404].includes(response.status))return sportJSON({error:response.status===404?'ESPN could not find this league for the selected sport and season.':'This league requires your current ESPN SWID and espn_s2 cookies.',code:'ESPN_DENIED'},response.status===404?404:401);
+  if(response.status>=300&&response.status<400)return sportJSON({error:'ESPN wouldn’t open your league. Your private league steps may need copying again.',code:'ESPN_REDIRECT'},401);
+  if([401,403,404].includes(response.status))return sportJSON({error:response.status===404?'ESPN could not find this league for the selected sport and season.':'That league is private. Follow the steps below to connect it.',code:'ESPN_DENIED'},response.status===404?404:401);
   if(!response.ok)throw new Error('upstream');const raw=await response.json();
   const teams=await sportMetadata(input.sport,season,fetcher);return sportJSON({...normalizeSportLeague(raw,input.sport,teams,own?.swid),sport:input.sport,leagueId:id,season,fetchedAt:Date.now()});
  }catch{return sportJSON({error:'ESPN could not return this league right now. Check the connection and retry.'},502);}

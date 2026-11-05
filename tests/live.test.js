@@ -112,8 +112,8 @@ test('liveGames() stamps fetchedAt with the injected clock, falls back on names,
  const games=liveGames(scoreboard(solo,event({id:'1'}),trio,event({id:'2',shortName:''}),{id:'3',competitions:[{competitors:[competitor(IND,'away',0),competitor(MIN,'home',0)]}]}),42);
  assert.deepEqual(games.map(g=>g.id),['1','2','3']);
  assert.deepEqual(games.map(g=>g.fetchedAt),[42,42,42]);
- assert.equal(games[1].name,'Indianapolis Colts at Minnesota Vikings');  // shortName empty -> name
- assert.equal(games[2].name,'NFL game');                                  // neither
+ assert.equal(games[1].name,'IND @ MIN');  // the same team codes as the rest of the page, whatever ESPN's own name says
+ assert.equal(games[2].name,'IND @ MIN');
  assert.equal(games[2].state,'pre');assert.equal(games[2].phase,'pre');   // no status at all
  assert.equal(games[2].teams[0].id,'11');
 });

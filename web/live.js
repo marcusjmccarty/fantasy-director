@@ -31,7 +31,7 @@ export function liveGames(raw,nowSeconds=Date.now()/1000){
    else if(last.scoringPlay||/touchdown|field goal good|safety/i.test(lastType)){phase='break';breakKind='score';}
    else if(possession<0){phase='break';breakKind='stoppage';}
   }
-  return {id:String(e.id),name:e.shortName||e.name||'NFL game',kind:'live',teams,state,phase,breakKind,score:teams.map(t=>t.score),scoreKnown,
+  return {id:String(e.id),name:teams.map(t=>t.abbr).join(' @ '),kind:'live',teams,state,phase,breakKind,score:teams.map(t=>t.score),scoreKnown,
    possession,down,distance:Number(s.distance||0),yardsToGoal:ytg,special:down<=0,kick:/kickoff|punt/i.test(lastType),
    period:Number(status.period||0),clock:status.displayClock||'',detail:type.shortDetail||'',downDistance:s.shortDownDistanceText||'',
    lastPlay:last.text||'',lastPlayId,playType:lastType,nextSnapIn:null,date:e.date,season:Number(raw.season?.year||e.season?.year)||null,week:Number(raw.week?.number||e.week?.number)||null,scores:[],fetchedAt:nowSeconds};

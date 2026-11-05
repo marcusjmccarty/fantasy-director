@@ -1,4 +1,5 @@
-import {StreamFinder} from '../web/stream-finder.js';
+import {StreamFinder,refusesFrame} from '../web/stream-finder.js';
+import * as strip from '../web/strip.js';
 // Exercise app-level state transitions with the real domain modules and a small
 // DOM/player boundary. No network, browser automation or production credentials.
 import test from 'node:test';
@@ -67,7 +68,7 @@ function app(fetcher=async()=>Response.json({events:[]}),{media=false,native=fal
  const frameFactory=()=>{const navigations=[];return ()=>{const f=new Video();let src;f.navigations=navigations;Object.defineProperty(f,'src',{get(){return src;},set(url){src=url;navigations.push(url);frameEvents.onNavigate?.(url,f);}});return f;};};
  class MediaPool extends PlayerPool{constructor(host,options){super(host,{...options,now:()=>time.now,create:source=>provider&&source.type==='provider/ok'?provider(source,time):embeds&&source.type==='embed/page'?new EmbedPlayer(source.url,{now:()=>time.now,createFrame:frameFactory(),autoReconnect:source.autoReconnect}):native?new ctx.Native(source):new Media(source)});}}
  const storage=new Map(stored===null?[]:[['fantasy-stream-v3',JSON.stringify(stored)]]);
- const ctx={StreamFinder,...archive,...sync,...director,...coverage,...replays,...live,...scoring,...roster,...highlights,...preferences,...liveHighlights,...continuity,...breaks,...scoreboard,...chat,...archiveBuild,FantasyScoreFeed:class extends scoreboard.FantasyScoreFeed{constructor(){super({fetcher});}sync(connection,seed){this.connection=connection;if(scores)return super.sync(connection,seed);}},PlayerPool:media?MediaPool:Pool,NFLSourceCatalog:class{},document,window:{navigator:{onLine:true},addEventListener(){}},localStorage:{getItem:key=>storage.get(key)||null,setItem(key,value){if(storageBlocked)throw new Error('Storage unavailable');storage.set(key,value);}},performance:{now:()=>time.now},setTimeout(fn,delay){timers.set(++timerId,{fn,delay});return timerId;},clearTimeout(id){timers.delete(id);},setInterval:()=>0,fetch:fetcher,CSS:{escape:value=>String(value)},AbortSignal,AbortController,Response,URL,URLSearchParams,Date,console};
+ const ctx={StreamFinder,refusesFrame,...strip,...archive,...sync,...director,...coverage,...replays,...live,...scoring,...roster,...highlights,...preferences,...liveHighlights,...continuity,...breaks,...scoreboard,...chat,...archiveBuild,FantasyScoreFeed:class extends scoreboard.FantasyScoreFeed{constructor(){super({fetcher});}sync(connection,seed){this.connection=connection;if(scores)return super.sync(connection,seed);}},PlayerPool:media?MediaPool:Pool,NFLSourceCatalog:class{},document,window:{navigator:{onLine:true},addEventListener(){}},localStorage:{getItem:key=>storage.get(key)||null,setItem(key,value){if(storageBlocked)throw new Error('Storage unavailable');storage.set(key,value);}},performance:{now:()=>time.now},setTimeout(fn,delay){timers.set(++timerId,{fn,delay});return timerId;},clearTimeout(id){timers.delete(id);},setInterval:()=>0,fetch:fetcher,CSS:{escape:value=>String(value)},AbortSignal,AbortController,Response,URL,URLSearchParams,Date,console};
  vm.createContext(ctx);
  if(native){ctx.attachMediaSource=async()=>null;const code=readFileSync(new URL('../web/native-player.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace('export class NativePlayer','class NativePlayer');vm.runInContext(code+'\nglobalThis.Native=NativePlayer;',ctx);}
  vm.runInContext(script+'\n globalThis.a={S,pool,streamFinder,refreshStreamLinks,fantasyFeed,director,coverage,clock,step,frame,picture,target,openPastReplay,selectWeek,applyReplayLinks,loadReplayArchive,updateBreaks,advanceClock,skipBreak,selectGame,excluded,cutTo,warm,startHighlight,updateHighlight,finishHighlight,syncFor,nudge,nfl,setMode,setPlaying,setDay,seekTo,replaySource,useRoster,importLeague,pollLive,pollLiveClips,prepareReplay,retryMissedReplays,failHighlight,render,init,roster,get saved(){return saved;}};',ctx);
@@ -183,10 +184,21 @@ test('family: a partially entered private-league connection is validated instead
  a.el('leagueId').value='123';a.el('espnSwid').value='{12345678-1234-1234-1234-123456789012}';await a.importLeague();
  assert.equal(payload.swid,a.el('espnSwid').value);assert.equal(payload.s2,'');assert.match(a.el('leagueStatus').textContent,/Paste both SWID/);assert.equal(a.el('importLeague').disabled,false);
 });
-test('new viewers start in live mode and must choose their own players',()=>{
- const a=app();a.render();assert.equal(a.S.mode,'live');assert.equal(a.roster().length,0);
- a.el('ovButton').onclick();assert.equal(a.el('lineupDialog').open,true);assert.equal(a.S.started,false);
- assert.equal(a.el('rosterRows').children.length,1);
+// The archive is here and no lineup has been chosen: a first visit a moment after the page opens.
+function sampleReady(a){a.S.archive=new archive.ReplayArchive(archiveData);a.S.day=1;const day=a.S.archive.sessions[1];a.clock.end=day.end;a.clock.seek(day.start,0);}
+test('new viewers start in live mode, and the main button plays something instead of asking for a league',async()=>{
+ const a=app(undefined,{media:true});sampleReady(a);a.render();assert.equal(a.S.mode,'live');assert.equal(a.roster().length,0);
+ assert.equal(a.el('ovButton').textContent,'Watch the latest replay');assert.equal(a.el('ovGhost').textContent,'Connect ESPN');assert.equal(a.el('ovGhost').hidden,false);
+ await a.el('ovButton').onclick();assert.equal(a.el('lineupDialog').open,undefined);assert.equal(a.S.mode,'replay');assert.equal(a.S.startOnLanding,true);
+ a.frame(a.time.now);assert.equal(a.S.playing,true,'one click: no second button once the replay has landed');assert.equal(a.S.startOnLanding,false);
+ const b=app();b.render();b.el('ovGhost').onclick();assert.equal(b.el('lineupDialog').open,true);assert.equal(b.S.started,false);assert.equal(b.el('rosterRows').children.length,1);
+});
+test('the first screen names a live game with a stream, and Play with no lineup plays it instead of opening the league form',()=>{
+ const a=app(undefined,{media:true});a.S.live.games=[game];a.S.games=[game];a.S.live.feed.push([game],970);a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.render();
+ assert.equal(a.el('ovButton').textContent,'Watch IND @ MIN');a.setPlaying(true);assert.equal(a.S.pinned,'A');assert.equal(a.el('lineupDialog').open,undefined);
+});
+test('a first-click replay is dropped if the viewer presses Live before it lands',async()=>{
+ const a=app();sampleReady(a);await a.el('ovButton').onclick();assert.equal(a.S.startOnLanding,true);await a.setMode('live');assert.equal(a.S.startOnLanding,false);a.frame(a.time.now);assert.equal(a.S.playing,false);
 });
 test('pause prevents director decisions and stops recording coverage',()=>{
  const a=app();ready(a);a.S.started=true;a.S.playing=false;a.S.program={kind:'game',id:'A'};a.S.lastAt=999;
@@ -234,13 +246,13 @@ test('successful archive loading leaves live mode intact and prepares a valid re
  const a=app(async url=>Response.json(url==='/week7.json'?archiveData:String(url).includes('scoreboard')?{events:[]}:{clips:[]}));await a.init();assert.ok([...a.timers.values()].some(t=>t.delay===1200),'the archive is scheduled after the live page is up');await a.loadReplayArchive();
  assert.equal(a.S.mode,'live');assert.ok(a.S.archive);assert.ok(a.clock.at>=a.S.archive.sessions[a.S.day].start);
 });
-test('viewing room: the first-visit replay shortcut enters replay without starting playback',async()=>{
- const a=app(async url=>Response.json(url==='/week7.json'?archiveData:String(url).includes('scoreboard')?{events:[]}:{clips:[]}));a.render();assert.equal(a.el('previewReplay').hidden,true);await a.init();await a.loadReplayArchive();assert.equal(a.el('previewReplay').hidden,false);
- await a.el('previewReplay').onclick();assert.equal(a.S.mode,'replay');assert.equal(a.S.playing,false);assert.equal(a.el('replayControls').hidden,false);assert.match(a.el('streamsHelp').textContent,/No stream links needed/);assert.equal(a.el('previewReplay').hidden,true);
+test('viewing room: the first-visit replay shortcut enters replay and waits for the week to land',async()=>{
+ const a=app(async url=>Response.json(url==='/week7.json'?archiveData:String(url).includes('scoreboard')?{events:[]}:{clips:[]}));a.saved.lineupReady=true;a.saved.teamName='My lineup';a.render();assert.equal(a.el('ovGhost').hidden,false,'the shortcut is there at once: it waits for the archive itself');await a.init();await a.loadReplayArchive();assert.equal(a.el('ovGhost').textContent,'Try a replay first');
+ await a.el('ovGhost').onclick();assert.equal(a.S.mode,'replay');assert.equal(a.S.playing,false,'it starts once the week has landed');assert.equal(a.S.startOnLanding,true);assert.equal(a.el('replayControls').hidden,false);assert.match(a.el('streamsHelp').textContent,/No stream links needed/);assert.equal(a.el('ovGhost').hidden,true);
 });
 test('viewing room: switching back to live hides replay-only settings and restores stream instructions',async()=>{
  const a=app();replayReady(a);await a.setMode('replay');a.saved.dataOnly=true;a.render();assert.equal(a.el('speedControl').hidden,false);
- await a.setMode('live');assert.equal(a.el('replayControls').hidden,true);assert.equal(a.el('speedControl').hidden,true);assert.equal(a.el('channelMode').textContent,'Live games');assert.match(a.el('streamsHelp').textContent,/player URL/);
+ await a.setMode('live');assert.equal(a.el('replayControls').hidden,true);assert.equal(a.el('speedControl').hidden,true);assert.equal(a.el('channelMode').textContent,'Live games');assert.match(a.el('streamsHelp').textContent,/My link/);
 });
 test('viewing room: the fullscreen fallback has a working named exit',async()=>{
  const a=app();ready(a);await a.el('fullButton').onclick();assert.equal(a.el('fullButton').textContent,'Exit full screen');assert.equal(a.el('fullButton')['aria-label'],'Exit full screen');
@@ -248,8 +260,8 @@ test('viewing room: the fullscreen fallback has a working named exit',async()=>{
 });
 test('viewing room: selecting a game and returning to automatic switching have explicit labels',()=>{
  const a=app();ready(a);a.render();assert.match(a.el('games').html,/Jonathan Taylor/);assert.match(a.el('games').html,/Open the game tracker · add a stream for video/);
- a.el('games').onclick({target:{closest:()=>({dataset:{game:'A'}})}});assert.equal(a.S.pinned,'A');assert.equal(a.el('autoChip').textContent,'Your choice');assert.equal(a.el('resumeAuto').hidden,false);assert.match(a.el('games').html,/Your choice until a break · select again/);
- a.el('resumeAuto').onclick();assert.equal(a.S.pinned,null);assert.equal(a.el('autoChip').textContent,'Automatic');assert.equal(a.el('resumeAuto').hidden,true);
+ a.el('games').onclick({target:{closest:()=>({dataset:{game:'A'}})}});assert.equal(a.S.pinned,'A');assert.equal(a.el('autoChip').textContent,'Your choice');assert.equal(a.el('pinCurrent').textContent,'Back to automatic');assert.match(a.el('games').html,/Your choice until a break · select again/);
+ a.el('pinCurrent').onclick();assert.equal(a.S.pinned,null);assert.equal(a.el('autoChip').textContent,'Automatic');
  a.S.cooldown.set('A',Infinity);a.render();assert.match(a.el('games').html,/<button[^>]* disabled>/);assert.match(a.el('games').html,/Try another stream for this game/);
 });
 test('saving an unchanged imported lineup retains its ESPN connection',()=>{
@@ -330,9 +342,9 @@ test('a scoreboard outage does not suspend stalled-video recovery',()=>{
  assert.equal(video.destroyed,true);assert.equal(a.S.cooldown.has('A'),true);
 });
 test('embed safety: reloading a stream preserves manual choice, lineup, coverage and the other player',()=>{
- const a=app(undefined,{media:true,embeds:true});ready(a);a.saved.streams={'IND-MIN':'https://ntv.st/embed/a'};a.selectGame('A');
+ const a=app(undefined,{media:true,embeds:true});ready(a);a.saved.streams={'IND-MIN':'https://player.example/embed/a'};a.selectGame('A');
  const p=a.pool.current;a.time.now=2000;p.element.emit('load');a.time.now=4000;assert.equal(p.progressing,true);
- const spare=a.pool.open('spare',{url:'https://ntv.st/embed/b',type:'embed/page'}).player;
+ const spare=a.pool.open('spare',{url:'https://player.example/embed/b',type:'embed/page'}).player;
  a.coverage.watch('A',998,1000);const lineup=JSON.stringify(a.saved),cuts=a.S.cuts,choice=a.S.selection;
  a.S.stall={since:0,step:2};a.render();assert.equal(a.el('reloadStream').hidden,false);a.el('reloadStream').onclick();
  assert.equal(a.pool.current,p);assert.equal(p.loadedAt,null);assert.equal(a.S.stall,null);assert.equal(a.S.pinned,'A');assert.equal(a.S.selection,choice);assert.equal(a.S.cuts,cuts);
@@ -342,7 +354,7 @@ test('embed safety: reloading a stream preserves manual choice, lineup, coverage
 test('embed safety: repeated switches unload the outgoing page and retain the sandbox on return',()=>{
  const a=app(undefined,{media:true,embeds:true});ready(a);
  const other={...game,id:'B',teams:[{abbr:'SEA'},{abbr:'SF'}]};a.S.games.push(other);a.S.live.games.push(other);a.S.live.feed.push(a.S.games,970);
- a.saved.streams={'IND-MIN':'https://ntv.st/embed/a','SEA-SF':'https://ntv.st/embed/b'};
+ a.saved.streams={'IND-MIN':'https://player.example/embed/a','SEA-SF':'https://player.example/embed/b'};
  for(let i=0;i<16;i++){
   const id=i%2?'B':'A';a.selectGame(id);const current=a.pool.current;assert.equal(a.pool.visible,id,`switch ${i}: the new page must get its own load/recovery window`);assert.match(current.element.sandbox,/allow-scripts/);assert.equal(current.element.sandbox.includes('allow-popups'),false);
   for(const slot of a.pool.slots.values())if(slot.key!==id)assert.ok(!slot.player.element.src||slot.player.element.src==='about:blank');
@@ -352,7 +364,7 @@ test('embed safety: repeated switches unload the outgoing page and retain the sa
 test('embed recovery: a page that never loads retains the selected game through a long outage',()=>{
  const a=app(undefined,{media:true,embeds:true});ready(a);const other={...game,id:'B',teams:[{abbr:'SEA'},{abbr:'SF'}]};
  a.useRoster([player,{name:'Other starter',team:'SEA',position:'WR'}],{teamName:'Two games'});a.S.games=[game,other];a.S.live.games=a.S.games;a.S.live.feed.push(a.S.games,970);
- a.saved.streams={'IND-MIN':'https://ntv.st/embed/a','SEA-SF':'https://example.test/b.mp4'};a.selectGame('A');const p=a.pool.current;
+ a.saved.streams={'IND-MIN':'https://player.example/embed/a','SEA-SF':'https://example.test/b.mp4'};a.selectGame('A');const p=a.pool.current;
  for(const now of [16000,36000,66000,...Array.from({length:180},(_,i)=>126000+i*60000)]){
   a.time.now=now;a.step(now);assert.equal(a.pool.visible,'A','keep reconnecting the selected game');assert.equal(a.pool.current,p);
   assert.equal(a.S.cooldown.size,0);assert.equal(a.S.pinned,'A');assert.equal(a.S.started,true);assert.equal(a.S.playing,true);assert.equal(p.destroyed,false);
@@ -364,7 +376,7 @@ test('embed safety: reload is unavailable for direct video and highlights',()=>{
  const p=a.pool.current;a.el('reloadStream').onclick();assert.equal(a.pool.current,p);assert.equal(p.wantPlay,true);
 });
 test('embed recovery: the real app reconnects a loaded but unobservable stream without losing the manual choice',()=>{
- const a=app(undefined,{media:true,embeds:true});ready(a);a.saved.autoReconnect=true;a.saved.streams={'IND-MIN':'https://ntv.st/embed?t=a'};a.selectGame('A');const p=a.pool.current;p.element.emit('load');
+ const a=app(undefined,{media:true,embeds:true});ready(a);a.saved.autoReconnect=true;a.saved.streams={'IND-MIN':'https://player.example/embed?t=a'};a.selectGame('A');const p=a.pool.current;p.element.emit('load');
  const choice=a.S.selection,lineup=JSON.stringify(a.saved),cuts=a.S.cuts;
  a.time.now=120999;a.step(a.time.now);assert.equal(p.element.navigations.length,1);
  a.time.now=121000;a.step(a.time.now);a.render();assert.equal(p.element.navigations.length,2);assert.match(a.el('pictureNote').textContent,/Refreshing stream connection/);
@@ -372,25 +384,25 @@ test('embed recovery: the real app reconnects a loaded but unobservable stream w
  p.element.emit('load');a.time.now=123000;a.step(a.time.now);assert.equal(p.progressing,true);assert.equal(a.S.pinned,'A');
 });
 test('embed recovery: Pause and hidden tabs suppress reconnects and resume gets a fresh deadline',()=>{
- const a=app(undefined,{media:true,embeds:true});ready(a);a.saved.streams={'IND-MIN':'https://ntv.st/embed?t=a'};a.selectGame('A');const p=a.pool.current;p.element.emit('load');
+ const a=app(undefined,{media:true,embeds:true});ready(a);a.saved.streams={'IND-MIN':'https://player.example/embed?t=a'};a.selectGame('A');const p=a.pool.current;p.element.emit('load');
  a.setPlaying(false);const paused=p.element.navigations.length;a.time.now=1000000;a.step(a.time.now);assert.equal(p.element.navigations.length,paused);assert.equal(p.element.src,'about:blank');
  a.setPlaying(true);p.element.emit('load');a.step(a.time.now);assert.equal(p.element.navigations.length,paused+1);
  a.page.hidden=true;a.time.now+=1000;a.step(a.time.now);const hidden=p.element.navigations.length;a.time.now+=600000;a.step(a.time.now);assert.equal(p.element.navigations.length,hidden);
  a.page.hidden=false;a.step(a.time.now);assert.equal(p.element.navigations.length,hidden,'no burst of overdue refreshes');
 });
 test('embed recovery: network loss waits without exhausting retries and reconnects on restoration',()=>{
- const a=app(undefined,{media:true,embeds:true});ready(a);a.saved.streams={'IND-MIN':'https://ntv.st/embed?t=a'};a.selectGame('A');const p=a.pool.current;p.element.emit('load');
+ const a=app(undefined,{media:true,embeds:true});ready(a);a.saved.streams={'IND-MIN':'https://player.example/embed?t=a'};a.selectGame('A');const p=a.pool.current;p.element.emit('load');
  a.network.onLine=false;a.time.now=2000;a.step(a.time.now);a.time.now=302000;a.step(a.time.now);assert.equal(p.element.navigations.length,1);assert.equal(a.S.cooldown.size,0);
  a.network.onLine=true;a.step(a.time.now);assert.equal(p.element.navigations.length,2);assert.equal(a.S.pinned,'A');assert.match(p.recoveryMessage,/Connection restored/);
 });
 test('embed recovery: the saved setting updates existing and newly opened players without an immediate reload',()=>{
- const a=app(undefined,{media:true,embeds:true});ready(a);a.saved.streams={'IND-MIN':'https://ntv.st/embed?t=a'};a.selectGame('A');const p=a.pool.current;p.element.emit('load');
+ const a=app(undefined,{media:true,embeds:true});ready(a);a.saved.streams={'IND-MIN':'https://player.example/embed?t=a'};a.selectGame('A');const p=a.pool.current;p.element.emit('load');
  a.el('optReconnect').onchange({target:{checked:false}});assert.equal(a.saved.autoReconnect,false);assert.equal(p.autoReconnect,false);assert.equal(JSON.parse(a.storage.get('fantasy-stream-v3')).autoReconnect,false);
  a.time.now=500000;a.step(a.time.now);assert.equal(p.element.navigations.length,1);
  a.pool.close('A');a.S.program={kind:'standby'};a.selectGame('A');const replacement=a.pool.current;assert.equal(replacement.autoReconnect,false);replacement.element.emit('load');
  a.el('optReconnect').onchange({target:{checked:true}});a.step(a.time.now);assert.equal(replacement.element.navigations.length,1);a.time.now+=120000;a.step(a.time.now);assert.equal(replacement.element.navigations.length,2);
 });
-function embeddedGame(){const a=app(undefined,{media:true,embeds:true});ready(a);a.saved.streams={'IND-MIN':'https://ntv.st/embed?t=a'};a.selectGame('A');return a;}
+function embeddedGame(){const a=app(undefined,{media:true,embeds:true});ready(a);a.saved.streams={'IND-MIN':'https://player.example/embed?t=a'};a.selectGame('A');return a;}
 function nativeFullscreen(a){
  a.stage.requestFullscreen=async()=>{a.page.fullscreenElement=a.stage;a.emitPage('fullscreenchange');};
  a.page.exitFullscreen=async()=>{a.page.fullscreenElement=null;a.emitPage('fullscreenchange');};
@@ -439,7 +451,7 @@ test('embed fullscreen: stale reconnect events from a retired player cannot chan
  assert.equal(a.stage.classList.contains('theater'),false);assert.notEqual(a.pool.current,old);
 });
 test('site recovery: failed pages rotate same-game backups across arbitrary hosts without losing fullscreen or selection',async()=>{
- for(const host of ['streamcorner.st','ntv.st','sports.example']){
+ for(const host of ['streamcorner.st','sports.example']){
   const a=app(undefined,{media:true,embeds:true});ready(a);a.saved.streams={'IND-MIN':`https://${host}/embed/game`};a.saved.streamBackups={'IND-MIN':'https://backup.example/embed/game'};a.selectGame('A');nativeFullscreen(a);await a.el('fullButton').onclick();
   const selection=a.S.selection,cuts=a.S.cuts;let last=a.pool.current,changes=0;const times=[];
   for(let now=1000;now<=600000;now+=250){
@@ -455,7 +467,7 @@ test('site recovery: scheduled refresh does not rotate an unobservable loaded pa
 });
 test('site recovery: manual backup switches retain lineup, coverage and selection and obey Pause',()=>{
  const a=embeddedGame();a.saved.streamBackups={'IND-MIN':'https://backup.example/embed/game'};a.coverage.watch('A',998,1000);const selection=a.S.selection,roster=JSON.stringify(a.saved.roster),first=a.pool.current;a.render();
- assert.equal(a.el('nextStream').hidden,false);a.el('nextStream').onclick();assert.equal(first.destroyed,true);assert.equal(a.pool.get('A').url,a.saved.streamBackups['IND-MIN']);assert.equal(a.el('nextStream').textContent,'Try primary');assert.equal(a.S.selection,selection);assert.equal(JSON.stringify(a.saved.roster),roster);assert.equal(a.coverage.intervals.get('A').length,1);
+ assert.equal(a.el('nextStream').hidden,false);a.el('nextStream').onclick();assert.equal(first.destroyed,true);assert.equal(a.pool.get('A').url,a.saved.streamBackups['IND-MIN']);assert.equal(a.el('nextStream').hidden,false);assert.equal(a.S.selection,selection);assert.equal(JSON.stringify(a.saved.roster),roster);assert.equal(a.coverage.intervals.get('A').length,1);
  a.setPlaying(false);const paused=a.pool.current;a.el('nextStream').onclick();assert.equal(a.pool.current,paused);assert.equal(a.el('nextStream').disabled,true);
 });
 async function nativeGame({backup=false}={}){
@@ -846,7 +858,7 @@ test('break recovery: an in-band commercial can be skipped to a configured non-r
 });
 test('break recovery: no alternative video hides and mutes the commercial until a stream is available',()=>{
  const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.setPlaying(true);a.cutTo('A',1000);const p=a.pool.current;a.pool.setMuted(false);a.skipBreak();
- assert.equal(a.S.breaks.size,1);assert.equal(a.S.program.kind,'standby');assert.equal(a.pool.visible,null);assert.equal(p.muted,true);assert.match(a.el('toast').textContent,/break is hidden/);
+ assert.equal(a.S.breaks.size,1);assert.equal(a.S.program.kind,'standby');assert.equal(a.pool.visible,null);assert.equal(p.muted,true);assert.match(a.el('toast').textContent,/comes back in 90 seconds/);
  a.time.now=91001;a.step(a.time.now);assert.equal(a.pool.visible,'A');
 });
 test('break recovery: a provider ad yields to a non-roster stream without counting ad coverage',()=>{
@@ -928,7 +940,7 @@ test('replay continuity: the app passes media protection to the director, but an
 });
 
 test('interface: the replay lineup editor shows the sample players that are actually being followed',()=>{
- const a=app();a.S.mode='replay';a.el('lineupButton').onclick();assert.equal(a.el('rosterRows').children.length,a.roster().length);assert.ok(a.roster().length>1);assert.match(a.el('lineupStatus').textContent,/Replay changes do not change your live lineup/);
+ const a=app();a.S.mode='replay';a.el('lineupButton').onclick();assert.equal(a.el('rosterRows').children.length,a.roster().length);assert.ok(a.roster().length>1);assert.match(a.el('lineupStatus').textContent,/sample team/);assert.match(a.el('playersState').textContent,/sample team/i);a.saved.lineupReady=true;a.saved.teamName='My lineup';a.el('lineupButton').onclick();assert.match(a.el('lineupStatus').textContent,/apply to replays only, not your live team/);
 });
 test('manual choice: a detected break ends the selection and returns control to the director',()=>{
  const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/a.mp4','SEA-SF':'https://example.test/x.mp4'};
@@ -1094,7 +1106,7 @@ test('stream links cover the entire slate even with no lineup or no lineup games
 test('live RedZone mode plays a saved non-roster game after all starters finish and returns to roster action',()=>{
  const a=app(undefined,{media:true});ready(a);const mine={...game,state:'post',phase:'final'},other={...game,id:'B',name:'SF at SEA',teams:[{abbr:'SF'},{abbr:'SEA'}],yardsToGoal:8};
  a.saved.streams={'IND-MIN':'https://example.test/mine.mp4','SEA-SF':'https://example.test/other.mp4'};a.S.games=[mine,other];a.S.live.games=[mine,other];a.S.live.feed.push([mine,other],970);a.setPlaying(true);a.step(1000);
- assert.equal(a.pool.visible,'B');assert.match(a.S.decision.reason,/RedZone mode/);
+ assert.equal(a.pool.visible,'B');assert.match(a.S.decision.reason,/Best chance to score/);
  a.S.live.feed.push([game,other],970);a.step(1250);assert.equal(a.pool.visible,'A');
 });
 test('manual choice remains authoritative in RedZone mode until its natural break',()=>{
@@ -1142,17 +1154,17 @@ test('embed fallback: opening the original page follows the selected source and 
 
 function discoveryReady(a){ready(a);const g={...game,teams:game.teams.map((t,i)=>({...t,name:i?'Minnesota Vikings':'Indianapolis Colts'}))};a.S.games=[g];a.S.live.games=[g];a.S.live.feed=new live.LiveFeed();a.S.live.feed.push([g],970);a.saved.leagueId='123';a.saved.teamId='1';return g;}
 function discoveryResponse(url,token='published'){
- if(url.startsWith('/api/streams?'))return Response.json({sport:'nfl',entries:[{id:'match',sport:'nfl',title:'Indianapolis Colts vs Minnesota Vikings',start:Date.parse(game.date),sources:['https://ntv.st/watch/raptor/match?source=0']}]});
- return Response.json({page:new URL(url,'https://app.example').searchParams.get('url'),url:'https://ntv.st/embed?t='+token});
+ if(url.startsWith('/api/streams?'))return Response.json({sport:'nfl',entries:[{id:'match',sport:'nfl',title:'Indianapolis Colts vs Minnesota Vikings',start:Date.parse(game.date),sources:['https://streamcorner.st/watch/match?source=0']}]});
+ return Response.json({page:new URL(url,'https://app.example').searchParams.get('url'),url:'https://player.example/embed?t='+token});
 }
 test('discovery: saved ESPN team starts with the published player and never frames the provider webpage',async()=>{
- const a=app(async u=>discoveryResponse(u),{media:true,embeds:true});discoveryReady(a);await a.refreshStreamLinks();a.step(a.time.now);assert.equal(a.S.playing,true);assert.equal(a.pool.get('A').url,'https://ntv.st/embed?t=published');assert.deepEqual(Object.keys(a.saved.streams),[]);assert.equal(a.el('openStream').href,'https://ntv.st/watch/raptor/match?source=0');
+ const a=app(async u=>discoveryResponse(u),{media:true,embeds:true});discoveryReady(a);await a.refreshStreamLinks();a.step(a.time.now);assert.equal(a.S.playing,true);assert.equal(a.pool.get('A').url,'https://player.example/embed?t=published');assert.deepEqual(Object.keys(a.saved.streams),[]);assert.equal(a.el('openStream').href,'https://streamcorner.st/watch/match?source=0');
 });
 test('discovery: a late player lookup cannot override Pause',async()=>{
- const pending=deferred(),a=app(u=>u.startsWith('/api/streams?')?Promise.resolve(discoveryResponse(u)):pending.promise,{media:true,embeds:true});discoveryReady(a);const lookup=a.refreshStreamLinks();await flush();a.setPlaying(false);pending.resolve(discoveryResponse('/api/streams/resolve?url='+encodeURIComponent('https://ntv.st/watch/raptor/match?source=0')));await lookup;a.step(a.time.now);assert.equal(a.S.playing,false);assert.equal(a.pool.visible,null);
+ const pending=deferred(),a=app(u=>u.startsWith('/api/streams?')?Promise.resolve(discoveryResponse(u)):pending.promise,{media:true,embeds:true});discoveryReady(a);const lookup=a.refreshStreamLinks();await flush();a.setPlaying(false);pending.resolve(discoveryResponse('/api/streams/resolve?url='+encodeURIComponent('https://streamcorner.st/watch/match?source=0')));await lookup;a.step(a.time.now);assert.equal(a.S.playing,false);assert.equal(a.pool.visible,null);
 });
 test('discovery: renewing the official embed token leaves a healthy fullscreen stream and manual choice intact',async()=>{
- let token='first';const a=app(async u=>discoveryResponse(u,token),{media:true,embeds:true});discoveryReady(a);await a.refreshStreamLinks();a.selectGame('A');const p=a.pool.current;p.element.emit('load');nativeFullscreen(a);await a.el('fullButton').onclick();const selection=a.S.selection;token='second';a.streamFinder.resolved.clear();a.streamFinder.catalogs.clear();await a.refreshStreamLinks();a.step(a.time.now);assert.equal(a.pool.current,p);assert.equal(a.S.selection,selection);assert.equal(a.page.fullscreenElement,a.stage);assert.equal(a.pool.get('A').url,'https://ntv.st/embed?t=first');
+ let token='first';const a=app(async u=>discoveryResponse(u,token),{media:true,embeds:true});discoveryReady(a);await a.refreshStreamLinks();a.selectGame('A');const p=a.pool.current;p.element.emit('load');nativeFullscreen(a);await a.el('fullButton').onclick();const selection=a.S.selection;token='second';a.streamFinder.resolved.clear();a.streamFinder.catalogs.clear();await a.refreshStreamLinks();a.step(a.time.now);assert.equal(a.pool.current,p);assert.equal(a.S.selection,selection);assert.equal(a.page.fullscreenElement,a.stage);assert.equal(a.pool.get('A').url,'https://player.example/embed?t=first');
 });
 test('discovery: switching to replay while lookup is pending cannot reopen live playback',async()=>{
  const pending=deferred(),a=app(()=>pending.promise,{media:true,embeds:true});discoveryReady(a);const lookup=a.refreshStreamLinks();a.S.archive=new archive.ReplayArchive(archiveData);a.setMode('replay');pending.resolve(discoveryResponse('/api/streams?sport=nfl'));await lookup;assert.equal(a.S.mode,'replay');assert.equal(a.S.playing,false);assert.equal(a.pool.visible,null);
@@ -1168,7 +1180,7 @@ test('custom save replaces the playing automatic source even when it remains ava
  assert.equal(old.destroyed,true);assert.equal(a.pool.get('A').url,'https://custom.example/embed/live');assert.ok(a.streamFinder.options(a.S.games[0]).length);assert.equal(a.S.pinned,'A');
  // Explicit automatic selection keeps the custom URL saved for later.
  a.el('streamsPanel').onclick({target:{closest:()=>({dataset:{sourceGame:'A',sourceMode:'auto'}})}});a.step(a.time.now);
- assert.equal(a.pool.get('A').url,'https://ntv.st/embed?t=published');assert.equal(a.saved.streams['IND-MIN'],'https://custom.example/embed/live');
+ assert.equal(a.pool.get('A').url,'https://player.example/embed?t=published');assert.equal(a.saved.streams['IND-MIN'],'https://custom.example/embed/live');
 });
 test('a late custom page extraction respects Pause and a newer saved primary',async()=>{
  const pending=deferred(),a=app(url=>String(url).includes('/resolve?')?pending.promise:Promise.resolve(Response.json({events:[]})),{media:true,embeds:true});ready(a);a.saved.streams={'IND-MIN':'https://custom.example/embed/old'};a.selectGame('A');a.render();
@@ -1550,7 +1562,7 @@ test('the strip arrows chain only while their own scroll is moving, and a stale 
 
 // ---------- render cost: past tiles built once, the strip patched, text and requests not repeated ----------
 const stripDOM=list=>{let items=[];const writes=[];Object.defineProperty(list,'innerHTML',{configurable:true,set(value){writes.push(value);items=value.split(/(?=<li )/);},get(){return items.join('');}});Object.defineProperty(list,'children',{configurable:true,get(){return items;}});Object.defineProperty(list,'lastElementChild',{configurable:true,get(){return {remove(){items.pop();}};}});list.insertAdjacentHTML=(_,html)=>{items.push(...html.split(/(?=<li )/));};return writes;};
-const pastGame=(id='P',counter={n:0})=>({id,date:'2026-09-13T17:00Z',detail:'Final',get name(){counter.n++;return 'IND at MIN';},teams:[{abbr:'IND',name:'Indianapolis Colts',score:'24'},{abbr:'MIN',name:'Minnesota Vikings',score:'17'}]});
+const pastGame=(id='P',counter={n:0})=>({id,date:'2026-09-13T17:00Z',name:'IND at MIN',get detail(){counter.n++;return 'Final';},teams:[{abbr:'IND',name:'Indianapolis Colts',score:'24'},{abbr:'MIN',name:'Minnesota Vikings',score:'17'}]});
 test('strip: past tiles are built once per set of weeks and lineup, and rendering again leaves them alone',()=>{
  const a=app();ready(a);const built={n:0},weeks=[{week:1,games:[pastGame('P',built)]}];a.S.pastWeeks=weeks;a.S.weeks.current=2;
  a.render();assert.equal(built.n,1);assert.match(a.el('games').innerHTML,/data-past-week="1"/);assert.match(a.el('games').innerHTML,/Week 2</);
@@ -1646,12 +1658,12 @@ test('NFL replay: a calibrated game\'s sync is left alone when its player correc
 });
 test('NFL replay: a recording the provider removed goes to the tracker for good, with no reload loop',t=>{
  const sim=okru(t,{length:8000}),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a);a.saved.highlights=false;a.seekTo(midGame(g));a.setPlaying(true);run(a,sim,5000);assert.equal(a.pool.visible,g.id);const at=a.S.at;
- sim.sims[0].send({event:'error',code:101});assert.equal(a.picture(g.id),'data');assert.equal(a.S.cooldown.size,0);assert.match(a.el('toast').textContent,/removed.*game tracker/);
+ sim.sims[0].send({event:'error',code:101});assert.equal(a.picture(g.id),'data');assert.equal(a.S.cooldown.size,0);assert.match(a.el('toast').textContent,/isn’t available.*game tracker/);
  run(a,sim,120000);assert.equal(sim.sims.length,1,'never opened again');assert.equal(a.S.program.id,g.id);assert.equal(a.pool.slots.size,0);assert.ok(a.S.at>at+60,'the clock runs on the tracker');
  for(const code of [102,103,150,151,152,153]){const other=okru(t,{length:8000}),b=app(undefined,{media:true,provider:other.create}),h=uncalibrated(b);b.saved.highlights=false;b.seekTo(midGame(h));b.setPlaying(true);run(b,other,5000);other.sims[0].send({event:'error',code});assert.equal(b.picture(h.id),'data',String(code));}
 });
 test('NFL replay: a game whose video is gone offers the replay-video shortcut, and the summary counts it out',t=>{
- const sim=okru(t,{length:8000}),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a);a.saved.highlights=false;a.seekTo(midGame(g));a.setPlaying(true);run(a,sim,5000);assert.equal(a.el('streamSummary').textContent,'1 of '+a.S.archive.games.length+' games have a replay video');
+ const sim=okru(t,{length:8000}),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a);a.saved.highlights=false;a.seekTo(midGame(g));a.setPlaying(true);run(a,sim,5000);assert.equal(a.el('streamSummary').textContent,'1 of '+a.S.archive.games.length+' games has a replay video');
  sim.sims[0].send({event:'error',code:101});a.render();assert.equal(a.el('streamSummary').textContent,'0 of '+a.S.archive.games.length+' games have a replay video');assert.match(a.el('games').innerHTML,new RegExp('data-add-stream="'+g.id+'"'));
 });
 test('NFL replay: a recording still processing keeps its retry',t=>{
@@ -1792,4 +1804,98 @@ test('Replay week: a tab left open across a week change moves the strip and the 
  await a.loadReplayArchive();await settle();assert.equal(a.S.weeks.current,9);assert.equal(a.S.weeks.latest,8);
  week=10;await a.pollLive(a.S.live.generation);await settle();assert.equal(a.S.weeks.current,10);assert.equal(a.S.weeks.latest,9);assert.match(a.el('weekSelect').innerHTML,/Week 9 · latest/);assert.ok(asked.some(u=>u.includes('week=9')),'the finished week joins the strip');
  const lists=asked.length;await a.pollLive(a.S.live.generation);await settle();assert.equal(asked.filter(u=>u.includes('dates=')).length,asked.slice(0,lists).filter(u=>u.includes('dates=')).length,'and a steady week asks for nothing more');
+});
+// ---------- first-draft pass: streams that refuse a frame ----------
+const NTV='https://ntv.st/watch/raptor/match?source=0';
+test('an NTV game never loads in a frame: pinned or chosen by the channel it follows on the tracker, with a real link to the video',()=>{
+ const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':NTV};a.saved.delay=0;a.render();assert.match(a.el('games').html,/Opens in new tab/);a.setPlaying(true);a.step(a.time.now);
+ assert.equal(a.pool.get('A'),null,'the channel found the game and opened no frame');assert.equal(a.S.program.id,'A');assert.equal(a.picture('A'),'data');
+ a.render();assert.equal(a.el('fieldView').hidden,false);assert.equal(a.el('fvOpen').hidden,false);assert.equal(a.el('fvOpen').href,NTV);assert.match(a.el('fvNote').textContent,/opens in a new tab/);
+ a.selectGame('A');a.step(a.time.now);assert.equal(a.pool.get('A'),null,'a viewer picking it opens no frame either');assert.equal(a.el('fvOpen').hidden,false);assert.equal(a.el('nextStream').hidden,true,'no backup on the same host to try');
+ a.saved.streams={'IND-MIN':'https://ntv.st/embed?t=pasted'};a.step(a.time.now);assert.equal(a.pool.get('A'),null,'a pasted embed link is the same host');
+ a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.step(a.time.now);assert.ok(a.pool.get('A'),'a link that can play here still does');
+});
+// ---------- a game that hasn't started ----------
+const preGame={...game,id:'P',name:'CIN @ ATL',state:'pre',phase:'pre',possession:-1,yardsToGoal:null,date:'2026-11-08T18:00:00Z',teams:[{id:'4',abbr:'CIN'},{id:'1',abbr:'ATL'}],detail:'11/8 - 1:00 PM EST',score:[0,0]};
+const onScreen=(a,g)=>{a.S.games=[g];a.S.live.games=[g];a.S.live.feed=new a.S.live.feed.constructor();a.S.live.feed.push([g],970);a.saved.delay=0;a.S.at=Date.now()/1000;};
+test('a game that has not started is not called LIVE, loads nothing, and offers the stream early or the way back',()=>{
+ const a=app(undefined,{media:true});ready(a);onScreen(a,preGame);a.saved.streams={'ATL-CIN':'https://example.test/embed/cin'};a.selectGame('P');a.step(a.time.now);
+ assert.equal(a.pool.get('P'),null,'no frame until someone asks');a.render();assert.equal(a.el('overlay').hidden,false);assert.match(a.el('ovTitle').innerHTML,/Kickoff/);assert.equal(a.el('ovButton').dataset.action,'early');assert.equal(a.el('ovGhost').textContent,'Back to the channel');
+ a.el('ovGhost').onclick();assert.equal(a.S.pinned,null,'back to the channel lets go of the game');
+ a.selectGame('P');a.step(a.time.now);a.el('ovButton').onclick();a.step(a.time.now);assert.ok(a.pool.get('P'),'asked for early: now it opens');
+});
+test('the bar under the video says what state the game is in, and only then what the score is',()=>{
+ const a=app(undefined,{media:true});ready(a);const see=(g,tag)=>{onScreen(a,g);a.S.started=true;a.S.program={kind:'game',id:g.id};a.S.earlyOpen.add(g.id);a.S.overlayOff=true;a.render();assert.equal(a.el('bugTag').textContent,tag,g.state);assert.equal(a.el('bugTag').dataset.state,g.state);};
+ see(preGame,'LATER');assert.match(a.el('bugGame').innerHTML,/CIN <span class="at">@<\/span> ATL/);assert.match(a.el('bugClock').textContent,/Kickoff/);assert.doesNotMatch(a.el('bugClock').textContent,/EST/);assert.match(a.el('lowerKicker').textContent,/KICKOFF/);assert.equal(a.el('skipBreak').hidden,true,'no break to skip');
+ see({...game,state:'post',phase:'final',detail:'Final',score:[20,17]},'FINAL');see({...game},'LIVE');see({...game,phase:'break'},'BREAK');
+});
+test('tiles stay in kickoff order whatever is on air, with ties settled the same way every time',()=>{
+ const later={...game,id:'L',teams:[{id:'9',abbr:'GB'},{id:'3',abbr:'CHI'}],date:'2026-11-08T21:00:00Z'},tie={...game,id:'T',teams:[{id:'2',abbr:'BUF'},{id:'15',abbr:'MIA'}],date:'2026-11-08T21:00:00Z'};
+ const a=app(undefined,{media:true});ready(a);const order=()=>[...a.el('games').html.matchAll(/data-game="(\w+)"/g)].map(m=>m[1]);
+ a.S.games=[later,tie,{...game}];a.S.live.games=a.S.games;a.render();assert.deepEqual(order(),['A','L','T']);
+ a.S.started=true;a.S.program={kind:'game',id:'T'};a.S.pinned='T';a.render();assert.deepEqual(order(),['A','L','T'],'picking a tile does not move it');
+});
+test('shortcuts leave the browser\'s own keys alone, and arrows on a tab do not seek the replay',()=>{
+ const a=app();replayReady(a);a.S.mode='replay';let full=0,mute=0;a.el('fullButton').click=()=>full++;a.el('muteButton').click=()=>mute++;const target={closest:()=>null};
+ a.emitPage('keydown',{key:'f',metaKey:true,target});a.emitPage('keydown',{key:'f',ctrlKey:true,target});a.emitPage('keydown',{key:'m',metaKey:true,target});assert.equal(full,0);assert.equal(mute,0);
+ const at=a.S.at;a.emitPage('keydown',{key:'ArrowLeft',metaKey:true,target,preventDefault(){}});a.emitPage('keydown',{key:'ArrowRight',defaultPrevented:true,target,preventDefault(){}});assert.equal(a.S.at,at);
+ a.emitPage('keydown',{key:'f',target});assert.equal(full,1,'the plain key still works');
+ a.el('muteButton').hidden=true;a.emitPage('keydown',{key:'m',target});assert.equal(mute,0,'a hidden mute button is not pressed by its key');
+});
+// ---------- a recording that never shows footage here ----------
+test('a replay that never shows footage stops hopping: it holds a link to the video, offers a way out at 20 seconds, and Play tries again',()=>{
+ const {a,g,p,to,since}=waitingFrame();p.played=false;to(since+8250);assert.equal(a.pool.visible,g.id);
+ to(since+21000);a.render();assert.equal(a.pool.visible,g.id,'a tap may still start it');assert.equal(a.el('frameHelp').hidden,false);assert.equal(a.el('frameOpen').href,g.embed);
+ to(since+91000);assert.equal(a.pool.get(g.id),null);assert.equal(a.S.cooldown.has(g.id),false,'not cooled: nothing to come back to');assert.equal(a.S.playing,false);a.render();
+ assert.match(a.el('ovTitle').innerHTML,/won’t play inside the page/);assert.equal(a.el('ovOpen').hidden,false);assert.equal(a.el('ovOpen').href,g.embed);assert.equal(a.el('frameHelp').hidden,true);
+ a.el('ovButton').onclick();assert.equal(a.S.wontPlay,null);assert.equal(a.S.playing,true);
+});
+test('a replay frame that never says anything gets the short limit and the same way out; one that once played still hops',()=>{
+ const silent=waitingFrame();silent.p.played=false;silent.p.initialized=false;silent.to(silent.since+8250);silent.to(silent.since+21000);assert.equal(silent.a.S.wontPlay?.id,silent.g.id);
+ const played=waitingFrame();played.p.played=true;played.to(played.since+8250);played.to(played.since+91000);assert.equal(played.a.S.wontPlay,null);assert.equal(played.a.S.cooldown.has(played.g.id),true);
+});
+// ---------- ESPN: disconnecting, private leagues, the sample team ----------
+test('Disconnect forgets the login on every league page and in the lineup kept for the other mode, and nothing still on its way brings it back',async()=>{
+ const pending=deferred(),a=app(()=>pending.promise);ready(a);const sports=JSON.stringify({swid:'{a}',s2:'b',leagueId:'7',teamId:'1',leagueSeason:2027,chatName:'Sam'});for(const s of ['nba','nhl','mlb'])a.storage.set('fantasy-stream-'+s+'-v1',sports);
+ a.saved.espn={swid:'{a}',s2:'b'};a.saved.leagueId='123';a.saved.teamId='1';a.saved.league={name:'L',teams:[]};a.S.replayLineup={espn:{swid:'{a}',s2:'b'},leagueId:'123'};a.S.liveLineup={espn:{swid:'{a}',s2:'b'},leagueId:'123'};
+ a.el('leagueId').value='123';const late=a.importLeague();a.el('forgetESPN').onclick();
+ assert.equal(JSON.stringify(a.saved.espn),'{"swid":"","s2":""}');assert.equal(a.saved.leagueId,'');assert.equal(a.saved.league,null);assert.equal(a.S.liveLineup.espn.s2,'');assert.equal(a.S.replayLineup.leagueId,'');assert.equal(a.el('espnS2').value,'');assert.equal(a.el('forgetESPN').hidden,true);
+ assert.doesNotThrow(()=>a.render(),'the scoreboard reads saved.espn whenever a league is connected, and copes when none is');
+ for(const s of ['nba','nhl','mlb']){const kept=JSON.parse(a.storage.get('fantasy-stream-'+s+'-v1'));assert.equal(kept.s2,'');assert.equal(kept.swid,'');assert.equal(kept.leagueId,'');assert.equal(kept.chatName,'Sam','only the login goes');}
+ assert.equal(JSON.parse(a.storage.get('fantasy-stream-v3')).espn.s2,'');
+ pending.resolve(Response.json({leagueId:'123',name:'L',teams:[{id:'1',name:'T',players:[player]}]},{headers:{'Content-Type':'application/json'}}));await late;assert.equal(a.saved.leagueId,'','a late answer cannot re-save the league');
+});
+test('a private league opens the private step before asking for its fields, so focus never lands on a hidden input',async()=>{
+ const a=app(async()=>Response.json({error:'That league is private. Follow the steps below to connect it.',code:'LEAGUE_PRIVATE'},{status:401}));a.el('privateLeague').open=false;a.el('leagueId').value='123';await a.importLeague();assert.equal(a.el('privateLeague').open,true);assert.match(a.el('leagueStatus').textContent,/private/);
+ const b=app();b.el('lineupButton').onclick();assert.equal(b.el('privateLeague').open,false,'nobody with no league saved is shown the cookie steps');assert.equal(b.el('leagueImport').open,true);
+ const c=app();c.saved.espn={swid:'{a}',s2:'b'};c.el('lineupButton').onclick();assert.equal(c.el('privateLeague').open,true,'saved values are shown so they can be changed');
+});
+test('in a replay with no lineup the team is named as a sample, and a choice made there carries over to Live',async()=>{
+ const a=app();sampleReady(a);a.saved.liveLineupMarker=1;await a.setMode('replay');a.render();assert.match(a.el('fantasyStatus').textContent,/sample team/);assert.equal(a.el('fantasyStatus').hidden,false);assert.equal(a.el('retryFantasy').hidden,false);assert.equal(a.el('retryFantasy').textContent,'Connect ESPN');assert.equal(a.el('youHeader').textContent,'Sample team');assert.equal(a.el('fantasyTitle').textContent,'Sample team');assert.doesNotMatch(a.el('ovText').textContent,/Sample lineup/);
+ a.useRoster([player],{teamName:'My lineup'});await a.setMode('live');assert.equal(a.saved.teamName,'My lineup','Live does not put the sample back');assert.equal(a.roster().length,1);
+});
+test('someone with a lineup of their own keeps it apart from replay changes',async()=>{
+ const a=app();replayReady(a);await a.setMode('replay');a.useRoster([{name:'Justin Jefferson',team:'MIN',position:'WR'}],{teamName:'Replay only'});await a.setMode('live');assert.equal(a.saved.teamName,'My lineup');
+});
+// ---------- wording under failure ----------
+test('with ESPN down on a first visit the strip and the screen say so, instead of looking like they are still loading',()=>{
+ const a=app();a.S.live.error='unavailable';a.render();assert.match(a.el('games').html,/Game updates are unavailable/);assert.doesNotMatch(a.el('games').html,/Loading the NFL schedule/);assert.match(a.el('ovText').textContent,/can’t reach the game schedule/);
+ a.S.live.error='';a.render();assert.match(a.el('games').html,/Loading the NFL schedule/);
+});
+test('Streams says this week for a week of games, and counts agree in number',()=>{
+ const a=app();ready(a);a.render();assert.equal(a.el('streamSummary').textContent,'0 of 1 game this week has a stream ready');a.S.live.games=[game,{...game,id:'B',teams:[{id:'9',abbr:'GB'},{id:'3',abbr:'CHI'}]}];a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.render();assert.equal(a.el('streamSummary').textContent,'1 of 2 games this week has a stream ready');a.S.live.games=[];a.render();assert.equal(a.el('streamSummary').textContent,'No games left this week');
+});
+test('the footer names the week being landed on, not the one being replaced',async()=>{
+ const a=app();replayReady(a);a.S.mode='replay';a.S.weeks.landing=8;a.render();assert.equal(a.el('channelMode').textContent,'Week 8 replay');a.S.weeks.landing=-1;a.render();assert.equal(a.el('channelMode').textContent,'Replay');a.S.weeks.landing=0;a.render();assert.equal(a.el('channelMode').textContent,'Week '+a.S.archive.data.week+' replay');
+});
+test('the week run survives the end of the regular season: all 18 weeks stay, and this week is labelled by name',async()=>{
+ const asked=[],a=app(async url=>{asked.push(String(url));return Response.json(String(url).includes('dates=')?{events:[]}:{season:{year:2026,type:3},week:{number:1,text:'Wild Card'},events:[]});});await a.init();await flush();await flush();await flush();
+ assert.equal(a.S.weeks.current,19);assert.equal(a.S.weeks.label,'Wild Card');assert.ok(asked.some(u=>u.includes('seasontype=2&week=18')),'week 18 is still fetched');
+});
+test('a hidden tab asks for no stream links, and catches up when it comes back',async()=>{
+ const asked=[],a=app(async url=>{asked.push(String(url));return Response.json(String(url).startsWith('/api/streams')?{sport:'nfl',entries:[]}:{events:[]});});ready(a);a.page.hidden=true;await a.refreshStreamLinks();assert.equal(asked.length,0);
+ a.page.hidden=false;a.emitPage('visibilitychange');await flush();assert.ok(asked.some(u=>u.startsWith('/api/streams')));
+});
+test('the way out of a replay that won\'t play is the main button, and trying again the second',()=>{
+ const {a,g,p,to,since}=waitingFrame();p.played=false;to(since+8250);to(since+91000);a.render();assert.match(a.el('ovButton').className,/ghost/);a.S.wontPlay=null;a.S.program={kind:'standby'};a.S.pending=null;a.render();assert.doesNotMatch(a.el('ovButton').className||'',/ghost/);void g;
 });

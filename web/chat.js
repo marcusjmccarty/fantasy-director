@@ -141,7 +141,7 @@ export function mountChat({$,sport,getName,setName,defaultName=()=>'',isOpen=()=
  $('chatNameButton').textContent=me()||'Set your name';
  return {
   client,
-  setRoom(next,nextLabel){label=nextLabel;head();if(next!==room){room=next;client.setRoom(next);}},
+  setRoom(next,nextLabel){label=nextLabel;head();$('chatNote').hidden=!String(next).includes(':league:');if(next!==room){room=next;client.setRoom(next);}},
   // A scoring play from the channel, once per room however many viewers announce it.
   event(text,key){if(room.includes(':league:'))client.send({kind:'event',text,key}).catch(()=>{});},
   markRead(){unread=0;badge();if(log.innerHTML)scrollDown();},

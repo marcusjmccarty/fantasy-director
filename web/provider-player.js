@@ -7,7 +7,7 @@ export function providerURL(value){
  const u=new URL(value);if(u.origin!==ORIGIN||!/^\/videoembed\/\d+$/.test(u.pathname))throw new Error('Unknown replay provider.');
  u.search='?autoplay=1&muted=1&silent=1';u.hash='';return u.href;
 }
-const ERRORS={100:'This recording is still processing.',101:'This recording was removed.',102:'The provider blocked this recording.',103:'The provider could not find this recording.',150:'The provider restricted this recording.',151:'The provider denied access to this recording.',152:'The provider disabled embedded playback.',153:'This recording is unavailable in your region.'};
+const GONE='This game’s video isn’t available.',ERRORS={100:'This recording is still processing.',101:GONE,102:GONE,103:GONE,150:GONE,151:GONE,152:GONE,153:GONE};
 
 export class ProviderPlayer{
  constructor(url,{events=window,now=()=>performance.now(),createFrame=()=>document.createElement('iframe'),duration=NaN}={}){
@@ -15,7 +15,7 @@ export class ProviderPlayer{
   this.element=createFrame();this.element.className='layer';this.element.title='Game replay';
   this.element.allow='autoplay; fullscreen; picture-in-picture; encrypted-media';this.element.referrerPolicy='strict-origin-when-cross-origin';
   this.duration=Number(duration)>0?Number(duration):NaN;this.knownDuration=Number.isFinite(this.duration);this.lastTime=0;this.lastMessage=-Infinity;this.lastAdvance=-Infinity;this.advances=0;
-  this.initialized=false;this.primed=false;this.inAd=false;this.timer=null;this.error=null;this.wantPlay=false;this.target=null;this.isMuted=true;this.seekedAt=-Infinity;this.seekStartedAt=null;this.seekLatency=3000;this.lastReport=-Infinity;this.kickedAt=-Infinity;this.audioLocked=false;this.audioWatch=null;this.otherLength=0;this.otherReports=0;this.corrected=false;
+  this.initialized=false;this.primed=false;this.inAd=false;this.timer=null;this.error=null;this.wantPlay=false;this.target=null;this.isMuted=true;this.seekedAt=-Infinity;this.seekStartedAt=null;this.seekLatency=3000;this.lastReport=-Infinity;this.kickedAt=-Infinity;this.audioLocked=false;this.audioWatch=null;this.otherLength=0;this.otherReports=0;this.corrected=false;this.played=false;
   this.element.setAttribute?.('sandbox','allow-scripts allow-same-origin allow-forms allow-presentation allow-storage-access-by-user-activation');   // the player works; popups and top navigation do not
   this.element.src=providerURL(url);   // validated before anything is registered
   this.onMessage=event=>this.receive(event);events.addEventListener('message',this.onMessage);
@@ -66,7 +66,8 @@ export class ProviderPlayer{
  // back to muted playback, flagging the slot so the app can offer a retry.
  set muted(value){
   this.isMuted=!!value;clearTimeout(this.audioWatch);this.audioWatch=null;
-  if(!this.initialized)return;
+  // Before footage has moved, a wedged unmute could not be told from a slow start: the wanted sound waits for the first moving picture.
+  if(!this.initialized||!this.played)return;
   this.applyVolume();
   if(!this.isMuted&&this.wantPlay){
    const mark=this.lastTime;
@@ -76,7 +77,7 @@ export class ProviderPlayer{
  }
  get muted(){return this.isMuted;}
  // Volume commands are sent only when the wanted state changes (or the player re-initialized); repeating them audibly stutters the provider.
- applyVolume(force=false){if(!force&&this.appliedMuted===this.isMuted)return;this.appliedMuted=this.isMuted;this.send(this.isMuted?'mute':'unmute');this.send('volume',{value:this.isMuted?0:1});}
+ applyVolume(force=false){const quiet=this.isMuted||!this.played;if(!force&&this.appliedMuted===quiet)return;this.appliedMuted=quiet;this.send(quiet?'mute':'unmute');this.send('volume',{value:quiet?0:1});}
  receive(event){
   if(event.origin!==ORIGIN||event.source!==this.element.contentWindow||!event.data||typeof event.data!=='object')return;
   const data=event.data,now=this.now();this.lastReport=now;
@@ -87,7 +88,7 @@ export class ProviderPlayer{
     if(this.wantPlay)this.bootstrap();else this.send('pause');
     return;
    case 'error':
-    this.error={code:'PROVIDER_'+(data.code??0),message:(ERRORS[data.code]||'The replay provider could not start this recording.')};
+    this.error={code:'PROVIDER_'+(data.code??0),message:(ERRORS[data.code]||GONE)};
     this.emit('error',this.error);return;
    case 'adShown':
     if(!this.inAd){this.inAd=true;this.advances=0;this.primed=false;this.emit('ad',true);}return;
@@ -125,7 +126,7 @@ export class ProviderPlayer{
    this.target=null;this.advances=0;if(this.wantPlay)this.bootstrap();
   }
   if(data.event!=='timeupdate')return;
-  if(data.time>this.lastTime+.02||this.advances===0){this.advances++;this.lastAdvance=now;if(this.advances>=2){this.primed=true;this.stalled=false;this.stopBootstrap();}}
+  if(data.time>this.lastTime+.02||this.advances===0){this.advances++;this.lastAdvance=now;if(this.advances>=2){this.primed=true;this.stalled=false;this.stopBootstrap();if(!this.played){this.played=true;this.lastTime=data.time;this.muted=this.isMuted;}}}
   this.lastTime=data.time;this.lastMessage=now;
   if(!this.wantPlay&&this.advances>2)this.send('pause');
  }

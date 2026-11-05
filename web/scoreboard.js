@@ -137,7 +137,7 @@ export class FantasyScoreFeed{
    if(!response.ok)throw Object.assign(new Error(data.error||'ESPN scores are unavailable'),{reconnect:[400,401,403,404,422].includes(response.status)||['ESPN_REDIRECT','CONNECTION_MISSING'].includes(data.code)});
    if(!this.valid(data,connection))throw new Error('ESPN did not return scores for the selected team and week.');
    this.data=data;this.updated=this.now();this.error='';this.needsConnection=false;
-  }catch(error){if(this.key===key&&this.pending===controller){this.needsConnection=!!error.reconnect;this.error=this.needsConnection?'Reconnect ESPN to restore league teams and fantasy scores. '+error.message:'Could not refresh fantasy points. Retrying automatically.';}}
+  }catch(error){if(this.key===key&&this.pending===controller){this.needsConnection=!!error.reconnect;this.error=this.needsConnection?'Reconnect ESPN to bring back your teams and fantasy scores.':'Could not refresh fantasy points. Retrying automatically.';}}
   finally{clearTimeout(timer);if(this.pending===controller){this.pending=null;this.next=this.now()+30000;}}
  }
 }

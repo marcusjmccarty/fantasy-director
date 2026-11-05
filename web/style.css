@@ -5,11 +5,11 @@
    condensed broadcast numerals. Spacing runs on a 4px grid. */
 :root{
  --bg:#090c12;--bg-2:#0c1018;--panel:#10151e;--panel-2:#151c27;--panel-3:#1c2432;--line:#1b2330;--line-2:#2a3445;
- --text:#edf1f7;--muted:#94a1b5;--faint:#66738a;
+ --text:#edf1f7;--muted:#94a1b5;--faint:#8794ab;
  --gold:#f6c54a;--gold-2:#ffd673;--gold-ink:#1a1300;--gold-soft:rgba(246,197,74,.12);--gold-line:rgba(246,197,74,.42);
  --live:#ff4b5c;--live-soft:rgba(255,75,92,.14);--green:#43d796;--green-soft:rgba(67,215,150,.12);--blue:#aab4c3;--blue-soft:rgba(255,255,255,.06);--red:#ff7b89;
  /* A calm palette: gold is yours, white-slate is theirs, green is in play, red is live or urgent. */
- --violet:#c2cad6;--violet-soft:rgba(194,202,214,.09);--teal:#43d796;--teal-soft:rgba(67,215,150,.11);--coral:#ff7b89;--coral-soft:rgba(255,123,137,.13);--slate:#7d8aa0;
+ --violet:#c2cad6;--violet-soft:rgba(194,202,214,.09);--teal:#43d796;--teal-soft:rgba(67,215,150,.11);--coral:#ff7b89;--coral-soft:rgba(255,123,137,.13);--slate:#8794ab;
  /* header 62 + strip 152 + room padding 28 + player chrome 146: the picture fills what is left of the screen */
  --chrome:420px;--rail:clamp(380px,calc(min(100vw,1680px) - 64px - (100vh - var(--chrome)) * 1.7778),600px);
  --radius:16px;--radius-s:10px;
@@ -70,19 +70,19 @@ input.switch{appearance:none;flex:none;width:40px;height:23px;min-height:0;paddi
 .strip-refresh{position:absolute;right:6px;bottom:6px;z-index:4;width:22px;min-width:22px;height:22px;min-height:0;padding:0;border-radius:50%;border-color:transparent;background:rgba(16,21,30,.85);color:var(--faint);opacity:.55;transition:opacity .2s,color .2s}.strip-refresh svg{width:12px;height:12px}.strip-refresh:hover{opacity:1;color:var(--text);background:var(--panel-2)}.strip-refresh:disabled{opacity:.3}
 .strip-day{position:absolute;left:24px;top:-1px;z-index:4;margin:0;padding:2px 9px;border-radius:0 0 8px 8px;background:var(--gold);color:var(--gold-ink);font-size:10.5px;font-weight:800;letter-spacing:.4px}.strip-day:empty{display:none}
 .week-label{flex:none;align-self:stretch;display:flex;align-items:center;justify-content:center;width:32px;margin-right:2px;border-radius:9px;background:rgba(255,255,255,.035);color:var(--faint);font-size:10.5px;font-weight:800;letter-spacing:1px;text-transform:uppercase;writing-mode:vertical-rl;transform:rotate(180deg);list-style:none}
-.tile.past{opacity:.82}.tile.past .g-cta{color:var(--muted)}.tile.past:hover{opacity:1}
+.tile.past .team-logo{opacity:.75}.tile.past::before{opacity:.35}.tile.past:hover .team-logo{opacity:1}.tile.past .g-cta{color:var(--muted)}
 .sb-refresh{display:inline-flex;align-items:center;gap:5px;align-self:flex-start;min-height:0;padding:0;border:0;background:none;color:var(--faint);font-size:10.5px;font-weight:600;line-height:1.35;white-space:normal;text-align:left}.sb-refresh svg{flex:none;width:12px;height:12px}.sb-refresh:hover{color:var(--text);background:none}.sb-refresh:disabled{opacity:.6}.back-today{align-self:flex-start;min-height:0;padding:0;font-size:10.5px}
 .strip-scroller{position:relative;flex:1;min-width:0;display:flex;align-items:stretch}
 .games{flex:1;min-width:0;display:flex;gap:10px;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x proximity;scroll-padding:0 28px;padding:3px 30px 5px 2px;scrollbar-width:none;list-style:none;margin:0}.games::-webkit-scrollbar{display:none}
 .strip-arrow{position:absolute;top:4px;bottom:34px;z-index:5;width:30px;min-width:30px;height:auto;padding:0;border-radius:9px;background:rgba(16,21,30,.94);border-color:var(--line-2);color:var(--text);font-size:22px;line-height:1;opacity:0;transition:opacity .2s;touch-action:manipulation}.strip-arrow.prev{left:-6px}.strip-arrow.next{right:-6px}.strip-scroller:hover .strip-arrow,.strip-arrow:focus-visible,.strip-arrow:active{opacity:1}@media(hover:none){.strip-arrow{display:none}}
 .tile{content-visibility:auto;contain-intrinsic-size:auto 228px auto 120px;flex:none;width:228px;scroll-snap-align:start;position:relative;display:flex;flex-direction:column;border-radius:13px;border:1px solid var(--line);overflow:hidden;
- background:linear-gradient(155deg,color-mix(in srgb,var(--away) 8%,transparent) 0%,transparent 42%),linear-gradient(335deg,color-mix(in srgb,var(--home) 8%,transparent) 0%,transparent 42%),var(--panel);transition:border-color .15s,transform .15s,box-shadow .15s}
+ background-color:var(--panel);background-image:linear-gradient(155deg,color-mix(in srgb,var(--away) 8%,transparent) 0%,transparent 42%),linear-gradient(335deg,color-mix(in srgb,var(--home) 8%,transparent) 0%,transparent 42%);transition:border-color .15s,transform .15s,box-shadow .15s}
 .tile::before{content:'';position:absolute;inset:0 0 auto;height:2px;background:linear-gradient(90deg,var(--away) 0 50%,var(--home) 50% 100%);opacity:.7}
 .tile:hover:not(.off){border-color:#3a475d;transform:translateY(-1px);box-shadow:0 10px 24px -16px #000}
 .tile.replay .team-logo,.tile.replay .team-score{display:none}.tile.replay .g-team{grid-template-columns:auto minmax(0,1fr)}.tile.replay .team-code{color:var(--text)}
 .tile.watching{border-color:var(--gold-line);box-shadow:0 0 0 1px var(--gold-line),0 10px 26px -14px rgba(246,197,74,.4)}.tile.pinned{border-color:var(--gold)}
 .tile .game{display:flex;flex-direction:column;align-items:stretch;gap:5px;width:100%;padding:10px 11px 6px;margin:0;border:0;border-radius:0;background:transparent;text-align:left;font-weight:400;font-size:inherit;white-space:normal;min-height:0}
-.tile .game:hover{background:rgba(255,255,255,.025)}.tile .game:active{transform:none}.tile .game:disabled{opacity:1;cursor:default}.tile.off .g-matchup,.tile.off .g-status{opacity:.78}
+.tile .game:hover{background:rgba(255,255,255,.025)}.tile .game:active{transform:none}.tile .game:disabled,.tile .game[aria-disabled=true]{opacity:1;cursor:default}.tile.off .team-logo{opacity:.78}
 .g-status{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:19px}.g-when{font-size:11px;color:var(--muted);text-align:right;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .g-matchup{display:grid;gap:2px}.g-team{display:grid;grid-template-columns:22px 34px minmax(0,1fr) auto auto;align-items:center;gap:6px;min-height:23px}
 .team-logo{width:22px;height:22px;display:grid;place-items:center}.team-logo img{width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 1px 1px rgba(0,0,0,.4))}
@@ -102,7 +102,7 @@ input.switch{appearance:none;flex:none;width:40px;height:23px;min-height:0;paddi
 /* ---------- page grid: the picture and the rail fill the screen ---------- */
 .room{display:grid;grid-template-columns:minmax(0,1fr) var(--rail);grid-template-areas:'notice notice' 'watch rail';gap:14px 18px;align-items:start;max-width:1680px;margin:auto;padding:14px 24px 14px}
 .room:has(#storageNotice[hidden]){grid-template-areas:'watch rail'}
-.notice{grid-area:notice;padding:11px 16px;border:1px solid #ff7b8955;background:#ff7b8912;border-radius:var(--radius-s)}
+.old-browser{margin:12px;color:var(--text)}.notice{grid-area:notice;padding:11px 16px;border:1px solid #ff7b8955;background:#ff7b8912;border-radius:var(--radius-s)}
 .stage{grid-area:watch;min-width:0}.rail{grid-area:rail}
 .player-frame,.rail{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);min-width:0;box-shadow:0 1px 0 #ffffff05 inset,0 24px 50px -32px #000}
 
@@ -132,13 +132,15 @@ input.switch{appearance:none;flex:none;width:40px;height:23px;min-height:0;paddi
 .field-view{position:absolute;inset:0;z-index:2;display:grid;align-content:center;gap:16px;padding:clamp(14px,3vw,40px);background:radial-gradient(ellipse at 50% 120%,rgba(39,96,66,.35),transparent 60%),linear-gradient(180deg,#0b1422,#070b12)}
 .fv-score{display:flex;align-items:center;justify-content:center;gap:18px;font-size:13px;color:var(--muted)}.fv-score>div{display:flex;align-items:center;gap:10px;padding:6px 14px;border-radius:11px;border:1px solid transparent}.fv-score>div.has-ball{border-color:var(--gold-line);background:var(--gold-soft)}.fv-score b{font-size:14px;letter-spacing:.6px;color:var(--text)}.fv-score strong{font-family:var(--num);font-size:34px;line-height:1;color:var(--text)}
 .fv-field{display:grid;grid-template-columns:46px 1fr 46px;height:clamp(64px,13vw,120px);border-radius:10px;overflow:hidden;border:2px solid #ffffff3a;box-shadow:0 20px 40px -24px #000}.fv-end{display:grid;place-items:center;background:#1d4a39;font-weight:800;font-size:12px;letter-spacing:1px}.fv-grid{position:relative;background:repeating-linear-gradient(90deg,#2b7d50 0 9.9%,#ffffff4d 9.9% 10%),#2b7d50}.fv-ball{position:absolute;top:50%;width:18px;height:12px;margin:-6px 0 0 -9px;border-radius:50%;background:#b8692a;border:1px solid #fff;transition:left .5s ease}.fv-line{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--gold);transition:left .5s ease}
+.fv-open{justify-self:center;display:inline-flex;align-items:center;min-height:44px;padding:9px 18px;border-radius:12px;font-weight:700;text-decoration:none;color:var(--gold-ink)}
+.frame-help{position:absolute;left:12px;bottom:14px;z-index:6;margin:0;max-width:calc(100% - 24px);padding:8px 13px;border:1px solid #ffffff2e;border-radius:99px;background:rgba(9,12,18,.92);font-size:13px;font-weight:600}.frame-help a{color:var(--gold)}
 .fv-play{margin:0;text-align:center;font-size:15px;line-height:1.55;max-width:62ch;justify-self:center}.fv-note{text-align:center;color:var(--muted);font-size:12.5px}
 
 /* ---------- ticker: score bug and who is on the field ---------- */
 .now-watching{display:flex;align-items:center;flex-wrap:wrap;gap:6px 18px;padding:10px 16px;border-top:1px solid var(--line);background:linear-gradient(180deg,#0e131c,#0c1017)}.now-watching:has(#bug[hidden]){display:none}
 .bug{display:flex;align-items:center;gap:10px;white-space:nowrap}.bug-tag{font-size:10.5px;letter-spacing:1px;font-weight:800;color:var(--gold);background:var(--gold-soft);padding:3px 7px;border-radius:5px}body[data-mode=live] .bug-tag{color:#fff;background:var(--live)}.screen.replaying~.now-watching .bug-tag{color:var(--gold-ink);background:var(--gold)}
 .bug-game{font-size:14px;font-weight:700;letter-spacing:.2px}.bug-game b{font-family:var(--num);font-size:20px;font-weight:700;margin:0 2px;vertical-align:-1px}.bug-clock{font-size:12.5px;color:var(--muted);font-weight:600;padding-left:10px;border-left:1px solid var(--line-2)}
-.lower{display:flex;gap:4px 12px;align-items:center;flex-wrap:wrap;min-width:0;flex:1}
+.lower{display:flex;gap:4px 12px;align-items:center;flex-wrap:wrap;min-width:0;flex:1 1 320px}
 .lower-kicker{font-size:10.5px;font-weight:800;letter-spacing:.8px;color:var(--green);padding:3px 7px;border-radius:5px;background:var(--green-soft);white-space:nowrap}.lower-kicker.red{color:var(--coral);background:var(--coral-soft)}.lower-kicker.amber,.lower-kicker.replay{color:var(--gold);background:var(--gold-soft)}.lower-kicker.blue{color:var(--blue);background:var(--blue-soft)}.lower-kicker.muted,.lower-kicker.break{color:var(--muted);background:#ffffff0b}
 .lower-main{font-size:14.5px;font-weight:650;overflow-wrap:anywhere}.lower-main span{margin-right:12px;white-space:nowrap}.lower-main i{font-size:11.5px;font-style:normal;color:var(--muted);margin-left:5px;font-weight:500}
 .lower-meta{font-size:12.5px;color:var(--muted);margin-left:auto;white-space:nowrap}
@@ -161,7 +163,7 @@ body[data-mode=replay] :is(.playback-actions,.replay-controls,.replay-seek){disp
 body[data-mode=replay] .playback-actions .spacer{display:none}
 body[data-mode=replay] #playButton{order:1}body[data-mode=replay] .replay-seek>button{order:2}
 body[data-mode=replay] .replay-progress{order:3;flex:1 1 160px;min-width:120px;gap:8px}body[data-mode=replay] .transport button{padding-left:10px;padding-right:10px}body[data-mode=replay] #playButton{min-width:84px}body[data-mode=replay] .time{font-size:12px}
-body[data-mode=replay] .replay-settings{order:4;flex:none;align-self:center;position:relative}body[data-mode=replay] .replay-settings>summary{display:inline-flex;align-items:center;min-height:36px;padding:0 10px;border:1px solid var(--line-2);border-radius:var(--radius-s);font-weight:600;color:var(--muted)}body[data-mode=replay] .replay-settings>summary::before{content:none}body[data-mode=replay] .replay-settings[open]>summary{color:var(--text);border-color:var(--gold-line);background:var(--gold-soft)}body[data-mode=replay] .replay-options{position:absolute;right:0;bottom:calc(100% + 8px);z-index:30;min-width:380px;max-width:calc(100vw - 40px);margin:0;padding:14px;border:1px solid var(--line-2);border-radius:14px;background:var(--panel);box-shadow:0 30px 60px -20px #000,inset 0 1px 0 rgba(255,255,255,.05)}
+body[data-mode=replay] .transport{position:relative}body[data-mode=replay] .replay-settings{order:4;flex:none;align-self:center;position:static}body[data-mode=replay] .replay-settings>summary{display:inline-flex;align-items:center;min-height:36px;padding:0 10px;border:1px solid var(--line-2);border-radius:var(--radius-s);font-weight:600;color:var(--muted)}body[data-mode=replay] .replay-settings>summary::before{content:none}body[data-mode=replay] .replay-settings[open]>summary{color:var(--text);border-color:var(--gold-line);background:var(--gold-soft)}body[data-mode=replay] .replay-options{position:absolute;right:14px;left:auto;bottom:calc(100% + 8px);z-index:30;min-width:0;max-width:none;width:min(380px,calc(100% - 28px));margin:0;padding:14px;border:1px solid var(--line-2);border-radius:14px;background:var(--panel);box-shadow:0 30px 60px -20px #000,inset 0 1px 0 rgba(255,255,255,.05)}
 body[data-mode=replay] :is(#muteButton,#fullButton,#reloadStream,#nextStream,#openStream){order:5}
 body[data-mode=replay] :is(.stream-health,.embed-help){order:10;flex-basis:100%}
 .direction-controls{display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;border-top:1px solid var(--line);padding:9px 16px;background:var(--bg-2)}
@@ -189,7 +191,7 @@ body[data-mode=replay] :is(.stream-health,.embed-help){order:10;flex-basis:100%}
 
 /* ---------- chat: the room for your league ---------- */
 .chat-panel{display:flex;flex-direction:column;padding:0;overflow:hidden}.chat-panel[hidden]{display:none}
-.chat-head{flex:none;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line)}.chat-room b{display:block;font-size:13px}.chat-room small{display:block;font-size:11px;color:var(--faint)}.chat-head .link{min-height:28px;font-size:12px;max-width:50%;overflow:hidden;text-overflow:ellipsis}
+.chat-head{flex:none;display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line)}.chat-room b{display:block;font-size:13px}.chat-room small{display:block;font-size:11px;color:var(--faint)}.chat-room small:empty{display:none}.chat-room .chat-note{line-height:1.35;margin-top:2px}.chat-head .link{min-height:28px;font-size:12px;max-width:50%;overflow:hidden;text-overflow:ellipsis}
 .chat-log{flex:1;min-height:0;overflow-y:auto;list-style:none;margin:0;padding:10px 14px;display:flex;flex-direction:column;gap:7px;scrollbar-width:thin;scrollbar-color:var(--line-2) transparent;overscroll-behavior:contain}
 .chat-msg{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:1px 8px;max-width:92%;padding:7px 11px;border-radius:12px 12px 12px 4px;background:var(--panel-2);font-size:13px;line-height:1.4}.chat-msg.mine{align-self:flex-end;border-radius:12px 12px 4px 12px;background:var(--gold-soft);border:1px solid var(--gold-line)}
 .chat-name{font-size:11.5px;font-weight:750;color:var(--gold);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.chat-msg.mine .chat-name{color:var(--gold-2)}.chat-time{font-size:10.5px;color:var(--faint);white-space:nowrap}.chat-text{grid-column:1/-1;overflow-wrap:anywhere;white-space:pre-wrap}.chat-text a{color:var(--gold)}
@@ -266,7 +268,8 @@ details.plain>summary{display:inline-flex;align-items:center;gap:6px;font-size:1
 .connect-badge{flex:none;display:grid;place-items:center;width:42px;height:28px;border-radius:7px;background:var(--panel-3);font-size:10.5px;font-weight:900;letter-spacing:.6px;color:var(--muted)}
 .connect-text{flex:1;min-width:0;display:grid}.connect-text b{font-size:14px}.connect-text small{font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .league-line{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--bg-2)}.league-line .connect-text b{font-size:14px;display:block}.league-line .connect-text small{display:block;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.league-line .link{flex:none;min-height:30px;font-size:12.5px}
-.connect-fields{display:grid;gap:10px;padding:2px 2px 0}.connect-fields:not([open]){display:none}.connect-fields label{margin:0;display:grid;gap:5px}.connect-fields p{margin:0}
+.connect-fields{display:grid;gap:10px;padding:2px 2px 0}.connect-fields:not([open]){display:none}.connect-fields label{margin:0;display:grid;gap:5px}.connect-fields p{margin:0}.private-league:not([open]){padding-bottom:2px}.private-league[open]{display:grid;gap:10px}.private-league>summary{margin-bottom:0}.private-league[open]>summary{margin-bottom:0}.private-league .season-field{max-width:180px}.connect-fields>.link{justify-self:start}
+details.advanced[open]{display:grid;gap:14px}
 .inline{display:flex;gap:8px;align-items:flex-end}.inline>input{flex:1;min-width:0}.inline>label.grow{flex:1;min-width:0}.season-field{flex:0 0 96px}.inline>input.season{flex:0 0 92px;width:92px}
 .cookie-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.cookie-grid label{margin:0;display:grid;gap:5px}
 .team-picker label{margin-bottom:6px}.team-picker select{min-height:44px;font-size:15px;font-weight:600}
@@ -286,7 +289,7 @@ details.plain>summary{display:inline-flex;align-items:center;gap:6px;font-size:1
 
 
 /* ---------- full screen and theater: only the picture and a floating transport ---------- */
-.stage:is(:fullscreen,:-webkit-full-screen,.theater){background:#000;padding:0;display:block;position:fixed;inset:0;z-index:50;width:100vw;height:100vh}
+.stage:is(:fullscreen,:-webkit-full-screen,.theater){background:#000;padding:0;display:block;position:fixed;inset:0;z-index:50;width:100vw;height:100vh;height:100dvh}
 .stage:is(:fullscreen,:-webkit-full-screen,.theater) .player-frame{position:relative;height:100%;width:100%;border:0;border-radius:0;box-shadow:none}
 .stage:is(:fullscreen,:-webkit-full-screen,.theater) .screen{position:absolute;inset:0;width:100%;height:100%;min-height:0!important;aspect-ratio:auto;border:0;border-radius:0}
 .stage:is(:fullscreen,:-webkit-full-screen,.theater) :is(.now-watching,.direction-controls,.replay-controls,.toast,.stream-health,.embed-help){display:none}
@@ -294,6 +297,9 @@ details.plain>summary{display:inline-flex;align-items:center;gap:6px;font-size:1
 .stage:is(:fullscreen,:-webkit-full-screen,.theater) .transport{position:absolute;top:max(14px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:10;width:max-content;max-width:calc(100% - 24px);padding:6px;border:1px solid #ffffff1f;border-radius:99px;background:rgba(9,12,18,.72);backdrop-filter:blur(10px);opacity:.55;transition:opacity .25s}
 .stage:is(:fullscreen,:-webkit-full-screen,.theater):hover .transport,.stage:is(:fullscreen,:-webkit-full-screen,.theater) .transport:focus-within{opacity:1}
 .stage:is(:fullscreen,:-webkit-full-screen,.theater) .playback-actions{flex-wrap:nowrap;gap:6px}.stage:is(:fullscreen,:-webkit-full-screen,.theater) .playback-actions :is(.spacer,#openStream,#nextStream){display:none}.stage:is(:fullscreen,:-webkit-full-screen,.theater) .playback-actions button{flex:none;min-height:34px;padding:5px 13px;font-size:13px;border-radius:99px}
+/* A phone held upright can't fit every control on one row, and it has no Escape key: the row wraps so Exit is always reachable. */
+@media(max-width:600px){.stage:is(:fullscreen,:-webkit-full-screen,.theater) .transport{border-radius:18px}.stage:is(:fullscreen,:-webkit-full-screen,.theater) .playback-actions{flex-wrap:wrap;justify-content:center}}
+@media(hover:none){.stage:is(:fullscreen,:-webkit-full-screen,.theater) .transport{opacity:.85}}
 
 /* ---------- NBA, NHL and MLB: the same room, plus a day picker ---------- */
 .sports .day-nav{display:flex;align-items:center;gap:3px}
@@ -320,13 +326,14 @@ details.plain>summary{display:inline-flex;align-items:center;gap:6px;font-size:1
  .lower-meta{margin-left:0;white-space:normal}.channel-meta{width:100%}
  .sports }
 @media(max-width:600px){
- body{font-size:14px}.bar-inner{padding:8px 12px}.brand{font-size:16px}.streams-button .label{display:none}.streams-button{padding:0 9px}:is(#lineupButton,#fantasyTeamButton){padding:6px 11px;font-size:13px}
+ body{font-size:14px}.bar-inner{padding:8px 12px}.brand{font-size:16px}.streams-button{padding:0 8px;gap:4px}:is(#lineupButton,#fantasyTeamButton){padding:6px 11px;font-size:13px}
  .modes button,.modes a{padding:0 11px}.sport-nav{gap:0}.sport-nav a{padding:0 8px;font-size:12.5px}
  .strip-inner{padding:8px 12px}.strip-day{left:12px}.tile{width:212px}
  .h2h .full{display:none}.h2h .short{display:inline}
  .screen:has(.overlay:not([hidden])){aspect-ratio:auto;min-height:400px}.overlay{padding:22px 16px}.overlay p{font-size:14px;margin-bottom:18px}.overlay h2{font-size:26px}.screen-emblem{display:none}
  .now-watching{padding:8px 12px}.bug-game b{font-size:18px}.transport{padding:8px 10px}.playback-actions .spacer{display:none}.playback-actions button,.playback-actions .stream-original{flex:1 1 28%}.direction-controls{padding:8px 12px}
  .replay-controls{grid-template-columns:1fr}.replay-seek button{flex:1}
+ body[data-mode=replay] .replay-settings[open]{flex:1 1 100%}body[data-mode=replay] .replay-options{position:static;width:auto;margin-top:8px;box-shadow:none}.replay-options select{min-width:0;width:100%}.replay-options>div{flex:1 1 40%;min-width:0}
  .mu-side strong{font-size:32px}
  dialog{width:calc(100vw - 16px);max-height:92dvh;border-radius:16px}dialog>form,dialog>.dialog-shell{max-height:calc(92dvh - 2px)}.dialog-head,.dialog-body,.dialog-actions{padding-left:16px;padding-right:16px}
  .stream-row{grid-template-columns:minmax(0,1fr);gap:8px}.stream-name small{white-space:normal}.stream-source-options .seg{max-width:100%;overflow-x:auto}.stream-fields{grid-template-columns:1fr}.cookie-grid{grid-template-columns:1fr}
@@ -342,7 +349,7 @@ details.plain>summary{display:inline-flex;align-items:center;gap:6px;font-size:1
 #streamsModeNote{margin:0}#streamsModeNote:empty{display:none}
 
 /* ---------- finish: one warm, quiet surface; gold only where you act ---------- */
-:root{--bg:#0b0e15;--bg-2:#0e121a;--panel:#121823;--panel-2:#182030;--panel-3:#1f2838;--line:#1e2735;--line-2:#2e3a4b;--text:#eef2f8;--muted:#97a3b6;--faint:#6b7891;--gold:#f7c548;--gold-2:#ffd978;--gold-soft:rgba(247,197,72,.12);--gold-line:rgba(247,197,72,.45);--radius:18px}
+:root{--bg:#0b0e15;--bg-2:#0e121a;--panel:#121823;--panel-2:#182030;--panel-3:#1f2838;--line:#1e2735;--line-2:#2e3a4b;--text:#eef2f8;--muted:#97a3b6;--faint:#8794ab;--gold:#f7c548;--gold-2:#ffd978;--gold-soft:rgba(247,197,72,.12);--gold-line:rgba(247,197,72,.45);--radius:18px}
 body{background:radial-gradient(1200px 560px at 50% -220px,rgba(247,197,72,.075) 0%,transparent 65%),radial-gradient(900px 520px at 100% 100%,rgba(67,215,150,.035) 0%,transparent 60%),var(--bg)}
 .bar{background:rgba(11,14,21,.8);border-bottom-color:rgba(255,255,255,.06)}.bar-inner{min-height:60px}
 .brand-dot{width:10px;height:10px;box-shadow:0 0 0 4px rgba(255,75,92,.14),0 0 18px rgba(255,75,92,.35)}
@@ -366,3 +373,16 @@ dialog{border-radius:20px;border-color:rgba(255,255,255,.09);box-shadow:0 50px 1
 .chat-msg{box-shadow:inset 0 1px 0 rgba(255,255,255,.03)}
 ::selection{background:var(--gold);color:var(--gold-ink)}
 *{scrollbar-width:thin;scrollbar-color:var(--line-2) transparent}
+/* A tile clips its button, so the ring goes on the tile. The scrubber's own focus style was removed with its border. */
+.tile:has(.game:focus-visible){border-color:var(--gold);box-shadow:0 0 0 2px var(--gold)}.tile .game:focus-visible{outline:none}
+@supports not selector(:has(a)){.tile .game:focus-visible{outline:2px solid var(--gold);outline-offset:-2px}}
+.timeline input:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+/* Keyboard hints are for keyboards. */
+@media(hover:none) and (pointer:coarse){.keys{display:none}}
+/* iPhones zoom in on any field under 16px and stay zoomed. */
+@media(max-width:960px){input:not([type=range],[type=checkbox]),select,textarea{font-size:16px!important}}
+/* Fingers: small controls grow, and the refresh button leaves the tiles' footers. */
+@media(pointer:coarse){
+ .strip-refresh{position:static;align-self:flex-end;width:36px;min-width:36px;height:36px;opacity:1;color:var(--muted)}.strip-refresh svg{width:16px;height:16px}
+ .g-stream{min-height:32px;margin-top:2px}.seg button,.stream-source-options .seg button{min-height:40px}.chat-quick button{min-height:40px;padding:2px 12px}.modes button,.modes a{min-height:40px}.channel-actions button{min-height:40px}
+}
