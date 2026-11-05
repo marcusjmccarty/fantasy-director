@@ -342,7 +342,6 @@ async function loadGames({manual=false}={}){
 }
 // Kept for tests and deep links: pins the guide to one date instead of today's slate.
 function changeDate(value){if(!/^\d{4}-\d{2}-\d{2}$/.test(value)||!Number.isFinite(Date.parse(value)))return;streamFinder.cancel();S.date=value;S.dateLocked=value!==localDate();S.lookahead=null;S.history=[];S.games=[];S.gamesLoading=true;S.gamesError=false;renderGuide();loadGames();}
-$('refreshGames').onclick=()=>{if(S.lookahead?.date===null)S.lookahead=null;S.pastRetryAt=0;if(S.mode==='replay'||S.replayError)void loadReplays();loadGames({manual:true});if(saved.leagueId)loadLeague();};
 const defaultSeason=()=>sport==='mlb'?new Date().getFullYear():new Date().getFullYear()+(new Date().getMonth()>=6?1:0);
 function openLeague(){
  $('leagueId').value=saved.leagueId;$('swid').value=saved.swid;$('s2').value=saved.s2;$('leagueSeason').value=saved.leagueSeason||S.season||defaultSeason();$('leagueTitle').textContent='Fantasy team · '+config.label;$('leagueError').textContent='';

@@ -1194,7 +1194,6 @@ $('addByHand').onclick=()=>{const first=$('rosterRows').querySelector('input');f
 $('forgetESPN').onclick=()=>{S.leagueRequest=(S.leagueRequest||0)+1;$('importLeague').disabled=false;const blank={espn:{swid:'',s2:''},leagueId:'',teamId:'',league:null};Object.assign(saved,blank);for(const snapshot of [S.liveLineup,S.replayLineup])if(snapshot)Object.assign(snapshot,blank);persist();forgetESPN(localStorage);for(const id of ['leagueId','espnSwid','espnS2'])$(id).value='';$('leagueStatus').textContent='Paste your ESPN league link.';$('forgetESPN').hidden=true;$('privateLeague').open=false;chatRoom();franchiseOptions();render();toast('ESPN is disconnected, and your login is forgotten on this device.');};
 $('leagueAction').onclick=()=>{const open=!$('leagueImport').open;$('leagueImport').open=open;if(open)$('leagueId').focus?.();};
 $('lineupDialog').addEventListener('close',()=>$('lineupButton').setAttribute('aria-expanded','false'));
-$('refreshScoreboard').onclick=()=>{fantasyFeed.next=0;renderScoreboard();if(S.mode==='live'){$('refreshStreams').onclick();}};
 $('connectFromBoard').onclick=()=>openESPNConnection();
 $('retryFantasy').onclick=()=>{if(fantasyFeed.needsConnection||!saved.leagueId){openESPNConnection();return;}fantasyFeed.next=0;renderScoreboard();};
 $('lineupForm').onsubmit=e=>{e.preventDefault();$('saveRoster').click();};
@@ -1407,7 +1406,7 @@ function renderScoreboard(){
  setText('scoreboardMeta',week?'Wk '+week:'');$('scoreboardMeta').title=[league?.name||'ESPN fantasy football',week?'Week '+week:''].filter(Boolean).join(' · ');
  const sample=sampleTeam();setText('youHeader',sample?'Sample team':'You');setText('fantasyTitle',shownTeam(board?.name)||(live&&hasLineup()?saved.teamName:'Your team'));
  setText('opponentTitle',opponent?.name||(match?.matchupId?'Bye week':'Your opponent'));$('fantasyTitle').title=$('fantasyTitle').textContent;$('opponentTitle').title=$('opponentTitle').textContent;
- setText('lineupButton','Fantasy team');$('lineupButton').title=saved.teamName||'Manage your fantasy team';$('refreshScoreboard').disabled=!!fantasyFeed.pending;
+ setText('lineupButton','Fantasy team');$('lineupButton').title=saved.teamName||'Manage your fantasy team';
  setText('fantasyTotal',board?.points||'—');setText('opponentTotal',opponent?.points||'—');
  const period=match?.weeks.length>1?'Weeks '+match.weeks.join(' + '):board?.week?'Week '+board.week:week?'Week '+week:'This week';
  setText('fantasyWeek',period);setText('opponentWeek',period);

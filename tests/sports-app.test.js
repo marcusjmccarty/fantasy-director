@@ -155,11 +155,10 @@ test('one bad lookahead day does not sink the schedule: the nearest day with gam
  assert.equal(a.S.gamesError,false);assert.equal(a.S.date,shift(3));assert.equal(a.S.lookahead.at,0,'the failed earlier day is asked again next poll');
  w.clear();await a.loadGames();assert.ok(w.days().includes(shift(1)));
 });
-test('an empty week is remembered for ten minutes, then walked again, and Refresh rechecks it now',async()=>{
+test('an empty week is remembered for ten minutes, then walked again',async()=>{
  const w=worker(),a=app(w.fetcher);await a.loadGames();await settle();assert.equal(a.S.lookahead.date,null);const at=a.S.lookahead.at;assert.match(a.el('games').innerHTML,/No NBA games in the next week/);
  w.clear();await a.loadGames();await settle();assert.equal(w.days().join(),data.localDate(),'the next poll asks only for today');assert.equal(a.S.lookahead.at,at,'and does not extend the memo');
  a.S.lookahead.at=Date.now()-600001;w.clear();await a.loadGames();assert.equal(w.days().length,8);
- w.clear();a.el('refreshGames').onclick();await settle();assert.ok(w.days().filter(d=>d>data.localDate()).length===7);
 });
 test('a week with a failed day is not remembered as empty',async()=>{
  const w=worker({day:date=>date===shift(4)?down():[]}),a=app(w.fetcher);await a.loadGames();assert.equal(a.S.gamesError,false);assert.equal(a.S.lookahead,null);
@@ -219,10 +218,10 @@ test('the first tick starts no catalog fetch, and a healthy listing refreshes in
  await a.loadGames();await settle();assert.equal(w.catalogs(),1);a.S.replaysAt=Date.now()-60001;a.tick();await settle();assert.equal(w.catalogs(),1);
  a.S.replaysAt=Date.now()-900001;a.tick();await settle();assert.equal(w.catalogs(),2);
 });
-test('a failed listing refresh keeps the tiles already showing, and Refresh retries it from Live',async()=>{
+test('a failed listing refresh keeps the tiles already showing, and retries automatically from Live',async()=>{
  let fail=false;const w=worker({catalog:()=>fail?Response.json({sport:'nba',games:[],error:'Replays are unavailable right now. x'},{status:502}):{sport:'nba',games:[listed('r',shift(-1))]}}),a=app(w.fetcher);await a.loadGames();await settle();const full=a.el('games').innerHTML;
  fail=true;a.S.replaysAt=Date.now()-900001;a.tick();await settle();assert.equal(a.S.replays.games.length,1);assert.equal(a.el('games').innerHTML,full);assert.ok(a.S.replayError);
- fail=false;w.clear();a.el('refreshGames').onclick();await settle();assert.equal(w.catalogs(),1);assert.equal(a.S.replayError,'');
+ fail=false;w.clear();a.S.replaysAt=Date.now()-60001;a.tick();await settle();assert.equal(w.catalogs(),1);assert.equal(a.S.replayError,'');
 });
 
 const replayWorker=(resolve,extra={})=>worker({day:()=>[event('1'),event('2')],catalog:()=>({sport:'nba',games:[listed('r',shift(-1)),listed('s',shift(-2))]}),resolve,...extra});
@@ -469,9 +468,8 @@ test('a private league opens the private step before focusing inside it',async()
  const b=app(async()=>Response.json(games()));b.el('fantasyTeamButton').onclick();assert.equal(b.el('privateLeague').open,false,'nobody without a saved login is shown the cookie steps');
  const c=app(async()=>Response.json(games()),{stored:{'fantasy-stream-nba-v1':JSON.stringify({swid:'{a}',s2:'b'})}});c.el('fantasyTeamButton').onclick();assert.equal(c.el('privateLeague').open,true);
 });
-test('polls stay silent for screen readers; a refresh someone pressed is answered, and a failure is said once',async()=>{
+test('polls stay silent for screen readers and a failure is said once',async()=>{
  let fail=false;const a=app(async()=>fail?Response.json({error:'x'},{status:502}):Response.json(games()));await a.loadGames();assert.equal(a.el('scheduleStatus').textContent,'');
- const pending=a.el('refreshGames').onclick();await settle();assert.match(a.el('scheduleStatus').textContent,/Updated/);void pending;
  fail=true;await a.loadGames();const said=a.el('scheduleStatus').textContent;assert.match(said,/retrying/);let writes=0;Object.defineProperty(a.el('scheduleStatus'),'textContent',{get(){return said;},set(){writes++;}});await a.loadGames();assert.equal(writes,0,'the same outage is not announced again');
 });
 test('a hidden tab asks for no stream links, and catches up when it comes back',async()=>{
