@@ -110,7 +110,7 @@ input.switch{appearance:none;flex:none;width:40px;height:23px;min-height:0;paddi
 /* ---------- the picture ---------- */
 .player-frame{overflow:hidden}
 .screen{position:relative;aspect-ratio:16/9;background:#04060a;overflow:hidden;isolation:isolate}
-.layers,.layers .layer{position:absolute;inset:0;width:100%;height:100%}.layers .layer{border:0;opacity:0;pointer-events:none;background:#000;transition:opacity .2s linear;z-index:0}.layers .layer.on{opacity:1;pointer-events:auto;z-index:1}
+.layers,.layers .layer{position:absolute;inset:0;width:100%;height:100%}.layers .layer{border:0;opacity:0;pointer-events:none;background:#000;z-index:0}.layers .layer.on{opacity:1;pointer-events:auto;z-index:1}
 .screen.replaying{box-shadow:inset 0 0 0 2px var(--gold)}
 .screen:has(.overlay:not([hidden])){aspect-ratio:16/9;min-height:340px}
 .overlay{position:absolute;inset:0;z-index:8;display:grid;place-items:safe center;overflow:auto;padding:30px 24px;text-align:center;

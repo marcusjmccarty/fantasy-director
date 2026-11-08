@@ -405,14 +405,20 @@ function cutTo(id,now){
  if(S.pending?.id!==id)S.pending={id,since:now};
  // A stopped clock (a scrub settling, a game coming back) is not a moving target to lead.
  const slot=pool.open(id,source);pool.hold(id,target(id),{play:true,fixed:!clock.running||clockHeld(now)});
+ if(slot.player.kind==='embed'){
+  slot.player.checkHealth?.({online:window.navigator?.onLine!==false,foreground:!document.hidden});
+  // Without a helper, expose the provider controls explicitly; never call a
+  // blank frame or a page load proof of playing video.
+  if(!slot.player.canPreload)return commit(id);
+ }
  if(S.mode==='live'&&slot.player.live){slot.player.checkHealth({active:S.playing,online:window.navigator?.onLine!==false,foreground:!document.hidden});if(pool.get(id)!==slot)return;}
  if(pool.ready(id,target(id)))return commit(id);
- if(now-S.pending.since>(awaitingClick(id,slot.player)?CLICK_LIMIT:LOAD_LIMIT)&&!(S.mode==='live'&&slot.player.live)){
+ if(now-S.pending.since>(awaitingClick(id,slot.player)?CLICK_LIMIT:slot.player.canPreload?LIVE_LOAD_LIMIT:LOAD_LIMIT)&&!(S.mode==='live'&&slot.player.live)){
   if(S.mode==='replay'&&pool.visible===id&&slot.player.played===false)noFootageHere(id);else cool(id,'it did not start in time');
  }else if(S.mode==='live'&&slot.player.live&&slot.player.kind!=='embed'&&S.pinned!==id&&now-S.pending.since>LIVE_LOAD_LIMIT){
   // A direct live link that never yields footage: the backup first; otherwise the link (not the game) is set aside and the tracker shows the game.
   if(!rotateStream(id)){const g=gameState(id);S.deadStreams.set(slot.url,now+DEAD_STREAM);S.streamChoices.delete(id);pool.close(id);S.pending=null;toast(`${g?.name||'Game'}: the stream never started. Following on the game tracker for a few minutes. Reload stream tries it again.`,'warn');render();}
- }else if(now-S.pending.since>8000&&(!pool.visible||!pool.current?.progressing||S.pinned===id)&&pool.visible!==id){
+ }else if(!slot.player.canPreload&&now-S.pending.since>8000&&(!pool.visible||!pool.current?.progressing||S.pinned===id)&&pool.visible!==id){
   // A manual choice may need a click inside its player. Leaving it hidden
   // behind the outgoing stream makes that click impossible until timeout.
   pool.show(id);S.program={kind:'game',id};S.unmuteHint=true;
@@ -870,7 +876,7 @@ function renderTransport(){
  const sources=current?inlineURLs(current):[],alternate=sources.find(url=>url!==pool.get(current?.id)?.url);
  $('nextStream').hidden=!inGame||S.mode!=='live'||!alternate;$('nextStream').disabled=!S.playing;
  const embed=inGame&&S.mode==='live'&&pool.current?.kind==='embed',original=embed?(pool.get(current?.id)?.source?.page||pool.get(current?.id)?.url):null;
- $('openStream').hidden=!original;$('openStream').href=original||'#';$('embedHelp').hidden=!embed;
+ $('openStream').hidden=!original;$('openStream').href=original||'#';$('embedHelp').hidden=!embed||!!pool.current?.canPreload;
  const health=S.playing&&inGame&&pool.current?.reconnecting?pool.current.recoveryMessage:'';
  $('streamHealth').hidden=!health;if($('streamHealth').textContent!==health)setText('streamHealth',health);
  $('leaveHighlight').hidden=!S.highlight||S.highlight.done;$('leaveHighlight').disabled=!S.playing;

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "Fantasy Stream Playback",
   "description": "Starts embedded players and keeps fullscreen on the Fantasy Stream channel when games switch.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "minimum_chrome_version": "106",
   "permissions": ["scripting"],
   "host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],

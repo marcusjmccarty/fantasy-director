@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {readFile,readdir} from 'node:fs/promises';
+import {packageExtension} from './extension-package.mjs';
 import worker from '../dist/server/index.js';
 import {versionAssets} from './version-assets.mjs';
 const assets=[];
@@ -37,3 +38,5 @@ try{for(const sport of ['nba','nhl','mlb']){const response=await worker.fetch(ne
 console.log(JSON.stringify({exactAssetComparisons:assets.length,headRequests:assets.length,routeChecks:13,compiledNFLMetadataCheck:'passed',compiledSportsCheck:'passed',network:'mocked'}));
 globalThis.fetch=async(url,options)=>{assert.equal(options.redirect,'manual');if(url.includes('/get-matches?'))return Response.json({success:true,nonLive:[{id:'qa-game',title:'Indianapolis Colts vs Minnesota Vikings',tournament:'NFL',date:1793556000000,sources:[{}]}]});assert.equal(url,'https://ntv.st/api/get-watch-streams?server=raptor&match=qa-game&source=0');return Response.json({success:true,embedUrl:'/embed?t=qa'});};
 try{const catalog=await worker.fetch(new Request('https://site.test/api/streams?sport=nfl'),{});assert.equal(catalog.status,200);assert.equal((await catalog.json()).entries[0].id,'qa-game');const resolved=await worker.fetch(new Request('https://site.test/api/streams/resolve?url='+encodeURIComponent('https://ntv.st/watch/raptor/qa-game?source=0')),{});assert.equal(resolved.status,200);assert.equal((await resolved.json()).url,'https://ntv.st/embed?t=qa');assert.equal((await worker.fetch(new Request('https://site.test/api/streams?sport=invalid'),{})).status,400);console.log('Compiled stream discovery and player resolution: passed');}finally{globalThis.fetch=original;}
+
+{const r=await worker.fetch(new Request('https://site.test/fantasy-stream-playback.zip'),{});assert.equal(r.status,200);assert.equal(r.headers.get('Content-Type'),'application/zip');assert.equal(r.headers.get('Cache-Control'),'no-cache');assert.ok(Buffer.from(await r.arrayBuffer()).equals(await packageExtension()));console.log('Packaged playback helper: exact ZIP bytes passed');}

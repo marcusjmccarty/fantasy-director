@@ -23,9 +23,9 @@ test('embed safety: every stream navigation is sandboxed before loading, includi
  assert.match(h.frame.allow,/autoplay/);assert.match(h.frame.allow,/fullscreen \*/);p.destroy();
 });
 test('embed safety: reload restores the original stream after internal navigation and waits for a fresh load',()=>{
- const h=harness(),{p}=h;p.setVisible(true);p.play();h.load();h.tick(2000);assert.equal(p.progressing,true);
+ const h=harness(),{p}=h;p.setVisible(true);p.play();h.load();h.tick(2000);assert.equal(p.progressing,false,'a page load or click is not media progress');
  const before=h.navigations.length;assert.equal(p.reload(),true);assert.equal(h.navigations.length,before+1);assert.equal(h.navigations.at(-1).url,p.url);assert.equal(p.progressing,false);
- h.load();h.tick(4000);assert.equal(p.progressing,true);assert.equal(p.wantPlay,true);p.destroy();
+ h.load();h.tick(4000);assert.equal(p.progressing,false,'a page load or click is not media progress');assert.equal(p.wantPlay,true);p.destroy();
 });
 test('embed safety: pause and hidden frames cannot be restarted by a reload',()=>{
  const h=harness(),{p}=h;assert.equal(p.reload(),false);assert.equal(h.navigations.length,0);
@@ -41,7 +41,7 @@ test('embed recovery: a loaded page is periodically reconnected even without a r
  h.tick(119999);p.checkHealth();assert.equal(h.navigations.length,1);
  h.tick(120000);p.checkHealth();assert.equal(h.navigations.length,2);assert.equal(p.loadedAt,null);assert.equal(p.reconnecting,true);
  for(let i=0;i<20;i++)p.checkHealth();assert.equal(h.navigations.length,2,'one navigation per recovery, not per application tick');
- h.load();h.tick(122000);assert.equal(p.progressing,true);assert.equal(p.reconnecting,false);p.destroy();
+ h.load();h.tick(122000);assert.equal(p.progressing,false,'a page load or click is not media progress');assert.equal(p.reconnecting,false);p.destroy();
 });
 test('embed recovery: a page that never loads retries three times with long windows, then stops and asks the viewer',()=>{
  const h=harness(),{p}=h,errors=[],events=[];p.on('error',x=>errors.push(x));p.on('reconnect',d=>events.push(d));p.setVisible(true);p.play();
@@ -53,7 +53,7 @@ test('embed recovery: a page that never loads retries three times with long wind
 });
 test('embed recovery: a click inside the page counts as proof of life and stops automatic reloads',()=>{
  const h=harness(),{p}=h;p.setVisible(true);p.play();h.tick(20000);p.noteInteraction();
- h.tick(400000);p.checkHealth();assert.equal(h.navigations.length,1,'no load-window retry and no periodic refresh after the viewer pressed play');assert.equal(p.progressing,true);
+ h.tick(400000);p.checkHealth();assert.equal(h.navigations.length,1,'no load-window retry and no periodic refresh after the viewer pressed play');assert.equal(p.progressing,false,'a page load or click is not media progress');
  h.tick(20000+600001);p.checkHealth();assert.equal(h.navigations.length,2,'the periodic refresh returns once the trust has expired');
  p.setVisible(false);p.setVisible(true);assert.equal(p.interactedAt,null,'a fresh document starts without trust');p.destroy();
 });test('embed recovery: a successful loading retry resets backoff and repeated reloads remain spaced',()=>{
@@ -102,11 +102,11 @@ test('embed switching: late load events from a retired page or blank document ca
  const h=harness(),{p}=h;p.setVisible(true);p.play();const first=p.element;h.load();p.setVisible(false);const blank=p.element;p.setVisible(true);const current=p.element;
  h.tick(1000);h.load(first);h.load(blank);assert.equal(p.loadedAt,null,'old document events cannot acknowledge the current request');assert.equal(p.progressing,false);
  assert.notEqual(current,first);assert.notEqual(current,blank);assert.equal(first.removed,true);assert.equal(blank.removed,true);
- h.load(current);h.tick(3000);assert.equal(p.progressing,true);p.destroy();
+ h.load(current);h.tick(3000);assert.equal(p.progressing,false,'a page load or click is not media progress');p.destroy();
 });
 test('embed switching: reloading the same URL creates a new attempt and rejects the previous load event',()=>{
  const h=harness(),{p}=h;p.setVisible(true);p.play();const old=p.element;p.reload();h.tick(1000);h.load(old);assert.equal(p.loadedAt,null);
- h.load();h.tick(3000);assert.equal(p.progressing,true);assert.equal(old.removed,true);p.destroy();
+ h.load();h.tick(3000);assert.equal(p.progressing,false,'a page load or click is not media progress');assert.equal(old.removed,true);p.destroy();
 });
 test('embed switching: all active documents delegate media across origins and retain navigation containment',()=>{
  const h=harness(),{p}=h;p.setVisible(true);p.play();p.reload();p.setVisible(false);p.setVisible(true);
@@ -119,7 +119,7 @@ test('embed probe: a page whose host answers is left alone even if its load even
  h.tick(44999);p.checkHealth();assert.equal(probes,0,'a page still inside its window is not asked');
  h.tick(45000);p.checkHealth();p.checkHealth();await settle();assert.equal(probes,1,'one question per frame, not per tick');
  for(const at of [45250,105000,195000,900000]){h.tick(at);p.checkHealth();}
- assert.equal(h.navigations.length,1,'the picture is never reloaded');assert.deepEqual(events,[]);assert.equal(p.reconnecting,false);assert.equal(p.gaveUp,false);assert.equal(p.progressing,true);assert.equal(probes,1);p.destroy();
+ assert.equal(h.navigations.length,1,'the picture is never reloaded');assert.deepEqual(events,[]);assert.equal(p.reconnecting,false);assert.equal(p.gaveUp,false);assert.equal(p.progressing,false,'a page load or click is not media progress');assert.equal(probes,1);p.destroy();
 });
 test('embed probe: a host that does not answer keeps the spaced retries and the failover',async()=>{
  let probes=0;const events=[],h=harness({probe:()=>{probes++;return Promise.reject(new TypeError('Failed to fetch'));}}),{p}=h;p.on('reconnect',d=>events.push(d));p.setVisible(true);p.play();
