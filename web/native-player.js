@@ -1,11 +1,13 @@
 // A <video> element (MP4, WebM or HLS) behind the same small interface as
 // ProviderPlayer, so the pool can treat every source alike.
 import {attachMediaSource} from './stream-loader.js';
+import {disableCaptions} from './captions.js';
 export class NativePlayer{
  constructor(source,{now=()=>performance.now()}={}){
   this.destroyed=false;this.kind='native';this.now=now;this.listeners=new Map();this.inAd=false;this.error=null;this.wantPlay=false;this.target=null;this.primed=false;this.lastAdvance=-Infinity;this.lastTime=0;this.audioLocked=false;this.audioWatch=null;this.playGeneration=0;this.audioGeneration=0;
   this.source=source;this.live=source.live===true;this.visible=false;this.attachGeneration=0;this.recoveryAttempts=0;this.lastReconnectAt=-Infinity;this.recoveryMessage='';this.resetRecovery();
   const v=this.element=document.createElement('video');v.className='layer';v.playsInline=true;v.preload='auto';v.muted=true;v.controls=false;
+  this.stopCaptions=disableCaptions(v);
   v.addEventListener('timeupdate',()=>{
    if(v.seeking)return;
    // The landing frame can differ slightly from the requested position. It
@@ -93,5 +95,5 @@ export class NativePlayer{
   }
  }
  get muted(){return this.element.muted;}
- destroy(){this.destroyed=true;this.wantPlay=false;this.attachGeneration++;this.attachment?.abort();this.playGeneration++;this.audioGeneration++;clearTimeout(this.audioWatch);this.audioWatch=null;this.controller?.destroy?.();const v=this.element;v.pause();v.removeAttribute('src');v.load();v.remove();this.listeners.clear();}
+ destroy(){this.destroyed=true;this.wantPlay=false;this.stopCaptions();this.attachGeneration++;this.attachment?.abort();this.playGeneration++;this.audioGeneration++;clearTimeout(this.audioWatch);this.audioWatch=null;this.controller?.destroy?.();const v=this.element;v.pause();v.removeAttribute('src');v.load();v.remove();this.listeners.clear();}
 }

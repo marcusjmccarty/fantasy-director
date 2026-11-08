@@ -8,13 +8,14 @@ const box={width:800,height:450};
 function video(options={}){return {paused:true,ended:false,readyState:4,currentTime:0,muted:false,plays:0,pauses:0,getBoundingClientRect:()=>box,play(){this.plays++;this.paused=false;return Promise.resolve();},pause(){this.pauses++;this.paused=true;},...options};}
 async function fixture({enabled=true,top=false}={}){
  const events=new Map(),docEvents=new Map(),messages=[],runtime=[],videos=[],frames=[],timers=new Map();let time=0,button=null,listener,full=false,clicks=0;
- const parent={},window={parent,addEventListener:(n,f)=>events.set(n,f)};parent.postMessage=m=>messages.push(m);
+ const parent={},window={parent,addEventListener:(n,f)=>events.set(n,f),dispatchEvent:e=>events.get(e.type)?.(e)};parent.postMessage=m=>messages.push(m);
  const stage={classList:{contains:()=>full}},toggle={click:()=>{clicks++;full=!full;}};
  const document={documentElement:{setAttribute(){}},querySelectorAll:s=>s==='video'?videos:frames,querySelector:s=>s==='.stage'?stage:button,getElementById:()=>toggle,addEventListener:(n,f)=>docEvents.set(n,f)};
  const chrome={runtime:{sendMessage:m=>{runtime.push(m);return Promise.resolve(m.type==='init'?{enabled,top}:undefined);},onMessage:{addListener:f=>listener=f}}};
- vm.runInNewContext(source,{window,document,chrome,Date:{now:()=>time},setInterval:f=>{timers.set(1,f);return 1;},clearInterval:k=>timers.delete(k),console});await flush();
- const command=(data={},from=parent)=>events.get('message')?.({source:from,data:{channel:'fantasy-stream-playback-v1',type:'state',session:'1',playing:true,muted:false,audioRevision:0,...data}});
- return {events,docEvents,messages,runtime,videos,frames,timers,command,tick:async t=>{time=t;timers.get(1)?.();await flush();},setButton:b=>{button=b;},receive:m=>listener?.(m),get clicks(){return clicks;}};
+ class Event{constructor(type,options={}){this.type=type;Object.assign(this,options);}}
+ vm.runInNewContext(source,{window,document,chrome,Event,CustomEvent:Event,Date:{now:()=>time},setInterval:f=>{timers.set(1,f);return 1;},clearInterval:k=>timers.delete(k),console});await flush();
+ let latest=null;const command=(data={},from=parent)=>{const message={channel:'fantasy-stream-playback-v1',type:'state',session:'1',playing:true,visible:true,muted:false,audioRevision:0,...data};if(from===parent)latest=message;events.get('message')?.({source:from,data:message});};
+ return {events,docEvents,messages,runtime,videos,frames,timers,command,tick:async(t,{refresh=true}={})=>{time=t;if(refresh&&latest)command(latest);timers.get(1)?.();await flush();},setButton:b=>{button=b;},receive:m=>listener?.(m),get clicks(){return clicks;}};
 }
 test('helper does nothing on an unrelated top-level website',async()=>{
  const h=await fixture({enabled:false});assert.equal(h.events.size,0);assert.equal(h.timers.size,0);assert.equal(h.messages.length,0);
@@ -63,4 +64,23 @@ test('background trusts Chrome tab identity, rejects lookalike sites and targets
  for(const url of ['https://example.com/','https://fantasy-stream.fantasy-hub.workers.dev.evil.test/','http://fantasy-stream.fantasy-hub.workers.dev/'])assert.equal(send(url),undefined);
  assert.equal(injections.length,0);assert.equal(send('https://fantasy-stream.fantasy-hub.workers.dev/').enabled,true);assert.equal(injections[0].target.documentIds[0],'doc-2');assert.equal(injections[0].world,'MAIN');
  send('https://fantasy-stream.fantasy-hub.workers.dev/','fullscreen');assert.equal(messages[0][2].frameId,0);
+});
+test('a warming stream is muted, captions stay off, and a lost host heartbeat pauses it',async()=>{
+ const h=await fixture(),events=new Map(),tracks=[{kind:'captions',mode:'showing'},{kind:'metadata',mode:'hidden'}];tracks.addEventListener=(n,f)=>events.set(n,f);
+ const v=video({textTracks:tracks,addEventListener:(n,f)=>events.set(n,f),buffered:{length:1,start:()=>0,end:()=>12},currentTime:5});h.videos.push(v);h.command({visible:false});await flush();
+ assert.equal(v.paused,false);assert.equal(v.muted,true);assert.equal(tracks[0].mode,'disabled');assert.equal(tracks[1].mode,'hidden');assert.equal(h.messages.at(-1).buffered,7);
+ v.muted=false;events.get('volumechange')();assert.equal(v.muted,true);tracks[0].mode='showing';events.get('change')();assert.equal(tracks[0].mode,'disabled');
+ await h.tick(3000,{refresh:false});assert.equal(v.paused,true);h.command({visible:true});await flush();assert.equal(v.paused,false);assert.equal(v.muted,false);
+});
+test('stale nested video reports expire instead of making a dead frame ready',async()=>{
+ const h=await fixture(),child={contentWindow:{postMessage(){}},getBoundingClientRect:()=>box};h.frames.push(child);h.command();
+ h.events.get('message')({source:child.contentWindow,data:{channel:'fantasy-stream-playback-v1',type:'status',session:'1',playing:true,time:20,buffered:3}});assert.equal(h.messages.at(-1).playing,true);
+ await h.tick(1600);assert.equal(h.messages.at(-1).playing,false);
+});
+
+test('an autoplay pause caused by unmuting retries immediately instead of waiting for the next startup window',async()=>{
+ const h=await fixture(),events=new Map();let quiet=true;const v=video({addEventListener:(n,f)=>events.set(n,f),play(){this.plays++;if(!quiet)return Promise.reject({name:'NotAllowedError'});this.paused=false;return Promise.resolve();}});
+ Object.defineProperty(v,'muted',{get:()=>quiet,set:value=>{const changed=quiet&&!value;quiet=value;if(changed&&!v.paused){v.paused=true;queueMicrotask(()=>events.get('pause')?.());}}});
+ h.videos.push(v);h.command({visible:false});await flush();assert.equal(v.paused,false);
+ h.command({visible:true});await flush();await flush();assert.equal(v.paused,false);assert.equal(v.muted,true);assert.equal(v.plays,3,'unmute is retried immediately and falls back to playing muted');
 });

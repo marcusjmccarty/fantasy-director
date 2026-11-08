@@ -1,8 +1,8 @@
 // Any web page the viewer points a game at (a stream site, a team's own
 // player) shown in an iframe. Without the optional browser helper it cannot
 // be observed, driven or muted, so it loads only on screen: a
-// hidden one would play its own sound over the picture. Hidden, it counts as
-// ready (there is nothing to warm); shown, it is ready once it has loaded.
+// hidden one could play its own sound over the picture. The v2 helper keeps
+// background frames muted and reports moving, buffered media before a cut.
 // A loaded page is NOT proof of moving video. Periodic reconnect is an explicit
 // fallback for that blind spot, separate from page-loading recovery. Loading
 // retries back off, but never abandon a stream the viewer still wants playing.
@@ -16,10 +16,10 @@ import {ntvEmbedURL} from './stream-policy.js';
 import {EmbedControl} from './embed-control.js';
 const RECONNECT_EVERY=120000,LOAD_WINDOWS=[45000,60000,90000],MAX_LOAD_RETRIES=3,NETWORK_RETRY_GAP=10000,OFFLINE_SETTLE=5000,INTERACTION_TRUST=600000;
 export class EmbedPlayer{
- constructor(url,{now=()=>performance.now(),createFrame=()=>document.createElement('iframe'),autoReconnect=true,probe=null,events=globalThis.window}={}){
+ constructor(url,{now=()=>performance.now(),createFrame=()=>document.createElement('iframe'),autoReconnect=true,probe=null,events=globalThis.window,helperAvailable=()=>Number(globalThis.document?.documentElement?.getAttribute?.('data-fantasy-stream-helper'))>=2}={}){
   this.kind='embed';this.url=ntvEmbedURL(url)||url;this.now=now;this.listeners=new Map();this.inAd=false;this.error=null;this.wantPlay=false;this.target=null;
   this.primed=true;this.advances=2;this.loadedAt=null;this.audioLocked=false;this.isMuted=true;this.duration=NaN;this.visible=false;
-  this.destroyed=false;
+  this.destroyed=false;this.helperAvailable=helperAvailable;this.warming=false;
   this.autoReconnect=!!autoReconnect;this.loadStartedAt=null;this.nextReconnectAt=null;this.loadRetries=0;this.lastReconnectAt=-Infinity;this.suspendedAt=null;this.offline=false;this.offlineSince=null;this.recoveryMessage='';this.everLoaded=false;this.interactedAt=null;this.gaveUp=false;
   this.probe=probe;this.probing=null;this.probedFrame=null;this.createFrame=createFrame;this.element=this.newFrame();this.control=new EmbedControl(this,events);
  }
@@ -33,7 +33,7 @@ export class EmbedPlayer{
   // Delegate provider fullscreen when the viewer chooses it. Our break cover
   // only applies inside the outer Fantasy Stream stage.
   f.allow="autoplay *; fullscreen *; picture-in-picture *; encrypted-media *";f.allowFullscreen=true;f.referrerPolicy='strict-origin-when-cross-origin';
-  f.addEventListener('load',()=>{if(!this.destroyed&&f===this.element&&this.visible&&this.wantPlay&&this.loadStartedAt!==null&&f.src&&f.src!=='about:blank'){this.loadedAt=this.now();this.loadRetries=0;this.everLoaded=true;this.gaveUp=false;this.control?.send();}});
+  f.addEventListener('load',()=>{if(!this.destroyed&&f===this.element&&this.activePlayback&&this.wantPlay&&this.loadStartedAt!==null&&f.src&&f.src!=='about:blank'){this.loadedAt=this.now();this.loadRetries=0;this.everLoaded=true;this.gaveUp=false;this.control?.send();}});
   return f;
  }
  replaceFrame(url){
@@ -51,26 +51,30 @@ export class EmbedPlayer{
   if(this.destroyed)return;
   this.visible=!!on;const f=this.element;
   if(on){if(this.wantPlay&&f.src!==this.url){this.resetRecovery();this.navigate();}this.control.send();}
-  else{this.control.send();this.resetRecovery();this.unload();}
+  else if(this.canPreload&&this.wantPlay){this.warming=true;this.control.send();}
+  else{this.warming=false;this.control.send();this.resetRecovery();this.unload();}
  }
+ get canPreload(){return this.helperAvailable();}
+ get activePlayback(){return this.visible||this.warming;}
  get currentTime(){return this.control.active?this.control.time:0;}
- get progressing(){if(this.control.connected)return !this.destroyed&&!this.error&&this.control.progressing;return !this.destroyed&&!this.error&&(!this.visible||this.loadedAt!==null&&this.now()-this.loadedAt>1500);}
- near(){return this.progressing;}
+ get progressing(){return !this.destroyed&&!this.error&&this.control.progressing;}
+ get readyToShow(){return !this.destroyed&&!this.error&&this.control.ready;}
+ near(){return this.readyToShow;}
  // The one sign of real viewing a cross-origin page gives: a recent click inside this document (a reload clears it).
  get viewerConfirmed(){if(this.control.active)return this.visible&&this.wantPlay&&this.control.progressing;return !this.destroyed&&!this.error&&this.visible&&this.wantPlay&&this.loadedAt!==null&&this.interactedAt!==null&&this.now()-this.interactedAt<INTERACTION_TRUST&&this.suspendedAt===null&&!this.offline;}
- play(){if(this.destroyed)return;this.wantPlay=true;if(this.visible)this.setVisible(true);this.control.send();}
- pause(){this.wantPlay=false;this.control.send();this.resetRecovery();this.unload();}
+ play(){if(this.destroyed)return;this.wantPlay=true;if(this.visible)this.setVisible(true);else if(this.canPreload){this.warming=true;if(this.element.src!==this.url){this.resetRecovery();this.navigate();}}this.control.send();}
+ pause(){this.wantPlay=false;this.control.send();if(!this.canPreload){this.warming=false;this.resetRecovery();this.unload();}}
  seek(){}
  // A cross-origin page can display an error or navigate inside its own frame
  // without telling us. Reload just that document; preserve the channel state.
- reload(){if(this.destroyed||!this.visible||!this.wantPlay)return false;this.resetRecovery();this.navigate('Reloading stream…');return true;}
+ reload(){if(this.destroyed||!this.activePlayback||!this.wantPlay)return false;this.resetRecovery();this.navigate('Reloading stream…');return true;}
  resetRecovery(){this.loadedAt=null;this.loadStartedAt=null;this.nextReconnectAt=null;this.loadRetries=0;this.suspendedAt=null;this.offline=false;this.offlineSince=null;this.recoveryMessage='';this.interactedAt=null;this.gaveUp=false;}
  // The viewer clicked inside the page: it is alive, whatever its load event said.
  noteInteraction(){if(this.destroyed||!this.visible)return;this.interactedAt=this.now();this.loadedAt??=this.now();this.loadRetries=0;this.gaveUp=false;this.recoveryMessage='';}
  navigate(message='',detail={}){
   const now=this.now();this.loadedAt=null;this.gaveUp=false;this.interactedAt=null;this.loadStartedAt=now;this.lastReconnectAt=now;this.nextReconnectAt=this.autoReconnect?now+RECONNECT_EVERY:null;this.recoveryMessage=message;
   if(message)this.emit('reconnect',detail);
-  if(!this.destroyed&&this.visible&&this.wantPlay)this.replaceFrame(this.url);
+  if(!this.destroyed&&this.activePlayback&&this.wantPlay)this.replaceFrame(this.url);
  }
  setAutoReconnect(value){
   if(this.autoReconnect===!!value)return;
@@ -80,7 +84,7 @@ export class EmbedPlayer{
  // Called only for the on-screen game by the app loop. No background timers
  // can reload an old frame after a switch, Pause, highlight, or destruction.
  checkHealth({online=true,foreground=true}={}){
-  if(this.destroyed||this.error||!this.visible||!this.wantPlay||this.loadStartedAt===null)return;
+  if(this.destroyed||this.error||!this.activePlayback||!this.wantPlay||this.loadStartedAt===null)return;
   const now=this.now();this.control.send();
   if(this.control.progressing){this.loadedAt??=now;this.nextReconnectAt=now+RECONNECT_EVERY;this.recoveryMessage='';return;}
   if(!online||!foreground){this.suspendedAt??=now;if(!online){this.offlineSince??=now;if(now-this.offlineSince>=OFFLINE_SETTLE)this.offline=true;}return;}
@@ -109,7 +113,7 @@ export class EmbedPlayer{
   const f=this.element;this.probing=f;this.probedFrame=f;
   Promise.resolve().then(()=>this.probe(this.url)).then(()=>true,()=>false).then(answered=>{
    if(this.probing===f)this.probing=null;
-   if(answered&&!this.destroyed&&f===this.element&&this.visible&&this.wantPlay&&this.loadedAt===null){this.loadedAt=this.now();this.loadRetries=0;this.gaveUp=false;this.recoveryMessage='';}
+   if(answered&&!this.destroyed&&f===this.element&&this.activePlayback&&this.wantPlay&&this.loadedAt===null){this.loadedAt=this.now();this.loadRetries=0;this.gaveUp=false;this.recoveryMessage='';}
   });
  }
  set muted(value){this.isMuted=!!value;this.audioLocked=false;if(this.control){this.control.audioRevision++;this.control.send();}}

@@ -2,6 +2,7 @@
 // player ships (actions: play, pause, seek, mute, unmute, volume; events:
 // inited, started, resumed, paused, timeupdate, rewound, ended, error, adShown).
 // Media stays inside the provider's own player.
+import {EmbedControl} from './embed-control.js';
 const ORIGIN='https://ok.ru';
 export function providerURL(value){
  const u=new URL(value);if(u.origin!==ORIGIN||!/^\/videoembed\/\d+$/.test(u.pathname))throw new Error('Unknown replay provider.');
@@ -18,8 +19,12 @@ export class ProviderPlayer{
   this.initialized=false;this.primed=false;this.inAd=false;this.timer=null;this.error=null;this.wantPlay=false;this.target=null;this.isMuted=true;this.seekedAt=-Infinity;this.seekStartedAt=null;this.seekLatency=3000;this.lastReport=-Infinity;this.kickedAt=-Infinity;this.audioLocked=false;this.audioWatch=null;this.otherLength=0;this.otherReports=0;this.corrected=false;this.played=false;
   this.element.setAttribute?.('sandbox','allow-scripts allow-same-origin allow-forms allow-presentation allow-storage-access-by-user-activation');   // the player works; popups and top navigation do not
   this.element.src=providerURL(url);   // validated before anything is registered
+  this.visible=false;this.control=new EmbedControl(this,null);this.helperConnected=false;
   this.onMessage=event=>this.receive(event);events.addEventListener('message',this.onMessage);
  }
+ get activePlayback(){return this.wantPlay;}
+ setVisible(on){this.visible=!!on;this.sendHelper();}
+ sendHelper(){if(this.helperConnected)this.control.send();}
  on(name,callback){if(!this.listeners.has(name))this.listeners.set(name,new Set());this.listeners.get(name).add(callback);}
  emit(name,detail){for(const callback of this.listeners.get(name)||[])callback(detail);}
  send(action,extra={}){try{this.element.contentWindow?.postMessage({action,...extra},ORIGIN);}catch{}}
@@ -32,10 +37,10 @@ export class ProviderPlayer{
  // Ready to be shown at `target`: footage has played at this position since
  // the last seek, and is either still moving or deliberately paused there.
  near(target,tolerance=2.5){return this.primed&&!this.inAd&&!this.error&&this.target===null&&(this.progressing||!this.wantPlay)&&Math.abs(this.currentTime-target)<=tolerance;}
- play(){this.wantPlay=true;if(this.initialized)this.bootstrap();}
+ play(){this.wantPlay=true;this.sendHelper();if(this.initialized)this.bootstrap();}
  // The viewer's click inside the frame pauses the provider's player: ask it straight to play again.
- resume(){this.wantPlay=true;if(this.initialized)this.send('play');}
- pause(){this.wantPlay=false;this.advances=0;this.stopBootstrap();clearTimeout(this.audioWatch);this.audioWatch=null;if(this.initialized)this.send('pause');}
+ resume(){this.wantPlay=true;this.sendHelper();if(this.initialized)this.send('play');}
+ pause(){this.wantPlay=false;this.sendHelper();this.advances=0;this.stopBootstrap();clearTimeout(this.audioWatch);this.audioWatch=null;if(this.initialized)this.send('pause');}
  // The provider drops a play sent before its player is ready (observed: one
  // play after `inited` yields nothing, a half-second retry starts footage), so
  // keep asking until a time report proves the footage is moving.
@@ -65,7 +70,7 @@ export class ProviderPlayer{
  // second and ignores play/seek until muted again). Watch for that and fall
  // back to muted playback, flagging the slot so the app can offer a retry.
  set muted(value){
-  this.isMuted=!!value;clearTimeout(this.audioWatch);this.audioWatch=null;
+  this.isMuted=!!value;this.control.audioRevision++;this.sendHelper();clearTimeout(this.audioWatch);this.audioWatch=null;
   // Before footage has moved, a wedged unmute could not be told from a slow start: the wanted sound waits for the first moving picture.
   if(!this.initialized||!this.played)return;
   this.applyVolume();
@@ -79,6 +84,7 @@ export class ProviderPlayer{
  // Volume commands are sent only when the wanted state changes (or the player re-initialized); repeating them audibly stutters the provider.
  applyVolume(force=false){const quiet=this.isMuted||!this.played;if(!force&&this.appliedMuted===quiet)return;this.appliedMuted=quiet;this.send(quiet?'mute':'unmute');this.send('volume',{value:quiet?0:1});}
  receive(event){
+  if(event.source===this.element.contentWindow&&event.data?.channel==='fantasy-stream-playback-v1'){if(event.data.type==='ready')this.helperConnected=true;this.control.receive(event);return;}
   if(event.origin!==ORIGIN||event.source!==this.element.contentWindow||!event.data||typeof event.data!=='object')return;
   const data=event.data,now=this.now();this.lastReport=now;
   switch(data.event){
@@ -138,5 +144,5 @@ export class ProviderPlayer{
  }
  // A gap this big is another video, not a rounding difference: the player now knows only what it was shown, and the app may learn from it.
  adoptLength(){if(!this.otherLength||Math.abs(this.otherLength-this.duration)<=60)return;this.duration=this.otherLength;this.knownDuration=false;this.corrected=true;this.otherLength=0;this.otherReports=0;if(this.target!==null)this.target=Math.min(this.target,this.duration-1);}
- destroy(){this.wantPlay=false;this.stopBootstrap();clearTimeout(this.audioWatch);this.events.removeEventListener('message',this.onMessage);this.element.removeAttribute('src');this.element.remove();this.listeners.clear();}
+ destroy(){this.destroyed=true;this.wantPlay=false;this.sendHelper();this.control.destroy();this.stopBootstrap();clearTimeout(this.audioWatch);this.events.removeEventListener('message',this.onMessage);this.element.removeAttribute('src');this.element.remove();this.listeners.clear();}
 }

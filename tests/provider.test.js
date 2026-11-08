@@ -995,19 +995,19 @@ test('createPlayer builds a ProviderPlayer for provider/ok sources',t=>{
 
 // ---- EmbedPlayer: a page embed loads only while it is on screen ------------
 import {EmbedPlayer} from '../web/embed-player.js';
-test('EmbedPlayer: hidden it has no page and counts as ready; shown it loads the page and is ready 1.5 s after load; hidden again it goes blank',()=>{
+test('EmbedPlayer without helper: blank or loaded pages never prove playback; hiding unloads the page',()=>{
  const saved=globalThis.document;let frame;
  globalThis.document={createElement(){frame=fakeFrame();frame.listeners={};frame.addEventListener=(n,fn)=>{frame.listeners[n]=fn;};return frame;}};
  try{
   let now=0;const p=new EmbedPlayer('https://stream.example/game',{now:()=>now});
   assert.equal(p.kind,'embed');assert.equal(frame.src,undefined,'nothing loads until shown');
-  assert.equal(p.progressing,true,'hidden: nothing to wait for');assert.equal(p.near(),true);
+  assert.equal(p.progressing,false,'a blank frame is not video');assert.equal(p.near(),false);
   p.setVisible(true);p.play();
   assert.equal(frame.src,'https://stream.example/game');assert.equal(p.progressing,false,'shown: not until the page has loaded');
   now=1000;frame.listeners.load();assert.equal(p.progressing,false);
-  now=2600;assert.equal(p.progressing,true);
+  now=2600;assert.equal(p.progressing,false,'load is not video progress');
   p.setVisible(true);assert.equal(p.loadedAt,1000,'showing it again does not reload');
-  p.setVisible(false);assert.equal(frame.src,'about:blank');assert.equal(p.progressing,true);
+  p.setVisible(false);assert.equal(frame.src,'about:blank');assert.equal(p.progressing,false);
   now=3000;frame.listeners.load();assert.equal(p.loadedAt,null,'a hidden load (the blank page) is ignored');
   p.setVisible(true);assert.equal(frame.src,'https://stream.example/game');assert.equal(p.progressing,false);
   p.destroy();assert.equal(frame.src,'about:blank');assert.equal(frame.removed,true);
@@ -1049,7 +1049,7 @@ test('EmbedPlayer pause unloads the page to stop sound and play reloads it',()=>
  globalThis.document={createElement(){frame=fakeFrame();frame.addEventListener=(name,fn)=>{if(name==='load')load=fn;};return frame;}};
  try{const p=new EmbedPlayer('https://stream.example/game',{now:()=>now});p.setVisible(true);p.play();p.pause();assert.equal(frame.src,'about:blank');assert.equal(p.wantPlay,false);
   load();now=2000;assert.equal(p.progressing,false,'loading about:blank is not playback');
-  p.play();assert.equal(frame.src,'https://stream.example/game');assert.equal(p.wantPlay,true);assert.equal(p.progressing,false);load();now=4000;assert.equal(p.progressing,true);p.destroy();}
+  p.play();assert.equal(frame.src,'https://stream.example/game');assert.equal(p.wantPlay,true);assert.equal(p.progressing,false);load();now=4000;assert.equal(p.progressing,false);p.destroy();}
  finally{globalThis.document=saved;}
 });
 test('only the visible player is keyboard reachable and exposed to assistive technology',()=>{

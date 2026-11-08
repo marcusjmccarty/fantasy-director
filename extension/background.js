@@ -7,7 +7,7 @@ chrome.runtime.onMessage.addListener((message,sender,reply)=>{
  if(!allowed(sender.tab?.url))return;
  if(message?.type==='init'){
   if(sender.frameId!==0&&sender.documentId){
-   chrome.scripting.executeScript({target:{tabId:sender.tab.id,documentIds:[sender.documentId]},world:'MAIN',files:['fullscreen.js']}).catch(()=>{});
+   chrome.scripting.executeScript({target:{tabId:sender.tab.id,documentIds:[sender.documentId]},world:'MAIN',files:['fullscreen.js','media.js']}).catch(()=>{});
   }
   reply({enabled:true,top:sender.frameId===0});return;
  }

@@ -9,7 +9,7 @@ import {SPORTS,escapeHTML as esc,localDate,normalizeSportGames,normalizeSportPre
 const $=id=>document.getElementById(id),requested=new URLSearchParams(location.search).get('sport');
 const sport=Object.hasOwn(SPORTS,requested)?requested:'nba',config=SPORTS[sport],storageKey='fantasy-stream-'+sport+'-v1';
 let saved;try{saved=normalizeSportPreferences(JSON.parse(localStorage.getItem(storageKey)||'{}'));}catch{saved=normalizeSportPreferences();}
-const S={earlyOpen:new Set(),ovRun:null,streamOpener:null,mode:'live',date:localDate(),dateLocked:false,lookahead:null,pastDays:[],pastFor:'',pastLoading:false,pastComplete:false,pastRetryAt:0,stripTarget:null,stripStartedAt:0,resume:null,streamFieldsOpen:new Set(),streamSignature:null,streamsDirty:false,streamsPressed:false,streamSaves:new Map(),highlights:[],summaryAt:{},summaryPending:new Map(),clip:null,replays:null,replay:null,replayLoading:false,replayError:'',gamesLoading:true,gamesError:false,games:[],history:[],season:null,playing:false,current:null,manual:false,lastSwitch:0,blocked:new Map(),filter:false,league:null,leagueError:'',leagueUpdated:0,leaguePending:false,leagueGeneration:0,gameGeneration:0,matchId:'',request:null,gameTimer:null,leagueTimer:null,fullRequest:0,fullWanted:false,rotations:new Map(),stripShown:null};
+const S={earlyOpen:new Set(),ovRun:null,streamOpener:null,mode:'live',date:localDate(),dateLocked:false,lookahead:null,pastDays:[],pastFor:'',pastLoading:false,pastComplete:false,pastRetryAt:0,stripTarget:null,stripStartedAt:0,resume:null,streamFieldsOpen:new Set(),streamSignature:null,streamsDirty:false,streamsPressed:false,streamSaves:new Map(),highlights:[],summaryAt:{},summaryPending:new Map(),clip:null,replays:null,replay:null,replayLoading:false,replayError:'',gamesLoading:true,gamesError:false,games:[],history:[],season:null,playing:false,current:null,pending:null,manual:false,lastSwitch:0,blocked:new Map(),filter:false,league:null,leagueError:'',leagueUpdated:0,leaguePending:false,leagueGeneration:0,gameGeneration:0,matchId:'',request:null,gameTimer:null,leagueTimer:null,fullRequest:0,fullWanted:false,rotations:new Map(),stripShown:null};
 // Website players are reloaded only on request now; a browser that saved the old default is reset once.
 if(saved.prefsVersion<2){saved.autoReconnect=false;saved.prefsVersion=2;try{localStorage.setItem(storageKey,JSON.stringify(saved));}catch{}}
 const streamFinder=new StreamFinder({fetcher:(...args)=>fetch(...args)});streamFinder.enabled=saved.autoDiscover;
@@ -185,14 +185,32 @@ function selectGame(id,{manual=true,url=null}={}){
  const game=S.games.find(g=>g.id===id);if(!game)return;const source=url||inlineUrls(game)[0];if(!source&&!urls(game).length){openStream(id);return;}
  if(S.clip)leaveClip(false);
  // Before the start, or with a stream that refuses a frame, nothing loads: the screen says when, or offers the real page.
- if(!source||game.state==='pre'&&!S.earlyOpen.has(id)){if(S.current&&pool.get(S.current))pool.close(S.current);S.current=id;S.manual=true;S.lastSwitch=Date.now();S.autoAttempted=true;S.playing=false;pool.setRunning(false);$('overlay').hidden=false;renderGuide();renderTransport();return;}
- if(S.current!==id){S.lastSwitch=Date.now();S.manual=manual;}else if(manual)S.manual=true;
+ if(!source||game.state==='pre'&&!S.earlyOpen.has(id)){S.pending=null;if(S.current&&pool.get(S.current))pool.close(S.current);S.current=id;S.manual=true;S.lastSwitch=Date.now();S.autoAttempted=true;S.playing=false;pool.setRunning(false);$('overlay').hidden=false;renderGuide();renderTransport();return;}
  const slot=pool.get(id);if(!slot||slot.url!==source){pool.open(id,{url:source,page:streamFinder.original(source),type:streamType(source),live:true,autoReconnect:saved.autoReconnect});}
- S.autoAttempted=true;S.current=id;S.playing=true;pool.setRunning(true,{resumeVisible:false});pool.show(id);$('overlay').hidden=true;renderGuide();renderTransport();
+ if(S.pending?.id!==id||S.pending?.url!==source)S.pending={id,url:source,manual,since:Date.now()};else if(manual)S.pending.manual=true;
+ S.autoAttempted=true;S.playing=true;pool.setRunning(true,{resumeVisible:false});pool.hold?.(id,null,{play:true});settleSwitch();renderGuide();renderTransport();
+}
+function settleSwitch(){
+ const pending=S.pending;if(!pending||!S.playing||S.mode!=='live'||S.clip)return;
+ const p=pool.get(pending.id)?.player;if(!p){S.pending=null;return;}
+ pool.hold?.(pending.id,null,{play:true});p.checkHealth?.({active:true,online:navigator.onLine!==false,foreground:!document.hidden});
+ if(p.kind==='embed'&&!p.canPreload||pool.ready?.(pending.id,null)){
+  if(S.current!==pending.id)S.lastSwitch=Date.now();S.current=pending.id;S.manual=pending.manual;S.pending=null;pool.show(S.current);$('overlay').hidden=true;renderGuide();return;
+ }
+ if(Date.now()-pending.since>45000){S.blocked.set(pending.id,Date.now()+60000);if(pending.id!==pool.visible)pool.close(pending.id);S.pending=null;$('scheduleStatus').textContent='The next stream did not start. Keeping the current game.';}
+}
+function warmNext(){
+ if(S.mode!=='live'||!S.playing||S.clip||S.pending||!pool.current?.progressing)return;
+ const blocked=new Set([S.current,...[...S.blocked].filter(([,until])=>until>Date.now()).map(([id])=>id)]);
+ const next=chooseSportGame(S.games,{streams:Object.fromEntries(S.games.map(g=>[g.key,{primary:inlineUrls(g)[0]}])),followed:followed(),blocked});
+ const wanted=new Set([S.current]);
+ if(next&&next.id!==S.current){const url=inlineUrls(next)[0];if(url){const slot=pool.get(next.id);if(!slot||slot.url!==url)pool.open(next.id,{url,page:streamFinder.original(url),type:streamType(url),live:true,autoReconnect:saved.autoReconnect});pool.hold?.(next.id,null,{play:true});wanted.add(next.id);}}
+ pool.keep?.(wanted);
 }
 // Play with nothing on screen stays on Play unless a game is coming that the page can show itself: the status line says what to do instead.
 function setPlaying(on){S.autoAttempted=true;S.playing=on;pool.setRunning(on);if(on&&!pool.current)direct();if(on&&!pool.current&&!S.clip&&!(S.mode==='live'&&S.games.some(g=>g.state!=='post'&&inlineUrls(g).length))){S.playing=false;pool.setRunning(false);}renderTransport();}
 function direct(){
+ settleSwitch();if(S.pending)return;
  if(S.mode!=='live'||S.clip||!S.playing||!saved.auto&&pool.current)return;
  const cutoff=Date.now()-saved.delay*1000,delayed=S.history.filter(h=>h.at<=cutoff).at(-1)||S.history[0];
  const games=delayed?.games||S.games,blocked=new Set([...S.blocked].filter(([,until])=>until>Date.now()).map(([id])=>id));
@@ -214,7 +232,7 @@ function renderTransport(){
  const clipOn=!!S.clip,chosen=!p&&!clipOn&&S.mode==='live'&&g?g:null,early=chosen?.state==='pre'&&!S.earlyOpen.has(chosen.id)?chosen:null,away=chosen&&!inlineUrls(chosen).length&&urls(chosen).length?chosen:null;
  setText('playButton',S.playing?'Pause':'Play');$('playButton').dataset.playing=String(S.playing);$('playButton').setAttribute('aria-label',S.playing?'Pause':'Play');
  setText('muteButton',saved.muted?'Turn sound on':'Mute sound');$('muteButton').hidden=embed&&!p.control?.active;$('reloadStream').hidden=typeof p?.reload!=='function';$('nextStream').hidden=!p||!g||inlineUrls(g).length<2;$('nextStream').disabled=!S.playing;
- $('openStream').hidden=!embed;$('openStream').href=embed?(slot?.source?.page||slot?.url||'#'):'#';$('embedHelp').hidden=!embed;
+ $('openStream').hidden=!embed;$('openStream').href=embed?(slot?.source?.page||slot?.url||'#'):'#';$('embedHelp').hidden=!embed||!!p?.canPreload;
  const clip=S.clip?S.highlights.find(h=>h.id===S.clip):null,rp=S.mode==='replay'?S.replay:null,replayGame=rp?S.replays?.games.find(x=>x.id===rp.id):null;
  setText('watchTitle',clip?clip.title:replayGame?replayGame.title:g?.name||config.name+' channel');setText('channelMode',clip?'HIGHLIGHT':S.mode==='replay'?'REPLAY':g?gameTime(g):config.label+' LIVE');setText('pictureNote',clip||S.mode==='replay'?'':saved.delay+' sec delay');
  $('leaveClip').hidden=!clip;$('nextReplaySource').hidden=!(rp?.sources?.length>1);$('autoMode').hidden=!!clip||S.mode==='replay';
@@ -234,7 +252,7 @@ function renderTransport(){
  // A replay on its way gets a word: a dark frame should never look broken. It stops once footage reports, and steps aside for an ad.
  if(rp&&p&&!rp.started&&(p.kind!=='provider'||p.advances>0)){rp.started=true;renderGuide();}
  const starting=!!rp&&p?.kind==='provider'&&pool.visible==='rp:'+rp.id&&S.playing&&!p.inAd&&!p.error&&!rp.started,waited=rp?.waited||0;
- $('switching').hidden=!starting||waited>=45000;if(!$('switching').hidden)setText('switching',waited<12000?'Loading the replay video…':`Still loading · if it waits, ${touch()?'tap':'click'} the video to start it`);
+ $('switching').hidden=(!starting||waited>=45000)&&!S.pending;if(!$('switching').hidden)setText('switching',S.pending?'Preparing the next stream…':waited<12000?'Loading the replay video…':`Still loading · if it waits, ${touch()?'tap':'click'} the video to start it`);
  $('frameHelp').hidden=!starting||!touch()&&waited<LOAD_LIMIT;$('frameOpen').href=rp?.sources?.[rp.index]?.url||'#';
  if(!p&&S.mode==='replay'){$('overlay').hidden=false;setText('ovOpen','Watch replay ↗');setText('ovTitle',outside?'This replay opens on its own page.':rp?.loading?'Opening your replay…':rp?.link?'This replay won’t play inside the page on this device.':rp?.error?'That replay won’t open right now.':'Full game replays.');setText('ovText',outside?`This video won’t play inside another page. It opens in a new tab, from the first minute.${rp.sources.length>1?' Try another link for a second one.':''}`:rp?.loading?'Finding the video on the replay site.':rp?.link?'It opens in a new tab, from the first minute. The channel and scores stay here.':rp?.error?'Choose the game again to retry, or pick another one above.':S.replays?.games?.length?'Pick a game above to watch it from the first minute.':S.replayError||(S.replayLoading?'Finding the latest replays…':S.replays?.note||'No replays listed yet.'));showAction(rp?null:firstPick());$('connectFirst').hidden=true;return;}
  if(early||away){$('overlay').hidden=false;const when=early?new Date(early.date).toLocaleString([],{...(isToday()?{}:{weekday:'long'}),hour:'numeric',minute:'2-digit'}):'';setText('ovOpen',early?'Open the stream early ↗':'Watch in a new tab ↗');setText('ovTitle',early?`${START} ${isToday()?'at ':''}${when}`:`${chosen.name} opens in a new tab`);setText('ovText',early?(away?'This game hasn’t started yet. Its stream opens in a new tab when you’re ready.':'This game hasn’t started yet. We’ll put it on when it does, or you can open the stream now.'):'This stream won’t play inside our page, so it opens on its own site in a new tab. Scores stay here.');showAction(early&&!away?{label:'Open the stream early',run:()=>{S.earlyOpen.add(early.id);selectGame(early.id);}}:null);$('connectFirst').hidden=true;return;}
@@ -440,7 +458,7 @@ function watchReplay(dt){
 }
 function tick(){const tickAt=Date.now();watchReplay(Math.min(2000,tickAt-(S.tickAt||tickAt-1000)));S.tickAt=tickAt;if(Date.now()-(S.highlightsPolledAt||0)>5000){S.highlightsPolledAt=Date.now();void pollHighlights();}
  // The replay listing retries a failure after a minute and refreshes itself every fifteen. In Live mode an answer with a note is final, and nothing is asked before the first load.
- const replayAge=Date.now()-(S.replaysAt||0);if(!S.replayLoading&&(S.mode==='replay'?replayAge>(S.replayError||!S.replays?.games?.length?60000:900000):S.replayError?replayAge>60000:S.replaysAt&&!S.replays?.note&&replayAge>900000))void loadReplays();if(S.playing){pool.current?.checkHealth?.({active:pool.visible===S.current,online:navigator.onLine!==false,foreground:document.visibilityState!=='hidden'});if(document.visibilityState!=='hidden')direct();}renderTransport();}
+ const replayAge=Date.now()-(S.replaysAt||0);if(!S.replayLoading&&(S.mode==='replay'?replayAge>(S.replayError||!S.replays?.games?.length?60000:900000):S.replayError?replayAge>60000:S.replaysAt&&!S.replays?.note&&replayAge>900000))void loadReplays();if(S.playing){pool.current?.checkHealth?.({active:pool.visible===S.current,online:navigator.onLine!==false,foreground:document.visibilityState!=='hidden'});if(document.visibilityState!=='hidden'){direct();warmNext();}}renderTransport();}
 // ---------- highlights: ESPN's clips from the games your players are in ----------
 const summaryURL=g=>`https://site.api.espn.com/apis/site/v2/sports/${config.path}/summary?event=${encodeURIComponent(g.id)}`;
 async function pollHighlights(){
@@ -473,7 +491,7 @@ function leaveClip(resume=true){
 }
 $('leaveClip').onclick=()=>leaveClip();
 // ---------- replays: full games from the sites the owner picked ----------
-function setMode(mode){
+function setMode(mode){S.pending=null;
  if(S.mode===mode)return;S.mode=mode;if(document.body?.dataset)document.body.dataset.mode=mode;
  // The two strips are different lists: start the new one from its own beginning.
  $('games').scrollLeft=0;S.stripScrolled=false;S.stripTarget=null;S.stripShown=null;

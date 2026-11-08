@@ -1,3 +1,4 @@
+import {disableCaptions} from '../web/captions.js';
 import {StreamFinder,refusesFrame} from '../web/stream-finder.js';
 import * as strip from '../web/strip.js';
 // Exercise app-level state transitions with the real domain modules and a small
@@ -70,7 +71,7 @@ function app(fetcher=async()=>Response.json({events:[]}),{media=false,native=fal
  const storage=new Map(stored===null?[]:[['fantasy-stream-v3',JSON.stringify(stored)]]);
  const ctx={StreamFinder,refusesFrame,...strip,...archive,...sync,...director,...coverage,...replays,...live,...scoring,...roster,...highlights,...preferences,...liveHighlights,...continuity,...breaks,...scoreboard,...chat,...archiveBuild,FantasyScoreFeed:class extends scoreboard.FantasyScoreFeed{constructor(){super({fetcher});}sync(connection,seed){this.connection=connection;if(scores)return super.sync(connection,seed);}},PlayerPool:media?MediaPool:Pool,NFLSourceCatalog:class{},document,window:{navigator:{onLine:true},addEventListener(){}},localStorage:{getItem:key=>storage.get(key)||null,setItem(key,value){if(storageBlocked)throw new Error('Storage unavailable');storage.set(key,value);}},performance:{now:()=>time.now},setTimeout(fn,delay){timers.set(++timerId,{fn,delay});return timerId;},clearTimeout(id){timers.delete(id);},setInterval:()=>0,fetch:fetcher,CSS:{escape:value=>String(value)},AbortSignal,AbortController,Response,URL,URLSearchParams,Date,console};
  vm.createContext(ctx);
- if(native){ctx.attachMediaSource=async()=>null;const code=readFileSync(new URL('../web/native-player.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace('export class NativePlayer','class NativePlayer');vm.runInContext(code+'\nglobalThis.Native=NativePlayer;',ctx);}
+ if(native){ctx.disableCaptions=disableCaptions;ctx.attachMediaSource=async()=>null;const code=readFileSync(new URL('../web/native-player.js',import.meta.url),'utf8').replace(/^import .*;\n/gm,'').replace('export class NativePlayer','class NativePlayer');vm.runInContext(code+'\nglobalThis.Native=NativePlayer;',ctx);}
  vm.runInContext(script+'\n globalThis.a={S,pool,streamFinder,refreshStreamLinks,fantasyFeed,director,coverage,clock,step,frame,picture,target,openPastReplay,selectWeek,applyReplayLinks,loadReplayArchive,updateBreaks,advanceClock,skipBreak,selectGame,excluded,cutTo,warm,startHighlight,updateHighlight,finishHighlight,syncFor,nudge,nfl,setMode,setPlaying,setDay,seekTo,replaySource,useRoster,importLeague,pollLive,pollLiveClips,prepareReplay,retryMissedReplays,failHighlight,render,init,roster,get saved(){return saved;}};',ctx);
  return {...ctx.a,window:ctx.window,time,timers,storage,page:document,stage,frameEvents,emitPage(name,event={}){for(const fn of pageEvents.get(name)||[])fn(event);},network:ctx.window.navigator, get saved(){return ctx.a.saved;},el:id=>elements.get(id)};
 }
@@ -351,7 +352,7 @@ test('a scoreboard outage does not suspend stalled-video recovery',()=>{
 });
 test('embed safety: reloading a stream preserves manual choice, lineup, coverage and the other player',()=>{
  const a=app(undefined,{media:true,embeds:true});ready(a);a.saved.streams={'IND-MIN':'https://player.example/embed/a'};a.selectGame('A');
- const p=a.pool.current;a.time.now=2000;p.element.emit('load');a.time.now=4000;assert.equal(p.progressing,true);
+ const p=a.pool.current;a.time.now=2000;p.element.emit('load');a.time.now=4000;assert.equal(p.progressing,false,'a page load is not media progress');
  const spare=a.pool.open('spare',{url:'https://player.example/embed/b',type:'embed/page'}).player;
  a.coverage.watch('A',998,1000);const lineup=JSON.stringify(a.saved),cuts=a.S.cuts,choice=a.S.selection;
  a.S.stall={since:0,step:2};a.render();assert.equal(a.el('reloadStream').hidden,false);a.el('reloadStream').onclick();
@@ -366,7 +367,7 @@ test('embed safety: repeated switches unload the outgoing page and retain the sa
  for(let i=0;i<16;i++){
   const id=i%2?'B':'A';a.selectGame(id);const current=a.pool.current;assert.equal(a.pool.visible,id,`switch ${i}: the new page must get its own load/recovery window`);assert.match(current.element.sandbox,/allow-scripts/);assert.equal(current.element.sandbox.includes('allow-popups'),false);
   for(const slot of a.pool.slots.values())if(slot.key!==id)assert.ok(!slot.player.element.src||slot.player.element.src==='about:blank');
-  current.element.emit('load');a.time.now+=2000;assert.equal(current.progressing,true);
+  current.element.emit('load');a.time.now+=2000;assert.equal(current.progressing,false);
  }
 });
 test('embed recovery: a page that never loads retains the selected game through a long outage',()=>{
@@ -377,7 +378,7 @@ test('embed recovery: a page that never loads retains the selected game through 
   a.time.now=now;a.step(now);assert.equal(a.pool.visible,'A','keep reconnecting the selected game');assert.equal(a.pool.current,p);
   assert.equal(a.S.cooldown.size,0);assert.equal(a.S.pinned,'A');assert.equal(a.S.started,true);assert.equal(a.S.playing,true);assert.equal(p.destroyed,false);
  }
- assert.equal(p.element.navigations.length,4,'three long retries, then the viewer is asked instead of an endless loop');assert.equal(p.gaveUp,true);a.render();assert.match(a.el('pictureNote').textContent,/Reload stream/);p.element.emit('load');a.time.now+=2000;a.step(a.time.now);assert.equal(p.progressing,true);assert.equal(a.pool.visible,'A');
+ assert.equal(p.element.navigations.length,4,'three long retries, then the viewer is asked instead of an endless loop');assert.equal(p.gaveUp,true);a.render();assert.match(a.el('pictureNote').textContent,/Reload stream/);p.element.emit('load');a.time.now+=2000;a.step(a.time.now);assert.equal(p.progressing,false);assert.equal(a.pool.visible,'A');
 });
 test('embed safety: reload is unavailable for direct video and highlights',()=>{
  const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.selectGame('A');a.render();assert.equal(a.el('reloadStream').hidden,true);
@@ -389,7 +390,7 @@ test('embed recovery: the real app reconnects a loaded but unobservable stream w
  a.time.now=120999;a.step(a.time.now);assert.equal(p.element.navigations.length,1);
  a.time.now=121000;a.step(a.time.now);a.render();assert.equal(p.element.navigations.length,2);assert.match(a.el('pictureNote').textContent,/Refreshing stream connection/);
  assert.equal(a.pool.current,p);assert.equal(a.S.pinned,'A');assert.equal(a.S.selection,choice);assert.equal(a.S.cuts,cuts);assert.equal(JSON.stringify(a.saved),lineup);assert.equal(a.S.cooldown.size,0);assert.equal(a.coverage.intervals.size,0);
- p.element.emit('load');a.time.now=123000;a.step(a.time.now);assert.equal(p.progressing,true);assert.equal(a.S.pinned,'A');
+ p.element.emit('load');a.time.now=123000;a.step(a.time.now);assert.equal(p.progressing,false);assert.equal(a.S.pinned,'A');
 });
 test('embed recovery: Pause and hidden tabs suppress reconnects and resume gets a fresh deadline',()=>{
  const a=app(undefined,{media:true,embeds:true});ready(a);a.saved.streams={'IND-MIN':'https://player.example/embed?t=a'};a.selectGame('A');const p=a.pool.current;p.element.emit('load');
@@ -523,7 +524,7 @@ test('embed switching: returning to older slots retires the outgoing context bef
   if(previousPlayer){assert.equal(previousPlayer.loadedAt,null);outgoing.emit('load');assert.equal(previousPlayer.loadedAt,null);}
   assert.equal(a.el('layers').children.filter(f=>f.src&&f.src!=='about:blank').length,1);
   assert.equal(p.element.parentNode,a.el('layers'));assert.equal(p.element.classList.contains('on'),true);assert.equal(p.element.tabIndex,0);assert.equal(p.element['aria-hidden'],'false');
-  p.element.emit('load');a.time.now+=2000;assert.equal(p.progressing,true);outgoing=p.element;previousPlayer=p;
+  p.element.emit('load');a.time.now+=2000;assert.equal(p.progressing,false);outgoing=p.element;previousPlayer=p;
  }
  a.frameEvents.onNavigate=null;
 });
@@ -1992,4 +1993,13 @@ test('switching away from a nested fullscreen frame preserves the channel view b
  const other={...game,id:'B',teams:[{abbr:'CLE'},{abbr:'NO'}]};a.S.games.push(other);a.S.live.feed.view=()=>[game,other];a.saved.streams['CLE-NO']='https://ntv.st/embed?t=next';
  a.frameEvents.onNavigate=()=>{assert.equal(a.stage.classList.contains('theater'),true);a.page.fullscreenElement=null;a.emitPage('fullscreenchange');};
  a.selectGame('B');assert.equal(a.pool.visible,'B');assert.equal(a.stage.classList.contains('theater'),true);assert.equal(a.S.playing,true);a.frameEvents.onNavigate=null;a.pool.destroy();
+});
+
+test('managed embed switching holds the current picture past eight seconds until buffered video advances',()=>{
+ const a=app(undefined,{media:true,embeds:true});ready(a);const other={...game,id:'B',teams:[{abbr:'SEA'},{abbr:'SF'}]};a.S.games.push(other);a.S.live.games.push(other);a.S.live.feed.push(a.S.games,970);
+ a.S.live.feed.view=()=>[game,other];a.saved.streams={'IND-MIN':'https://example.test/a.mp4','SEA-SF':'https://player.example/embed/b'};a.selectGame('A');const outgoing=a.pool.current;a.stage.classList.add('theater');
+ const p=a.pool.open('B',{url:'https://player.example/embed/b',type:'embed/page'}).player;p.helperAvailable=()=>true;a.selectGame('B');const frame=p.element;
+ for(const now of [2000,10000,30000]){a.time.now=now;a.cutTo('B',now);assert.equal(a.pool.current,outgoing);assert.equal(outgoing.wantPlay,true);assert.equal(a.S.pending.id,'B');}
+ for(let i=0;i<3;i++){a.time.now=31000+i*250;p.control.receive({source:p.element.contentWindow,data:{channel:'fantasy-stream-playback-v1',session:p.control.session,type:'status',playing:true,time:10+i*.25,buffered:2}});}
+ a.cutTo('B',a.time.now);assert.equal(a.pool.current,p);assert.equal(p.element,frame);assert.equal(a.S.pending,null);assert.equal(a.stage.classList.contains('theater'),true);a.pool.destroy();
 });

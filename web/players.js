@@ -41,7 +41,7 @@ export class PlayerPool{
  // re-seeking a provider every poll never lets it deliver a frame.
  hold(key,target,{play=this.running,fixed=false}={}){
   const slot=this.slots.get(key);if(!slot)return;this.touch(slot);const p=slot.player;
-  if(target===null||target===undefined||p.kind==='embed'){if(play&&!p.wantPlay)p.play();else if(!play&&p.wantPlay)p.pause();return;}
+  if(target===null||target===undefined||p.kind==='embed'){if(play&&(!p.wantPlay||p.kind==='embed'&&p.canPreload&&!p.activePlayback))p.play();else if(!play&&p.wantPlay)p.pause();return;}
   const lead=play&&!fixed?this.lead(key):0;
   const seek=()=>{slot.seekAt=this.now();p.seek(target+lead);if(play)p.play();};
   if(p.target!==null){
@@ -56,14 +56,14 @@ export class PlayerPool{
   if(p.kind==='native'&&key!==this.visible&&drift>AHEAD){p.pause();return;}
   if(play&&!p.wantPlay)p.play();else if(!play&&p.wantPlay)p.pause();
  }
- ready(key,target,tolerance=TOLERANCE){const p=this.slots.get(key)?.player;return !!p&&(target===null||target===undefined?p.progressing:p.near(target,tolerance));}
+ ready(key,target,tolerance=TOLERANCE){const p=this.slots.get(key)?.player;return !!p&&(p.kind==='embed'?p.readyToShow:target===null||target===undefined?p.progressing:p.near(target,tolerance));}
  show(key){
   const slot=this.slots.get(key);if(!slot)return false;
   if(this.visible&&this.visible!==key)this.onBeforeLeave(this.visible);
   // Retire every outgoing page before starting the incoming one, including a
   // return to an older slot that precedes the current one in insertion order.
   for(const s of this.slots.values())if(s!==slot){s.player.element.classList.remove('on');s.player.element.setAttribute('aria-hidden','true');s.player.element.tabIndex=-1;s.player.muted=true;s.player.setVisible?.(false);}
-  slot.player.element.classList.add('on');slot.player.element.setAttribute('aria-hidden','false');slot.player.element.tabIndex=0;slot.player.muted=this.muted;slot.player.setVisible?.(true);
+  slot.player.element.classList.add('on');slot.player.element.setAttribute('aria-hidden','false');slot.player.element.tabIndex=0;slot.player.setVisible?.(true);slot.player.muted=this.muted;
   // A warm, moving player only needs to be revealed. Starting it again can
   // re-enter a provider's startup/recovery flow right at the cut.
   this.visible=key;this.touch(slot);if(this.running&&(!slot.player.wantPlay||!slot.player.progressing))slot.player.play();return true;
@@ -77,7 +77,7 @@ export class PlayerPool{
  // playing muted meanwhile, since a paused provider restarts from its own
  // remembered position.
  keep(keys){
-  for(const key of [...this.slots.keys()])if(key!==this.visible&&!keys.has(key)){const s=this.slots.get(key);if(s.player.kind==='native')s.player.pause();if(this.now()-s.usedAt>STALE)this.close(key);}
+  for(const key of [...this.slots.keys()])if(key!==this.visible&&!keys.has(key)){const s=this.slots.get(key);if(s.player.kind==='native'||s.player.kind==='embed')s.player.pause();if(this.now()-s.usedAt>STALE)this.close(key);}
   this.trim();
  }
  trim(){while(this.slots.size>this.capacity){const victim=[...this.slots.values()].filter(s=>s.key!==this.visible).sort((a,b)=>a.used-b.used)[0];if(!victim)break;this.close(victim.key);}}

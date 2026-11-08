@@ -1,4 +1,4 @@
-Fantasy Stream Playback — Chrome
+Fantasy Stream Playback 1.1.0 — Chrome
 
 Install once:
 1. Extract Fantasy-Stream-Playback.zip and keep its folder somewhere permanent.
@@ -10,8 +10,17 @@ Install once:
 
 The helper starts HTML video and recognized JW Player, Video.js, Plyr and
 Clappr play controls inside embedded frames. It retries players that load late,
-relays mute/pause state, and reports actual media progress to Fantasy Stream.
+relays mute/pause state, and reports actual media progress and buffered video.
+The next game plays muted before a switch; Fantasy Stream waits for advancing
+video with a playback buffer before revealing it. Captions/subtitles are disabled
+on native text tracks and supported JW Player, Video.js and Plyr overlays.
+Captions that are burned into the video image cannot be removed.
 It does not click arbitrary advertisements, links, consent prompts or CAPTCHAs.
+
+Updating from 1.0.0:
+Replace the old helper folder with this folder, then click its Reload button
+on chrome://extensions. Reload Fantasy Stream. The older Fantasy Director
+ESPN extension is a different extension and does not provide these controls.
 
 Permission explanation:
 Chrome shows access to websites because embedded players use changing domains.

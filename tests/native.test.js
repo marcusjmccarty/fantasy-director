@@ -1,3 +1,4 @@
+import {disableCaptions} from '../web/captions.js';
 // Real NativePlayer lifecycle with a deferred media attachment / play promise.
 // The boundary is the browser video element, not the player's state machine.
 import test from 'node:test';
@@ -10,7 +11,7 @@ function harness(attachment,play=()=>Promise.resolve(),source={url:'https://exam
  const video={paused:true,calls:[],listeners:{},addEventListener(name,fn){this.listeners[name]=fn;},play(){this.calls.push('play');return play();},pause(){this.paused=true;this.calls.push('pause');},load(){},remove(){},removeAttribute(){}};
  const timers=new Map();let sequence=0;
  const time={now:0},attachments=[];
- const ctx={document:{createElement:()=>video},attachMediaSource:(...args)=>{attachments.push(args);return typeof attachment==='function'?attachment(...args):attachment;},setTimeout(fn){timers.set(++sequence,fn);return sequence;},clearTimeout:id=>timers.delete(id),performance:{now:()=>time.now},AbortController};vm.createContext(ctx);vm.runInContext(code+'\nglobalThis.Player=NativePlayer;',ctx);
+ const ctx={disableCaptions,document:{createElement:()=>video},attachMediaSource:(...args)=>{attachments.push(args);return typeof attachment==='function'?attachment(...args):attachment;},setTimeout(fn){timers.set(++sequence,fn);return sequence;},clearTimeout:id=>timers.delete(id),performance:{now:()=>time.now},AbortController};vm.createContext(ctx);vm.runInContext(code+'\nglobalThis.Player=NativePlayer;',ctx);
  return {player:new ctx.Player(source),video,timers,time,attachments};
 }
 test('a native player destroyed while attaching disposes the late controller without restarting video',async()=>{
