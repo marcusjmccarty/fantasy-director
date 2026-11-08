@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
 import {readFile,readdir,mkdir,rm,writeFile} from 'node:fs/promises';
+import {versionAssets} from './version-assets.mjs';
 const files={};for(const name of await readdir('web'))if(/\.(html|css|js|json|svg)$/.test(name))files['/'+(name==='index.html'?'':name)]={type:name.endsWith('.svg')?'image/svg+xml':name.endsWith('.html')?'text/html':name.endsWith('.css')?'text/css':name.endsWith('.json')?'application/json':'text/javascript',body:await readFile('web/'+name,'utf8')};
 const api=(await readFile('server/api.js','utf8')).replaceAll('export ','');
 const sports=(await readFile('server/sports.js','utf8')).replace(/^import .*;\n/gm,'').replaceAll('export ','');
@@ -14,6 +15,7 @@ const teamMap=Object.fromEntries(JSON.parse(await readFile('web/week7.json','utf
 const nflCatalog=JSON.parse(await readFile('web/nfl-highlights.json','utf8')).clips;
 files['/hls.light.mjs']={type:'text/javascript',body:await readFile('node_modules/hls.js/dist/hls.light.mjs','utf8')};
 files['/hls-LICENSE.txt']={type:'text/plain',body:await readFile('node_modules/hls.js/LICENSE','utf8')};
+versionAssets(files);
 for(const file of Object.values(files))file.etag='"'+createHash('sha256').update(file.body).digest('base64url').slice(0,16)+'"';
 // Images are bytes, not text: they travel as base64 with an etag taken from the bytes themselves.
 const images={};for(const name of await readdir('web'))if(name.endsWith('.png')){const bytes=await readFile('web/'+name);images['/'+name]={type:'image/png',b64:bytes.toString('base64'),etag:'"'+createHash('sha256').update(bytes).digest('base64url').slice(0,16)+'"'};}

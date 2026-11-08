@@ -49,7 +49,8 @@ export function fantasyScores(raw){
    // appliedStatTotal on the pool entry may span several weeks, even when
    // scoringPeriodId is requested. Only the dated actual stat is authoritative.
    const value=points(actual?.appliedTotal);
-   return {id:String(p.id||''),name:p.fullName||'Empty slot',team:TEAM[p.proTeamId]||'',position:POS[p.defaultPositionId]||'FLEX',slot:slots[e.lineupSlotId]||POS[p.defaultPositionId]||'FLEX',points:value,...([20,21].includes(Number(e.lineupSlotId))?{bench:true}:{})};
+   const stats=actual?.stats&&typeof actual.stats==='object'?Object.fromEntries(Object.entries(actual.stats).filter(([key,value])=>/^\d+$/.test(key)&&typeof value==='number'&&Number.isFinite(value))):null;
+   return {id:String(p.id||''),name:p.fullName||'Empty slot',team:TEAM[p.proTeamId]||'',position:POS[p.defaultPositionId]||'FLEX',slot:slots[e.lineupSlotId]||POS[p.defaultPositionId]||'FLEX',points:value,stats,...([20,21].includes(Number(e.lineupSlotId))?{bench:true}:{})};
   });
   // Bench and IR are listed for reference only; they never count.
   const starters=players.filter(p=>!p.bench),complete=starters.length>0&&starters.every(p=>p.points!==null);

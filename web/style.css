@@ -208,7 +208,7 @@ body[data-mode=replay] :is(.stream-health,.embed-help){order:10;flex-basis:100%}
 /* ---------- your matchup: a scorebug for two fantasy teams, then slot by slot ---------- */
 .score-center{display:flex;flex-direction:column;gap:6px}
 .h2h-fill{flex:1 1 auto;display:flex;flex-direction:column;min-height:min-content;min-width:0}.h2h-fill>.h2h{flex:1 1 auto;height:100%}
-.h2h.bench{margin-top:0}.h2h.bench tr.bench td{height:40px}.h2h.bench .h2h-player b{font-weight:600;color:#cfd6e2}.h2h.bench td.h2h-pts{color:var(--faint)}.h2h.bench .h2h-slot span{background:transparent;color:var(--faint)}
+.h2h.bench{margin-top:0}
 .h2h tr.h2h-divider td{height:22px;padding:4px 5px 2px;border-bottom:1px solid var(--line)}.h2h tr.h2h-divider span{font-size:9.5px;font-weight:850;letter-spacing:1px;text-transform:uppercase;color:var(--faint)}
 .score-center[data-empty=true]+.bench,.score-center[data-connect=true]+.bench{display:none}
 .h2h col.c-pts{width:49px}.h2h col.c-slot{width:40px}.h2h.solo col.c-pts{width:58px}
@@ -295,13 +295,15 @@ details.advanced[open]{display:grid;gap:14px}
 .stage:is(:fullscreen,:-webkit-full-screen,.theater) .player-frame{position:relative;height:100%;width:100%;border:0;border-radius:0;box-shadow:none}
 .stage:is(:fullscreen,:-webkit-full-screen,.theater) .screen{position:absolute;inset:0;width:100%;height:100%;min-height:0!important;aspect-ratio:auto;border:0;border-radius:0}
 .stage:is(:fullscreen,:-webkit-full-screen,.theater) :is(.now-watching,.direction-controls,.replay-controls,.toast,.stream-health,.embed-help){display:none}
-/* Top center: clear of the broadcast scorebug and the player's own controls, and always reachable (hover never reaches us through an embedded player). */
-.stage:is(:fullscreen,:-webkit-full-screen,.theater) .transport{position:absolute;top:max(14px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:10;width:max-content;max-width:calc(100% - 24px);padding:6px;border:1px solid #ffffff1f;border-radius:99px;background:rgba(9,12,18,.72);backdrop-filter:blur(10px);opacity:.55;transition:opacity .25s}
-.stage:is(:fullscreen,:-webkit-full-screen,.theater):hover .transport,.stage:is(:fullscreen,:-webkit-full-screen,.theater) .transport:focus-within{opacity:1}
+/* A top-edge hit area receives pointer events even over cross-origin frames. */
+.fullscreen-reveal{display:none}
+.stage:is(:fullscreen,:-webkit-full-screen,.theater) .fullscreen-reveal{display:block;position:absolute;inset:0 0 auto;height:76px;z-index:40}
+.stage:is(:fullscreen,:-webkit-full-screen,.theater) .transport{position:absolute;top:max(14px,env(safe-area-inset-top));left:50%;transform:translateX(-50%);z-index:41;width:max-content;max-width:calc(100% - 24px);padding:6px;border:1px solid #ffffff1f;border-radius:99px;background:rgba(9,12,18,.72);backdrop-filter:blur(10px);opacity:0;pointer-events:none;transition:opacity .2s}
+.stage:is(:fullscreen,:-webkit-full-screen,.theater) .fullscreen-reveal:hover~.transport,.stage:is(:fullscreen,:-webkit-full-screen,.theater) .transport:is(:hover,:has(:focus-visible)){opacity:1;pointer-events:auto}
 .stage:is(:fullscreen,:-webkit-full-screen,.theater) .playback-actions{flex-wrap:nowrap;gap:6px}.stage:is(:fullscreen,:-webkit-full-screen,.theater) .playback-actions :is(.spacer,#openStream,#nextStream){display:none}.stage:is(:fullscreen,:-webkit-full-screen,.theater) .playback-actions button{flex:none;min-height:34px;padding:5px 13px;font-size:13px;border-radius:99px}
 /* A phone held upright can't fit every control on one row, and it has no Escape key: the row wraps so Exit is always reachable. */
 @media(max-width:600px){.stage:is(:fullscreen,:-webkit-full-screen,.theater) .transport{border-radius:18px}.stage:is(:fullscreen,:-webkit-full-screen,.theater) .playback-actions{flex-wrap:wrap;justify-content:center}}
-@media(hover:none){.stage:is(:fullscreen,:-webkit-full-screen,.theater) .transport{opacity:.85}}
+@media(hover:none){.stage:is(:fullscreen,:-webkit-full-screen,.theater) .transport{opacity:.85;pointer-events:auto}}
 
 /* ---------- NBA, NHL and MLB: the same room, plus a day picker ---------- */
 .sports .day-nav{display:flex;align-items:center;gap:3px}
@@ -407,24 +409,26 @@ dialog{border-radius:20px;border-color:rgba(255,255,255,.09);box-shadow:0 50px 1
  .stage:not(:fullscreen,:-webkit-full-screen,.theater) .screen{flex:1;min-height:0;aspect-ratio:auto}
  .player-frame>:not(.screen){flex-shrink:0}
  .rail{height:100%;min-height:0}.rail-tabs button{min-height:34px}
- /* Flex rows fill the starter area in Safari as well as Chromium. */
- #matchupPanel .mu-fold{height:100%;min-height:min-content}
+ /* Keep the hidden guide measurable, so its freed space reveals bench rows. */
+ #gameTiles[hidden]{display:block!important;position:absolute;inset:0 0 auto;visibility:hidden;pointer-events:none}
+ #matchupPanel{--matchup-min-row-height:40px}
+ #matchupPanel .mu-fold{height:auto;min-height:min-content}
  #matchupPanel .mu-fold>:not(.h2h-fill){flex-shrink:0}
  #matchupPanel>.bench{flex:none}
- .h2h-fill>.h2h{display:flex;flex-direction:column;height:auto;min-height:min-content}
- .h2h-fill>.h2h>colgroup{display:none}
- .h2h-fill>.h2h>thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
- .h2h-fill>.h2h>tbody{display:flex;flex-direction:column;flex:1;min-height:min-content}
- .h2h-fill>.h2h>tbody>tr{display:grid;grid-template-columns:minmax(0,1fr) 49px 40px 49px minmax(0,1fr);flex:1;min-height:40px}
- .h2h-fill>.h2h>tbody>tr>td{display:flex;align-items:center;min-width:0;width:auto;height:auto}
- .h2h-fill .h2h-pts.mine,.h2h-fill .h2h-name.theirs{justify-content:flex-end}
- .h2h-fill .h2h-slot{justify-content:center}
- .h2h-fill>.h2h.solo>tbody>tr{grid-template-columns:minmax(0,1fr) 58px 40px}
- .h2h-fill>.h2h.nopoints>tbody>tr{grid-template-columns:minmax(0,1fr) 0 40px 0 minmax(0,1fr)}
- .h2h-fill>.h2h.solo.nopoints>tbody>tr{grid-template-columns:minmax(0,1fr) 0 40px}
- .h2h-fill>.h2h.solo>tbody>tr>.theirs{display:none}
- /* With the guide hidden, use the panel for starters and bench together. */
- body:has(#gameTiles[hidden]) #matchupPanel .mu-fold{height:auto;flex:1 0 auto}
+ #matchupPanel .h2h{display:flex;flex-direction:column;height:auto;min-height:min-content}
+ #matchupPanel .h2h>colgroup{display:none}
+ #matchupPanel .h2h>thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+ #matchupPanel .h2h>tbody{display:flex;flex-direction:column;min-height:min-content}
+ #matchupPanel .h2h>tbody>tr:not(.h2h-divider){display:grid;grid-template-columns:minmax(0,1fr) 49px 40px 49px minmax(0,1fr);flex:none;height:var(--matchup-row-height,40px);min-height:var(--matchup-min-row-height)}
+ #matchupPanel .h2h>tbody>tr:not(.h2h-divider)>td{display:flex;align-items:center;min-width:0;width:auto;height:auto}
+ #matchupPanel .h2h-pts.mine,#matchupPanel .h2h-name.theirs{justify-content:flex-end}
+ #matchupPanel .h2h-slot{justify-content:center}
+ #matchupPanel .h2h.solo>tbody>tr:not(.h2h-divider){grid-template-columns:40px minmax(0,1fr) 58px}
+ #matchupPanel .h2h.nopoints>tbody>tr:not(.h2h-divider){grid-template-columns:minmax(0,1fr) 0 40px 0 minmax(0,1fr)}
+ #matchupPanel .h2h.solo.nopoints>tbody>tr:not(.h2h-divider){grid-template-columns:40px minmax(0,1fr) 0}
+ #matchupPanel .h2h.solo>tbody>tr>.theirs{display:none}
+ #matchupPanel .h2h-divider{display:flex;flex:none;height:22px}
+ #matchupPanel .h2h-divider>td{width:100%}
  .now-watching{padding:6px 12px;gap:4px 12px}.transport{padding:8px 10px}.direction-controls{padding:6px 12px;gap:6px 10px}
  .overlay{padding:18px}.overlay h2{font-size:clamp(24px,2.5vw,36px)}.overlay p{margin-bottom:16px}.screen-emblem{margin-bottom:10px}
 }
@@ -434,5 +438,14 @@ dialog{border-radius:20px;border-color:rgba(255,255,255,.09);box-shadow:0 50px 1
  .rail-panel{padding:6px 10px}.rail-tabs button{min-height:32px}
  .score-center{gap:4px}.mu-duel{padding:5px 8px}.mu-side strong{font-size:28px}.mu-track{height:3px;margin-top:-2px}
  .mu-picker select{min-height:26px;padding-block:3px}
- .h2h td,.h2h.bench tr.bench td{height:38px;padding-block:2px;line-height:1}.h2h-player{gap:1px}
+ #matchupPanel{--matchup-min-row-height:38px}
+ .h2h td{height:38px;padding-block:2px;line-height:1}.h2h-player{gap:1px}
 }
+
+/* Opaque break slate covers the running provider frame without unloading it. */
+.overlay.commercial-cover{background:#0a0e16;backdrop-filter:none;z-index:30}
+
+/* Weekly box-score line uses the same row layout for starters and reserves. */
+.h2h-player small.h2h-stats{color:var(--text);font-size:10.5px;line-height:1.2;font-variant-numeric:tabular-nums}
+#matchupPanel:has(.h2h-stats){--matchup-min-row-height:54px}
+.h2h-name:has(.h2h-stats){padding-block:4px}

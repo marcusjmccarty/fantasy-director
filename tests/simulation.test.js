@@ -312,13 +312,13 @@ test('margin: a same-tier challenger needs RULES.margin more score to take over,
  for(const c of plain){const cur=c.ranked.find(e=>e.game.id===c.before.id);assert.ok(c.entry.score-cur.score>=RULES.margin);}
 });
 
-test('debounce: leaving a live game waits for the same challenger RULES.debounce seconds; leaving a break or a final does not',()=>{
+test('debounce: leaving active roster action waits; unrelated action and breaks yield immediately',()=>{
  const r=main();
  let live=0,breaks=0;
  for(const c of r.cuts){
   if(!c.before||c.fromHighlight)continue;
   const b=c.before;
-  if(b.state==='in'&&b.phase!=='break'&&b.phase!=='final'){
+  if(b.state==='in'&&b.phase!=='break'&&b.phase!=='final'&&c.ranked.some(e=>e.game.id===b.id)){
    live++;
    assert.ok(c.challenger,`${rel(c.at)}: left live ${c.from} for ${c.to} with no challenger on record`);
    assert.equal(c.challenger.id,c.to,`${rel(c.at)}: the challenger that won is the one that was waiting`);

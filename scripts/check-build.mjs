@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import {readFile,readdir} from 'node:fs/promises';
 import worker from '../dist/server/index.js';
+import {versionAssets} from './version-assets.mjs';
 const assets=[];
 for(const name of await readdir('web'))if(/\.(html|css|js|json|svg)$/.test(name))assets.push([name==='index.html'?'/':'/'+name,'web/'+name]);
 assets.push(['/hls.light.mjs','node_modules/hls.js/dist/hls.light.mjs'],['/hls-LICENSE.txt','node_modules/hls.js/LICENSE']);
-for(const [path,file] of assets){const response=await worker.fetch(new Request('https://site.test'+path),{});assert.equal(response.status,200);assert.equal(await response.text(),await readFile(file,'utf8'),path);assert.equal(response.headers.get('X-Content-Type-Options'),'nosniff');const head=await worker.fetch(new Request('https://site.test'+path,{method:'HEAD'}),{});assert.equal(await head.text(),'');assert.equal(head.status,200);}
+const expected={};for(const [path,file] of assets)expected[path]={type:path==='/'||path.endsWith('.html')?'text/html':/\.(?:js|mjs)$/.test(path)?'text/javascript':'other',body:await readFile(file,'utf8')};
+const revision=versionAssets(expected);
+for(const [path] of assets){const response=await worker.fetch(new Request('https://site.test'+path+'?v='+revision),{});assert.equal(response.status,200);assert.equal(await response.text(),expected[path].body,path);assert.equal(response.headers.get('X-Content-Type-Options'),'nosniff');const head=await worker.fetch(new Request('https://site.test'+path,{method:'HEAD'}),{});assert.equal(await head.text(),'');assert.equal(head.status,200);}
 // A revalidation is answered with a 304 however the validator comes back: Cloudflare weakens a strong ETag when it compresses.
 {const etag=(await worker.fetch(new Request('https://site.test/app.js'),{})).headers.get('ETag');assert.match(etag,/^"[\w-]{16}"$/);
  for(const sent of [etag,'W/'+etag,'"other", W/'+etag,'*']){const r=await worker.fetch(new Request('https://site.test/app.js',{headers:{'If-None-Match':sent}}),{});assert.equal(r.status,304,sent);assert.equal(await r.text(),'');assert.equal(r.headers.get('ETag'),etag);}

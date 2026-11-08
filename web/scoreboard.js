@@ -38,6 +38,31 @@ export function scoreCards(games,roster=[],{mine=false,watching=null}={}){
  }).join('')||`<p class="sb-empty">${mine?'No games for your starters in this slate. Switch to All to see the rest of the league.':'The schedule is loading. Scores appear here when ESPN responds.'}</p>`;
 }
 
+// ESPN actual scoring-period stat IDs (not projected or season aggregates).
+// Mapping reference: github.com/cwendt94/espn-api/blob/master/espn_api/football/constant.py
+export function nflStatLine(stats,position){
+ if(!stats||typeof stats!=='object')return '';
+ const has=id=>typeof stats[id]==='number'&&Number.isFinite(stats[id]);
+ const n=id=>has(id)?stats[id]:0,parts=[];
+ const add=(id,label,zero=false)=>{if(has(id)&&(zero||n(id)!==0))parts.push(`${n(id)} ${label}`);};
+ if(position==='K'){
+  if(has(83)||has(84))parts.push(`${n(83)}${has(84)?'/'+n(84):''} FG`);
+  if(has(86)||has(87))parts.push(`${n(86)}${has(87)?'/'+n(87):''} XP`);
+ }else if(position==='D/ST'){
+  add(99,'SACK');add(95,'INT');add(96,'FR');add(has(105)?105:94,'TD');add(97,'BLK');add(98,'SAF');add(120,'PA',true);
+ }else{
+  if(position==='QB'||n(0)>0){add(3,'PASS YDS',true);add(4,'PASS TD');add(20,'INT');add(24,'RUSH YDS');add(25,'RUSH TD');add(41,'REC');add(42,'REC YDS');add(43,'REC TD');}
+  else{
+   add(41,'REC');
+   if(has(24)||has(42))parts.push(`${n(24)+n(42)} YDS`);
+   const td=n(25)+n(43);if(td)parts.push(`${td} TD`);
+   if(n(3)){add(3,'PASS YDS');add(4,'PASS TD');add(20,'INT');}
+  }
+  add(72,'FUM LOST');add(62,'2PT');
+ }
+ return parts.join(', ');
+}
+
 export function fantasyBoard(data,teamId,games=[]){
  const team=data?.scoring?.teams?.find(t=>t.id===teamId);
  if(!team)return null;
@@ -53,7 +78,7 @@ export function fantasyBoard(data,teamId,games=[]){
   const side=game?game.teams.findIndex(t=>t.abbr===alias(p.team)):-1,other=side>=0?game.teams[1-side]:null;
   const line=!game?'No game':game.state==='pre'?kickoff(game):`${side===0?'@':'vs'} ${other?.abbr||''} ${tallyOf(game,side)}-${tallyOf(game,1-side)} · ${game.state==='post'?'Final':game.detail||'In progress'}`;
   const status=involved?(involved.role==='defense'?'Defending':involved.role==='kicker'?'In FG range':'On offense')+' · '+line:line;
-  return {slot:p.slot||p.position,name:p.name,team:p.team,status,active:!!involved&&!p.bench,points:p.points,...(p.bench?{bench:true}:{})};
+  return {slot:p.slot||p.position,name:p.name,team:p.team,status,active:!!involved&&!p.bench,points:p.points,statLine:game?.state==='pre'?'':nflStatLine(p.stats,p.position),...(p.bench?{bench:true}:{})};
  });
  return {points:formatPoints(team.points),complete:team.complete,rows,players,week:data.scoring.week};
 }
@@ -86,7 +111,7 @@ export function fantasyMatchup(data,teamId,games=[],matchupId=null){
 const shortName=n=>{const words=String(n||'').trim().split(/\s+/);return words.length<2||/D\/ST$/i.test(n)?n:words[0][0]+'. '+words.slice(1).join(' ');};
 const number=v=>typeof v==='number'&&Number.isFinite(v);
 const nameLabel=n=>`<span class="full">${escape(n)}</span><span class="short" aria-hidden="true">${escape(shortName(n))}</span>`;
-const nameCell=(p,side,emptyWord)=>p?`<td class="h2h-name ${side}"><span class="h2h-player${p.active?' on':''}"><b>${nameLabel(p.name)}</b><small>${p.active?'<i class="player-live-dot" aria-hidden="true"></i>':''}${escape(p.team)} · ${escape(p.status)}</small></span></td>`:`<td class="h2h-name ${side} empty"><span class="h2h-player"><b>${emptyWord}</b></span></td>`;
+const nameCell=(p,side,emptyWord)=>p?`<td class="h2h-name ${side}"><span class="h2h-player${p.active?' on':''}"><b>${nameLabel(p.name)}</b><small>${p.active?'<i class="player-live-dot" aria-hidden="true"></i>':''}${escape(p.team)} · ${escape(p.status)}</small>${p.statLine?`<small class="h2h-stats" title="${escape(p.statLine)}">${escape(p.statLine)}</small>`:''}</span></td>`:`<td class="h2h-name ${side} empty"><span class="h2h-player"><b>${emptyWord}</b></span></td>`;
 const pointsCell=(p,other,side)=>{const v=p?.points,lead=number(v)&&number(other?.points)&&v>other.points;return `<td class="h2h-pts ${side}${lead?' lead':''}${number(v)&&v<0?' sb-negative':''}">${p?formatPoints(v):''}</td>`;};
 const slotCell=(a,b)=>`<td class="h2h-slot"><span>${escape(a?.slot||b?.slot||'')}</span></td>`;
 const row=(a,b,opponent,cls='')=>opponent?`<tr${cls?` class="${cls}"`:''}>${nameCell(a,'mine','Empty')}${pointsCell(a,b,'mine')}${slotCell(a,b)}${pointsCell(b,a,'theirs')}${nameCell(b,'theirs','Empty')}</tr>`:`<tr${cls?` class="${cls}"`:''}>${slotCell(a)}${nameCell(a,'mine','')}${pointsCell(a,null,'mine')}</tr>`;
@@ -108,10 +133,36 @@ export function benchRows(yours,opponent){
 // Column widths for both tables, so the bench lines up under the starters.
 export const matchupColumns=opponent=>opponent?'<col class="c-name"><col class="c-pts"><col class="c-slot"><col class="c-pts"><col class="c-name">':'<col class="c-slot"><col class="c-name"><col class="c-pts">';
 
+// One row size for starters and bench. Hiding the guide reveals more of the
+// same list instead of compressing the bench to fit it onto the first screen.
+export function mountMatchupRows({$,view=globalThis}){
+ if(!view.ResizeObserver||!view.MutationObserver)return;
+ const panel=$('matchupPanel'),board=$('scoreboard'),rows=$('fantasyPlayers'),guide=$('gameTiles');
+ let frame=0;
+ const update=()=>{
+  frame=0;
+  if(panel.hidden||!panel.clientHeight||!rows.rows.length||!view.matchMedia('(min-width:961px)').matches)return;
+  const style=view.getComputedStyle(panel),padding=parseFloat(style.paddingTop)+parseFloat(style.paddingBottom);
+  const heading=board.getBoundingClientRect().height-rows.getBoundingClientRect().height;
+  const revealed=guide.hidden?guide.getBoundingClientRect().height:0;
+  const minimum=parseFloat(style.getPropertyValue('--matchup-min-row-height'))||40;
+  const height=Math.max(minimum,(panel.clientHeight-padding-heading-revealed)/rows.rows.length);
+  const value=height.toFixed(2)+'px';
+  if(panel.style.getPropertyValue('--matchup-row-height')!==value)panel.style.setProperty('--matchup-row-height',value);
+ };
+ const schedule=()=>{if(!frame)frame=view.requestAnimationFrame(update);};
+ const resize=new view.ResizeObserver(schedule);
+ for(const element of [panel,board,guide])resize.observe(element);
+ const changes=new view.MutationObserver(schedule);
+ changes.observe(rows,{childList:true});changes.observe(guide,{attributes:true,attributeFilter:['hidden']});
+ schedule();
+ return ()=>{resize.disconnect();changes.disconnect();if(frame)view.cancelAnimationFrame(frame);};
+}
+
 // Score updates have no access to the player, director, roster or saved state.
 // An old request can never replace a newly selected league or replay mode.
 export class FantasyScoreFeed{
- constructor({fetcher=fetch,now=()=>Date.now()}={}){this.fetcher=fetcher;this.now=now;this.key='';this.data=null;this.updated=0;this.error='';this.needsConnection=false;this.next=0;this.pending=null;}
+ constructor({fetcher=fetch,now=()=>Date.now()}={}){this.fetcher=fetcher.bind(globalThis);this.now=now;this.key='';this.data=null;this.updated=0;this.error='';this.needsConnection=false;this.next=0;this.pending=null;}
  valid(data,connection){return data?.leagueId===connection.leagueId&&Array.isArray(data.scoring?.teams)&&data.scoring.teams.length>0&&(!connection.teamId||data.scoring.teams.some(t=>t.id===connection.teamId))&&(!connection.week||data.scoring.week===connection.week)&&(!connection.season||data.season===connection.season);}
  sync(connection,seed=null){
   // Every response contains all teams. Changing franchises can reuse the same
@@ -132,12 +183,12 @@ export class FantasyScoreFeed{
   const timer=setTimeout(()=>controller.abort(),15000);
   try{
    const response=await this.fetcher('/api/league',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(connection),signal:controller.signal,cache:'no-store'});
-   const data=await response.json();
+   let data;try{data=await response.json();}catch{throw new Error(`The score service returned an unreadable response (HTTP ${response.status}).`);}
    if(this.key!==key||this.pending!==controller||controller.signal.aborted)return;
    if(!response.ok)throw Object.assign(new Error(data.error||'ESPN scores are unavailable'),{reconnect:[400,401,403,404,422].includes(response.status)||['ESPN_REDIRECT','CONNECTION_MISSING'].includes(data.code)});
    if(!this.valid(data,connection))throw new Error('ESPN did not return scores for the selected team and week.');
    this.data=data;this.updated=this.now();this.error='';this.needsConnection=false;
-  }catch(error){if(this.key===key&&this.pending===controller){this.needsConnection=!!error.reconnect;this.error=this.needsConnection?'Reconnect ESPN to bring back your teams and fantasy scores.':'Could not refresh fantasy points. Retrying automatically.';}}
+  }catch(error){if(this.key===key&&this.pending===controller){this.needsConnection=!!error.reconnect;const detail=error.name==='AbortError'?'ESPN took too long to respond.':error.message||'Could not refresh fantasy points.';this.error=this.needsConnection?'Reconnect ESPN to bring back your teams and fantasy scores.':detail+' Retrying automatically.';}}
   finally{clearTimeout(timer);if(this.pending===controller){this.pending=null;this.next=this.now()+30000;}}
  }
 }

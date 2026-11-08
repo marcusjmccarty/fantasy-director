@@ -13,7 +13,7 @@ const providerPage=url=>!!ntvURL(url)||new URL(url).hostname==='streamcorner.st'
 export function refusesFrame(url){try{return /(?:^|\.)ntv\.st$/i.test(new URL(url).hostname.replace(/\.$/,''))&&!ntvEmbedURL(url);}catch{return false;}}
 export function needsPlayerResolution(url){try{const u=new URL(url);return streamType(url)==='embed/page'&&!/\/(?:embed|player|videoembed)(?:[/.]|$)/i.test(u.pathname);}catch{return false;}}
 export class StreamFinder{
- constructor({fetcher=fetch,now=()=>Date.now()}={}){this.fetcher=fetcher;this.now=now;this.matches=new Map();this.resolved=new Map();this.catalogs=new Map();this.generation=0;this.status='';this.enabled=true;this.pending=false;this.resolving=new Map();}
+ constructor({fetcher=fetch,now=()=>Date.now()}={}){this.fetcher=fetcher.bind(globalThis);this.now=now;this.matches=new Map();this.resolved=new Map();this.catalogs=new Map();this.generation=0;this.status='';this.enabled=true;this.pending=false;this.resolving=new Map();}
  cancel(){this.generation++;this.pending=false;this.matches.clear();}
  playable(url){try{url=safeVideo(url);}catch{return null;}if(!url)return null;if(!needsPlayerResolution(url))return ntvEmbedURL(url)||url;return this.resolved.get(url)?.url||null;}
  options(game){return this.matches.get(String(game.id))?.options||[];}

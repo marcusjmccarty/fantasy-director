@@ -74,6 +74,9 @@ export class BreakControl{
     if(increased||g.phase==='break'&&g.breakKind==='score'){
      hold=g.celebrating?{key:null,playId:null,before:hold?.before??(increased?[...previous.score]:null),kind:'score'}:{key,playId:g.lastPlayId||hold?.playId,before:hold?.before??(increased?[...previous.score]:null),kind:'score'};if(!g.celebrating)released.add(g.id);
     }
+    // Every detected break stays covered until fresh football arrives. A disappearing
+    // timeout label or an elapsed timer is not evidence that the broadcast returned.
+    if(!hold&&g.phase==='break'&&g.lastPlayId)hold={key,playId:g.lastPlayId||null,kind:g.breakKind||'stoppage'};
     // The feed keeps a fresh score on screen for the celebration; the break starts when it says so.
     if((g.phase==='break'||hold)&&!g.celebrating){blocked.add(g.id);released.add(g.id);reasons.set(g.id,hold||{kind:g.breakKind||'stoppage'});}
     this.live.set(g.id,{score:scoreKnown?[...score]:previous?.score||[],hold});

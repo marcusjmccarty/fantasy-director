@@ -68,7 +68,7 @@ export class Director{
  // is not worth leaving for a filler; only a game with one of the viewer's starters on the field takes over.
  decide({games,roster,at,current={},excluded=new Set(),queue=[],includeDefense=true,recentScore=()=>false,backups=new Set(),redzone=false,stayThrough=false}){
   const r=this.rules,ranked=rank(games,roster,{excluded,includeDefense,currentId:current.id}),best=ranked[0];
-  const curGame=current.kind==='game'?games.find(g=>g.id===current.id&&!excluded.has(g.id)&&hasRoster(g,roster)):null;
+  const curGame=current.kind==='game'?games.find(g=>g.id===current.id&&!excluded.has(g.id)&&(hasRoster(g,roster)||stayThrough)):null;
   const cur=curGame?(ranked.find(e=>e.game.id===curGame.id)||{game:curGame,players:[],...rate(curGame,[])}):null;
   const stay=reason=>({kind:'game',id:curGame.id,entry:cur,reason});
   // Leaving a watchable game waits out feed jitter; leaving a break or a final does not.
@@ -88,18 +88,18 @@ export class Director{
   }
   if(curGame&&curGame.state==='in'&&current.protected){this.challenger=null;return stay('Finishing the play');}
   // Never cut away from a live snap in a game you care about, nor in the seconds before one.
-  if(cur&&cur.tier>0&&curGame.phase==='play'){this.challenger=null;return stay('Play in progress');}
+  if(cur&&cur.tier>0&&curGame.phase==='play'&&!curGame.synthesized){this.challenger=null;return stay('Play in progress');}
   if(cur&&cur.tier>0&&curGame.phase==='live'&&curGame.nextSnapIn!==null&&curGame.nextSnapIn<=r.preSnap){this.challenger=null;return stay('Snap coming');}
   const held=curGame&&curGame.state==='in'&&curGame.phase!=='break'?recentScore(curGame,at):false;
   if(held)return stay(typeof held==='string'?held:'Your player just scored');
   if(queue.length&&!ranked.some(e=>e.critical)&&(!cur||cur.tier===0||curGame.phase!=='play'&&(at-queue[0].queuedAt>=r.highlightWait||!best)))
    return {kind:'highlight',id:queue[0].id,reason:'Replaying a score you missed'};
   if(!best){
-   if(stayThrough&&curGame&&curGame.state==='in'){this.challenger=null;return stay(curGame.phase==='break'?'Break · staying with this stream':'Your players are off the field');}
    if(redzone){
     const filler=this.redzoneChoice({games,at,current,excluded,backups});
     if(filler)return filler;
    }
+   if(stayThrough&&curGame&&curGame.state==='in'){this.challenger=null;return stay(curGame.phase==='break'?'Break · staying with this stream':'Your players are off the field');}
    this.challenger=null;
    if(curGame&&curGame.state==='in'&&curGame.phase!=='break')return stay('Your players are off the field');
    const fallback=games.filter(g=>g.state==='in'&&hasRoster(g,roster)&&!excluded.has(g.id)).sort((a,b)=>(a.phase==='break')-(b.phase==='break')||a.id.localeCompare(b.id))[0];
@@ -116,10 +116,7 @@ export class Director{
   }
   if(!cur||excluded.has(curGame.id))return {kind:'game',id:best.game.id,entry:best,reason:explain(best)};
   if(best.game.id===curGame.id){this.challenger=null;return stay(explain(cur));}
-  // A timeout in the viewer's own drive on a website player: the drive resumes shortly and a page that leaves
-  // comes back only as a fresh load, so a defense elsewhere waits. An offense, kicker or critical drive still takes over.
-  if(stayThrough&&curGame.state==='in'&&curGame.phase==='break'&&curGame.breakKind==='timeout'&&best.tier<2&&involvement({...curGame,phase:'live'},roster,{includeDefense}).some(x=>x.role!=='defense')){this.challenger=null;return stay('Timeout · staying with this drive');}
-  if(cur.tier===0)return go(best,explain(best));
+  if(cur.tier===0){this.challenger=null;return {kind:'game',id:best.game.id,entry:best,reason:explain(best)};}
   // A drive must clear the current one by a few yards: one hovering around the 20 does not trade places with its neighbour.
   const urgentUpgrade=best.critical&&!cur.critical&&best.score>=cur.score+Math.min(r.margin,5);
   if(at-this.lastCut<r.dwell&&best.tier<=cur.tier&&!urgentUpgrade){this.challenger=null;return stay(explain(cur));}
