@@ -297,10 +297,10 @@ test('decide: a drive a few yards better across the 20 does not break the dwell 
  const clear=game('B','DAL','NYG',{yardsToGoal:19});   // score 81: the 5-yard floor
  const d=new Director({debounce:0});d.committed(1000);assert.equal(decide(d,{games:[cur,clear],roster,at:1002,current}).id,'B','a drive that clears the floor still breaks the dwell');
 });
-test('decide: a timeout in the viewer\'s own drive keeps a website player from leaving for a defense',()=>{
+test('decide: a timeout yields to a roster defense even for a website player',()=>{
  const timeout=game('A','IND','KC',{yardsToGoal:8,phase:'break',breakKind:'timeout'}),defense=game('B','BAL','PIT'),current={kind:'game',id:'A'};
  const run=(games,o={})=>{const d=new Director();d.committed(1000);return decide(d,{games,at:1002,current,stayThrough:true,...o});};
- const stayed=run([timeout,defense]);assert.equal(stayed.id,'A','the drive resumes shortly: two page reloads and the next snap are not worth a D/ST');assert.equal(stayed.reason,'Timeout · staying with this drive');
+ assert.equal(run([timeout,defense]).id,'B','available roster action replaces the break');
  assert.equal(run([timeout,defense],{stayThrough:false}).id,'B','a player that can resume still fills the break');
  assert.equal(run([timeout,game('B','DAL','NYG')]).id,'B','an offense elsewhere takes over');
  assert.equal(run([timeout,game('B','DAL','NYG',{yardsToGoal:15})]).id,'B','a critical drive takes over');
@@ -510,4 +510,29 @@ test('RedZone fallback keeps plays, dwell, margin and debounce protections',()=>
  assert.equal(d.decide({...base,at:1010}).id,'A');assert.equal(d.decide({...base,at:1012}).id,'B');
  assert.equal(d.decide({...base,at:1013,games:[{...a,yardsToGoal:14},b]}).id,'A');
  assert.equal(d.decide({...base,excluded:new Set(['A']),current:{kind:'game',id:'A',protected:true}}).id,'B');
+});
+
+
+test('a website fallback game stays connected through its break without roster players',()=>{
+ const d=new Director(),g=game('X','CIN','ATL',{phase:'break'});
+ const input={games:[g],roster:ROSTER,at:1000,current:{kind:'game',id:'X'},redzone:true,backups:new Set(['X']),stayThrough:true};
+ assert.equal(d.decide(input).id,'X');
+ assert.equal(d.decide({...input,games:[g,game('A','IND','MIN')]}).id,'A','real starter action can still take over');
+ assert.equal(d.decide({...input,games:[{...g,state:'post',phase:'final'}]}).kind,'standby');
+});
+
+test('Fannin on offense immediately takes over from a Rams drive with no active starters',()=>{
+ const d=new Director(),roster=[{name:'Harold Fannin Jr.',team:'CLE',position:'TE'},{name:'Jayden Daniels',team:'WAS',position:'QB'}];
+ d.committed(1000);
+ const rams=game('rams','LAR','WAS',{possession:0,phase:'play',synthesized:true,nextSnapIn:0,yardsToGoal:5});
+ const browns=game('browns','CLE','NO',{possession:0,yardsToGoal:70});
+ assert.equal(d.decide({games:[rams,browns],roster,at:1001,current:{kind:'game',id:'rams'},redzone:true,backups:new Set(['rams','browns'])}).id,'browns');
+});
+test('inferred live play protection cannot lock the director onto a weaker drive',()=>{
+ const d=new Director({debounce:0});
+ assert.equal(decide(d,{games:[game('A','IND','MIN',{phase:'play',synthesized:true,yardsToGoal:80}),game('B','DAL','NYG',{yardsToGoal:10})],current:{kind:'game',id:'A'}}).id,'B');
+});
+test('a covered embedded break yields to available football while no starter is active',()=>{
+ const d=new Director();const stopped=game('A','IND','MIN',{phase:'break',breakKind:'timeout'}),filler=game('X','SEA','SF');
+ assert.equal(decide(d,{games:[stopped,filler],current:{kind:'game',id:'A'},stayThrough:true,redzone:true,backups:new Set(['A','X'])}).id,'X');
 });

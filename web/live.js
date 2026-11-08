@@ -52,7 +52,7 @@ export const STALLED_AFTER=75;     // seconds without a new play: the snap is no
 export const TEMPO=30;             // logged plays this close together mean a hurry-up offense: the safe window shrinks
 export const CELEBRATION=20;       // seconds a fresh score stays on screen before the game is a break
 export const STOPPAGE_GRACE=12;    // a possession missing for less than this is a gap in the feed, not a stoppage
-export const STOPPAGE_MAX=180;     // a logged stoppage with no sign of football since is over
+export const STOPPAGE_MAX=180;     // retained for callers; elapsed time never proves a break ended
 export const FEED_SILENCE=20;      // longest normal wait for a snapshot (one timed-out poll: 5 s + 8 s + 5 s, with room): past it ESPN, not the field, has gone quiet
 export const FEED_GAP=90;          // a snapshot this long after the last follows a sleep or an outage (longer than a throttled tab's poll): a fresh start, not a diff
 export const TRY_WINDOW=180;       // seconds after a touchdown its extra point or two-point try can still land on the scoreboard
@@ -112,7 +112,6 @@ export class LiveFeed{
    if(g.kick&&logged?.playId===g.lastPlayId){
     const resumed=before(this.resumed,g.id);
     if(resumed&&resumed.playId===g.lastPlayId&&resumed.at>logged.at){const age=t-resumed.at;return age<=STALLED_AFTER?{...out,phase:'play',breakKind:null,playAge:age,playEndsIn:null,synthesized:true}:{...out,phase:'live',breakKind:null};}
-    if(since!==null&&since>STOPPAGE_MAX)return {...out,phase:'live',breakKind:null};
     return {...out,phase:'break',breakKind:/kickoff/i.test(g.playType||'')?'kickoff':'punt'};
    }
    if(g.phase==='break'&&g.breakKind==='timeout'){
@@ -121,7 +120,6 @@ export class LiveFeed{
      const age=t-resumed.at;
      return age<=STALLED_AFTER?{...out,phase:'play',breakKind:null,playAge:age,playEndsIn:null,synthesized:true}:{...out,phase:'live',breakKind:null};
     }
-    if(stoppedAt!==null&&t-stoppedAt>STOPPAGE_MAX)return {...out,phase:'live',breakKind:null};
     return out;
    }
    if(g.phase==='break'&&g.breakKind==='stoppage'){

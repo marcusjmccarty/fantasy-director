@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {scoreCards,fantasyBoard,fantasyMatchup,FantasyScoreFeed,formatPoints,nearStart} from '../web/scoreboard.js';
+import {scoreCards,fantasyBoard,fantasyMatchup,FantasyScoreFeed,formatPoints,nearStart,nflStatLine} from '../web/scoreboard.js';
 import {fantasyScores} from '../server/api.js';
 
 const starter=(id,points,slot=2)=>({lineupSlotId:slot,playerPoolEntry:{appliedStatTotal:points,player:{id,fullName:'Player '+id,proTeamId:11,defaultPositionId:2,stats:[{scoringPeriodId:8,statSourceId:0,statSplitTypeId:1,appliedTotal:points}]}}});
@@ -17,6 +17,40 @@ test('ESPN cumulative pool totals cannot fill in a missing current week',()=>{
  const entry=starter(1,54);entry.playerPoolEntry.player.stats=[{scoringPeriodId:7,statSourceId:0,statSplitTypeId:1,appliedTotal:26}];
  assert.equal(fantasyScores(league([entry])).teams[0].points,null);
  entry.playerPoolEntry.player.stats=[];assert.equal(fantasyScores(league([entry])).teams[0].points,null);
+});
+test('box scores come only from actual stats for the selected week, including bench players',()=>{
+ const entry=starter(1,12,20),stats={24:52,25:1,41:3,42:18,43:0,72:0};
+ entry.playerPoolEntry.player.stats=[
+  {scoringPeriodId:0,statSourceId:0,statSplitTypeId:0,stats:{24:900}},
+  {scoringPeriodId:7,statSourceId:0,statSplitTypeId:1,stats:{24:200}},
+  {scoringPeriodId:8,statSourceId:1,statSplitTypeId:1,stats:{24:100}},
+  {scoringPeriodId:8,statSourceId:0,statSplitTypeId:1,appliedTotal:12,stats:{...stats,4:'2',20:NaN,bad:'<script>'}},
+ ];
+ const actual=fantasyScores(league([entry])).teams[0].players[0];
+ assert.deepEqual(actual.stats,stats);assert.equal(actual.bench,true);
+ entry.playerPoolEntry.player.stats.pop();assert.equal(fantasyScores(league([entry])).teams[0].players[0].stats,null);
+});
+test('NFL box-score lines summarize each position without invented or duplicate totals',()=>{
+ assert.equal(nflStatLine({3:331,4:2,20:1,24:12,25:1,72:1},'QB'),'331 PASS YDS, 2 PASS TD, 1 INT, 12 RUSH YDS, 1 RUSH TD, 1 FUM LOST');
+ assert.equal(nflStatLine({24:20,25:1,41:10,42:173,43:1,62:1},'WR'),'10 REC, 193 YDS, 2 TD, 1 2PT');
+ assert.equal(nflStatLine({24:-3,41:0,42:0},'RB'),'-3 YDS');
+ assert.equal(nflStatLine({24:0,42:0},'RB'),'0 YDS');
+ assert.equal(nflStatLine({83:2,84:3,86:4,87:4},'K'),'2/3 FG, 4/4 XP');
+ assert.equal(nflStatLine({99:3,95:2,96:1,94:1,105:2,97:1,120:0},'D/ST'),'3 SACK, 2 INT, 1 FR, 2 TD, 1 BLK, 0 PA');
+ assert.equal(nflStatLine({94:1,120:17},'D/ST'),'1 TD, 17 PA');
+ for(const stats of [null,undefined,{}, {24:'42',41:NaN,42:Infinity}])assert.equal(nflStatLine(stats,'RB'),'');
+});
+test('both matchup lineups and their benches show the same stat line under each player',()=>{
+ const entry=(id,slot)=>{const p=starter(id,12,slot);p.playerPoolEntry.player.stats[0].stats={24:52,41:3,42:18,25:1};return p;};
+ const data={scoring:fantasyScores({scoringPeriodId:8,teams:[{id:1,roster:{entries:[entry(1,2),entry(2,20)]}},{id:2,roster:{entries:[entry(3,2),entry(4,20)]}}]})};
+ const yours=fantasyBoard(data,'1'),theirs=fantasyBoard(data,'2');
+ for(const rows of [headToHead(yours,theirs),benchRows(yours,theirs)]){
+  assert.equal((rows.match(/class="h2h-stats"/g)||[]).length,2);
+  assert.equal((rows.match(/>3 REC, 70 YDS, 1 TD<\/small>/g)||[]).length,2);
+ }
+ const pre={...game,state:'pre',date:'2026-11-08T18:00:00Z'};
+ assert.equal(fantasyBoard(data,'1',[pre]).players[0].statLine,'','scheduled games do not display a misleading zero stat line');
+ assert.match(headToHead({players:[{slot:'RB',name:'Safe',statLine:'<img onerror="x">'}]},null),/&lt;img onerror=&quot;x&quot;&gt;/);
 });
 test('missing stats, unknown week and empty rosters cannot produce a misleading total',()=>{
  for(const value of [null,undefined,'',NaN,Infinity]){const data=fantasyScores(league([starter(1,10),starter(2,value)]));assert.equal(data.teams[0].points,null);assert.equal(data.teams[0].complete,false);}
@@ -151,7 +185,7 @@ test('fantasyBoard exposes structured players with plain-language status for the
  const data={scoring:{week:8,teams:[{id:'1',points:12,players:[{slot:'RB',name:'Jonathan Taylor',team:'IND',position:'RB',points:12}]}]}};
  const live={id:'g',state:'in',phase:'live',possession:0,down:1,detail:'Q2 4:10',score:[10,7],teams:[{abbr:'IND'},{abbr:'MIN'}]};
  const board=fantasyBoard(data,'1',[live]);
- assert.deepEqual(board.players,[{slot:'RB',name:'Jonathan Taylor',team:'IND',status:'On offense · @ MIN 10-7 · Q2 4:10',active:true,points:12}]);
+ assert.deepEqual(board.players,[{slot:'RB',name:'Jonathan Taylor',team:'IND',status:'On offense · @ MIN 10-7 · Q2 4:10',active:true,points:12,statLine:''}]);
  assert.equal(fantasyBoard(data,'1',[{...live,state:'post',possession:-1,detail:'Final'}]).players[0].status,'@ MIN 10-7 · Final');
  assert.equal(fantasyBoard(data,'1',[]).players[0].status,'No game');
  assert.equal(fantasyBoard(data,'1',[{...live,scoreKnown:false,score:[0,0],shownScore:[10,7]}]).players[0].status,'On offense · @ MIN 10-7 · Q2 4:10','a blank poll keeps the last tally');
@@ -169,4 +203,30 @@ test('the matchup table lists starters only; the bench follows in the same colum
 test('nearStart covers a listed start from 5 minutes before to an hour after, only while the game is pre',()=>{
  const at=minutes=>new Date(1e12+minutes*60000).toISOString(),near=(minutes,state='pre')=>nearStart({state,date:at(minutes)},1e12);
  assert.equal(near(4),true);assert.equal(near(-59),true);assert.equal(near(6),false);assert.equal(near(-61),false);assert.equal(near(1,'in'),false);assert.equal(nearStart({state:'pre'},1e12),false);
+});
+
+import {mountMatchupRows} from '../web/scoreboard.js';
+test('matchup row sizing keeps the bench at starter scale when hiding the guide reveals more of the list',()=>{
+ let callback,queued,writes=0;
+ const values=new Map(),panel={clientHeight:700,style:{getPropertyValue:key=>values.get(key)||'',setProperty:(key,value)=>{writes++;values.set(key,value);}}};
+ const rows={rows:Array(9),getBoundingClientRect:()=>({height:9*(parseFloat(values.get('--matchup-row-height'))||40)})};
+ const board={getBoundingClientRect:()=>({height:84+rows.getBoundingClientRect().height})};
+ const guide={hidden:false,getBoundingClientRect:()=>({height:144})};
+ const elements={matchupPanel:panel,scoreboard:board,fantasyPlayers:rows,gameTiles:guide};
+ class Observer{constructor(fn){callback=fn;}observe(){}disconnect(){}}
+ const view={ResizeObserver:Observer,MutationObserver:Observer,requestAnimationFrame:fn=>{queued=fn;return 1;},cancelAnimationFrame(){},matchMedia:()=>({matches:true}),getComputedStyle:()=>({paddingTop:'8',paddingBottom:'8',getPropertyValue:()=> '40'})};
+ const flush=()=>{const fn=queued;queued=null;fn?.();};
+ const stop=mountMatchupRows({$:id=>elements[id],view});flush();assert.equal(values.get('--matchup-row-height'),'66.67px');
+ guide.hidden=true;panel.clientHeight+=144;callback();flush();assert.equal(values.get('--matchup-row-height'),'66.67px','freed guide space reveals bench rows without shrinking anyone');
+ callback();flush();assert.equal(writes,1,'observer feedback does not rewrite the same size');
+ panel.clientHeight=450;callback();flush();assert.equal(values.get('--matchup-row-height'),'40.00px','short windows scroll instead of squeezing rows');
+ panel.hidden=true;panel.clientHeight=0;callback();flush();assert.equal(values.get('--matchup-row-height'),'40.00px');stop();
+});
+
+// Safari's native fetch validates its receiver, unlike Node's fetch.
+test('automatic score polling uses the browser global as the fetch receiver',async()=>{
+ let calls=0,now=1;
+ const feed=new FantasyScoreFeed({now:()=>now,fetcher:async function(){assert.equal(this,globalThis);calls++;return Response.json(result());}});
+ await feed.sync(connection);assert.equal(feed.error,'');assert.equal(calls,1);
+ now+=30001;await feed.sync(connection);assert.equal(feed.error,'');assert.equal(calls,2);assert.ok(feed.data);
 });

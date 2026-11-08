@@ -529,12 +529,12 @@ test('LiveFeed.view: the quarter rollover (0:00 to 15:00 with End Period as the 
  f.push([liveGame('g',{lastPlayId:'e1',phase:'break',breakKind:'timeout',period:2,clock:'14:55'})],120);
  assert.equal(f.view(120,0)[0].phase,'play','the second quarter is under way');
 });
-test('LiveFeed.view: a stoppage with no clock movement and no new play is over after STOPPAGE_MAX',()=>{
+test('LiveFeed.view: a stoppage with no clock movement stays covered beyond STOPPAGE_MAX',()=>{
  const f=new LiveFeed();
  f.push([liveGame('g',{lastPlayId:'p1'})],0);
  for(let t=5;t<=STOPPAGE_MAX+20;t+=5)f.push([liveGame('g',{lastPlayId:'t1',phase:'break',breakKind:'timeout',clock:'2:00'})],t);
  assert.equal(f.view(5+STOPPAGE_MAX,0)[0].phase,'break');
- assert.equal(f.view(5+STOPPAGE_MAX+1,0)[0].phase,'live');
+ assert.equal(f.view(5+STOPPAGE_MAX+1,0)[0].phase,'break');
 });
 test('LiveFeed.view: a fresh score stays on screen for CELEBRATION seconds (no offense, not a break), then the score break begins',()=>{
  const f=new LiveFeed();
@@ -606,7 +606,7 @@ test('LiveFeed.view: a kickoff or punt is a break until the clock moves for the 
  const snapping=f.view(1120,0)[0];assert.equal(snapping.phase,'play');assert.equal(snapping.synthesized,true);
  const g=new LiveFeed();for(let t=1000;t<=1100;t+=5)g.push([liveGame('g',{lastPlayId:t>1000?'punt':'drive',kick:t>1000,playType:t>1000?'Punt':'Rush',down:1})],t);
  assert.equal(g.view(1060,0)[0].breakKind,'punt');
- assert.equal(g.view(1005+STOPPAGE_MAX+1,0)[0].phase,'live','a kick with no clock evidence for three minutes is football again');
+ assert.equal(g.view(1005+STOPPAGE_MAX+1,0)[0].phase,'break','elapsed time cannot reopen a commercial');
 });
 
 // ---------- the feed going quiet, waking up, leaving a game out ----------

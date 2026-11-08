@@ -11,8 +11,8 @@ const STUCK=15000;             // ms a seek may stay unanswered before it is sen
 const STALE=20000;             // ms an unwanted hidden player is kept before it is closed
 
 export class PlayerPool{
- constructor(host,{capacity=4,create=createPlayer,now=()=>performance.now(),onAd=()=>{},onClose=()=>{},onEnded=()=>{},onError=()=>{},onAudioLocked=()=>{},onReconnect=()=>{}}={}){
-  Object.assign(this,{host,capacity,create,now,onAd,onClose,onEnded,onError,onAudioLocked,onReconnect});
+ constructor(host,{capacity=4,create=createPlayer,now=()=>performance.now(),onAd=()=>{},onClose=()=>{},onEnded=()=>{},onError=()=>{},onAudioLocked=()=>{},onReconnect=()=>{},onBeforeLeave=()=>{}}={}){
+  Object.assign(this,{host,capacity,create,now,onAd,onClose,onEnded,onError,onAudioLocked,onReconnect,onBeforeLeave});
   this.slots=new Map();this.visible=null;this.muted=true;this.running=false;this.sequence=0;
  }
  get(key){return this.slots.get(key)||null;}
@@ -25,11 +25,12 @@ export class PlayerPool{
   const current=()=>this.slots.get(key)===slot;
   player.on('ad',on=>{if(current())this.onAd(key,on);});player.on('ended',()=>{if(current())this.onEnded(key);});player.on('error',error=>{if(current())this.onError(key,error);});player.on?.('audiolocked',()=>{if(current())this.onAudioLocked(key);});
   player.on?.('reconnect',detail=>{if(current())this.onReconnect(key,detail);});
+  player.on?.('beforenavigate',()=>{if(current()&&this.visible===key)this.onBeforeLeave(key);});
   player.element.classList.add('layer');player.element.setAttribute('aria-hidden','true');player.element.tabIndex=-1;
   this.host.append(player.element);this.slots.set(key,slot);this.trim();return slot;
  }
  touch(slot){slot.used=++this.sequence;slot.usedAt=this.now();}
- close(key){const slot=this.slots.get(key);if(!slot)return;this.slots.delete(key);if(this.visible===key)this.visible=null;slot.player.destroy();this.onClose(key);}
+ close(key){const slot=this.slots.get(key);if(!slot)return;if(this.visible===key)this.onBeforeLeave(key);this.slots.delete(key);if(this.visible===key)this.visible=null;slot.player.destroy();this.onClose(key);}
  // Seconds a seek on this player takes to land; a moving target is led by this much.
  lead(key){const p=this.slots.get(key)?.player;return p?.kind==='provider'?Math.min(12,Math.max(1,(p.seekLatency||3000)/1000)):0;}
  // Players that cannot be driven (page embeds) are shown as soon as they have loaded.
@@ -58,13 +59,16 @@ export class PlayerPool{
  ready(key,target,tolerance=TOLERANCE){const p=this.slots.get(key)?.player;return !!p&&(target===null||target===undefined?p.progressing:p.near(target,tolerance));}
  show(key){
   const slot=this.slots.get(key);if(!slot)return false;
+  if(this.visible&&this.visible!==key)this.onBeforeLeave(this.visible);
   // Retire every outgoing page before starting the incoming one, including a
   // return to an older slot that precedes the current one in insertion order.
   for(const s of this.slots.values())if(s!==slot){s.player.element.classList.remove('on');s.player.element.setAttribute('aria-hidden','true');s.player.element.tabIndex=-1;s.player.muted=true;s.player.setVisible?.(false);}
   slot.player.element.classList.add('on');slot.player.element.setAttribute('aria-hidden','false');slot.player.element.tabIndex=0;slot.player.muted=this.muted;slot.player.setVisible?.(true);
-  this.visible=key;this.touch(slot);if(this.running)slot.player.play();return true;
+  // A warm, moving player only needs to be revealed. Starting it again can
+  // re-enter a provider's startup/recovery flow right at the cut.
+  this.visible=key;this.touch(slot);if(this.running&&(!slot.player.wantPlay||!slot.player.progressing))slot.player.play();return true;
  }
- hide(){for(const s of this.slots.values()){s.player.element.classList.remove('on');s.player.element.setAttribute('aria-hidden','true');s.player.element.tabIndex=-1;s.player.muted=true;s.player.setVisible?.(false);}this.visible=null;}
+ hide(){if(this.visible)this.onBeforeLeave(this.visible);for(const s of this.slots.values()){s.player.element.classList.remove('on');s.player.element.setAttribute('aria-hidden','true');s.player.element.tabIndex=-1;s.player.muted=true;s.player.setVisible?.(false);}this.visible=null;}
  setMuted(value){this.muted=!!value;const slot=this.slots.get(this.visible);if(slot)slot.player.muted=this.muted;}
  // The viewer asked for sound on the visible player (inside their gesture): try the unmute again, and start a video whose muted autoplay was refused too.
  retryAudio(){const p=this.current;if(!p||this.muted)return false;p.audioLocked=false;p.muted=false;if(p.kind==='native'&&p.wantPlay&&p.element.paused)p.play();return true;}

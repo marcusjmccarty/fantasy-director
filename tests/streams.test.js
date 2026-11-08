@@ -137,3 +137,8 @@ test('unresolved NTV pages and invalid provider results keep their fallback inst
  }
  for(const url of ['https://notntv.st/embed','https://streamcorner.st/watch/a','https://ntv.st.example/embed','not a url',''])assert.equal(refusesFrame(url),false,url);
 });
+
+test('stream resolution uses the browser global as the fetch receiver',async()=>{
+ const finder=new StreamFinder({fetcher:async function(url){assert.equal(this,globalThis);return finderFetch(url);}});
+ const url=await finder.resolve(framed);assert.equal(url,framedEmbed);
+});

@@ -6,7 +6,7 @@ import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 import * as data from '../web/sports-data.js';
 import {safeVideo,streamType,teamColor,teamLogo,forgetESPN} from '../web/roster.js';
-import {headToHead,benchRows,matchupColumns,nearStart} from '../web/scoreboard.js';
+import {headToHead,benchRows,matchupColumns,mountMatchupRows,nearStart} from '../web/scoreboard.js';
 import {mountChat,chatRoomFor} from '../web/chat.js';
 import {normalizeHighlights,mergeHighlights,highlightView,playable} from '../web/highlights.js';
 const html=readFileSync(new URL('../web/sports.html',import.meta.url),'utf8');
@@ -16,7 +16,7 @@ class Pool{constructor(host,options){this.options=options;this.slots=new Map();t
 function app(fetcher,{sport='nba',stored={}}={}){const elements=new Map([...html.matchAll(/id="([^"]+)"/g)].map(m=>[m[1],new Element()])),stage=new Element(),events=new Map(),storage=new Map(Object.entries(stored)),timers=new Map();let timer=0;
  elements.get('games').addEventListener=function(name,fn){(this.listeners??={})[name]=fn;};
  const document={getElementById:id=>{assert.ok(elements.has(id),id);return elements.get(id);},querySelector:()=>stage,addEventListener:(n,fn)=>events.set(n,fn),visibilityState:'visible'};
- const ctx={StreamFinder,refusesFrame,stripEnds,stripTabStop,stripKeys,mountGameTiles,forgetESPN,...data,esc:data.escapeHTML,safeVideo,streamType,teamColor,teamLogo,headToHead,benchRows,matchupColumns,nearStart,mountChat,chatRoomFor,normalizeHighlights,mergeHighlights,highlightView,playable,PlayerPool:Pool,document,location:{search:'?sport='+sport},URLSearchParams,AbortController,AbortSignal,Response,Date,console,fetch:fetcher,window:{addEventListener(){}},navigator:{onLine:true},localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},setTimeout:(fn,ms)=>{timers.set(++timer,{fn,ms});return timer;},clearTimeout:id=>timers.delete(id)};
+ const ctx={StreamFinder,refusesFrame,stripEnds,stripTabStop,stripKeys,mountGameTiles,forgetESPN,...data,esc:data.escapeHTML,safeVideo,streamType,teamColor,teamLogo,headToHead,benchRows,matchupColumns,mountMatchupRows,nearStart,mountChat,chatRoomFor,normalizeHighlights,mergeHighlights,highlightView,playable,PlayerPool:Pool,document,location:{search:'?sport='+sport},URLSearchParams,AbortController,AbortSignal,Response,Date,console,fetch:fetcher,window:{addEventListener(){}},navigator:{onLine:true},localStorage:{getItem:k=>storage.get(k),setItem:(k,v)=>storage.set(k,v)},setTimeout:(fn,ms)=>{timers.set(++timer,{fn,ms});return timer;},clearTimeout:id=>timers.delete(id)};
  vm.createContext(ctx);vm.runInContext(source+'\nglobalThis.app={S,pool,streamFinder,refreshStreamLinks,loadGames,loadLeague,renderGuide,renderFantasy,renderTransport,selectGame,setPlaying,direct,changeDate,rotateSource,tick,saveStreamLink,openStream,selectReplay,setMode,playClip,leaveClip,get saved(){return saved;}};',ctx);return {...ctx.app,window:ctx.window,el:id=>elements.get(id),stage,document,events,storage,timers};}
 const event=(id='1')=>({id,date:'2026-11-01T22:00Z',shortName:'ATL @ BOS',competitions:[{status:{type:{state:'in',name:'STATUS_IN_PROGRESS',shortDetail:'3rd 2:00'}},competitors:[{homeAway:'away',team:{id:'1',abbreviation:'ATL',displayName:'Atlanta'},score:'80'},{homeAway:'home',team:{id:'2',abbreviation:'BOS',displayName:'Boston'},score:'81'}]}]});
 const games=(sport='nba',date=data.localDate())=>({sport,date,season:2027,events:[event()]});

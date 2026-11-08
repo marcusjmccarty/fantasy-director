@@ -334,6 +334,11 @@ test('volume commands go out only when the wanted state changes; inited and star
 });
 
 // ---- progress --------------------------------------------------------------
+test('advancing footage may report zero duration without losing the catalog length',t=>{
+ const h=harness(t),p=h.init(h.make(EMBED,{duration:7800}));p.play();
+ for(let time=1;time<5;time++){h.tick(1000);h.msg(p,{event:'timeupdate',time,duration:0});}
+ assert.equal(p.progressing,true);assert.equal(p.played,true);assert.equal(p.duration,7800);p.destroy();
+});
 test('timeupdate progress: two advancing reports prime the player, mark it progressing and end the bootstrap; stalls and repeats do not count',t=>{
  const h=harness(t,{start:10000});const p=h.init(h.make());p.play();clear(p);
  h.msg(p,{event:'timeupdate',time:100,duration:7800});
@@ -849,6 +854,16 @@ test('setRunning(false) pauses every player; setRunning(true) resumes only the v
  assert.deepEqual(a.names(),['play']);assert.deepEqual(b.names(),[],'hidden players wait for their next hold()');
  pool.hold('B',20);
  assert.deepEqual(b.names(),['play'],'hold() with a pending seek resumes it now that the pool runs');
+});
+test('a cut between warm moving streams reveals footage without another play, pause or seek',()=>{
+ const {pool,open,player}=poolHarness();pool.setRunning(true);open('A','provider');open('B','native');
+ pool.hold('A',100);pool.hold('B',100);player('A').settle(100);player('B').settle(100);
+ pool.show('A');player('A').reset();player('B').reset();
+ assert.equal(pool.ready('B',100),true);player('B').reset();pool.show('B');
+ for(const key of ['A','B']){assert.equal(player(key).wantPlay,true);assert.deepEqual(player(key).names(),['muted']);}
+ assert.equal(pool.visible,'B');
+ player('A').pause();player('A').reset();pool.show('A');
+ assert.equal(player('A').wantPlay,true);assert.deepEqual(player('A').names(),['muted','play'],'a paused warm stream is resumed automatically');
 });
 
 // ---- PlayerPool: keep ------------------------------------------------------

@@ -2,7 +2,7 @@ import {StreamFinder,refusesFrame} from './stream-finder.js';
 import {PlayerPool} from './players.js';
 import {safeVideo,streamType,teamColor,teamLogo,forgetESPN} from './roster.js';
 import {stripEnds,stripTabStop,stripKeys,mountGameTiles} from './strip.js';
-import {headToHead,benchRows,matchupColumns,nearStart} from './scoreboard.js';
+import {headToHead,benchRows,matchupColumns,mountMatchupRows,nearStart} from './scoreboard.js';
 import {mountChat,chatRoomFor} from './chat.js';
 import {normalizeHighlights,mergeHighlights,highlightView,playable} from './highlights.js';
 import {SPORTS,escapeHTML as esc,localDate,normalizeSportGames,normalizeSportPreferences,chooseSportGame,sportMatchup} from './sports-data.js';
@@ -20,7 +20,7 @@ const markup=new Map();function put(id,html,head='',kept=0){const last=markup.ge
 // The strip changed: a focused tile gets its focus back without moving the page (a past tile comes back as a replay tile after the mode swap).
 function stripSettled(keep){const list=$('games');if(keep)for(const b of list.querySelectorAll?.('button')||[]){const d=b.dataset;if(!b.disabled&&(keep[0]==='replay'?d.replay===keep[1]||d.pastReplay===keep[1]:d[keep[0]]===keep[1])){b.focus?.({preventScroll:true});break;}}stripTabStop(list);stripEnds(list,$('stripPrev'),$('stripNext'));}
 function persist(){try{localStorage.setItem(storageKey,JSON.stringify(saved));$('storageWarning').hidden=true;}catch{$('storageWarning').hidden=false;}}
-const pool=new PlayerPool($('layers'),{capacity:2,onEnded:key=>{if(S.clip&&key==='hl:'+S.clip)leaveClip();},onError:(key,error)=>{if(S.clip&&key==='hl:'+S.clip)leaveClip();else if(String(key).startsWith('rp:'))failReplay(key,error?.message||'That replay could not be reached.');else renderTransport();},onReconnect:(key,detail)=>{const active=document.fullscreenElement||document.webkitFullscreenElement;if(key===pool.visible&&active&&active!==document.querySelector('.stage'))document.querySelector('.stage').classList.add('theater');if(detail?.failover)rotateSource(key);},onAudioLocked:()=>renderTransport()});
+const pool=new PlayerPool($('layers'),{capacity:2,onBeforeLeave:()=>{const stage=document.querySelector('.stage'),active=document.fullscreenElement||document.webkitFullscreenElement;if(active&&active!==stage){S.fullWanted=true;stage.classList.add('theater');}},onEnded:key=>{if(S.clip&&key==='hl:'+S.clip)leaveClip();},onError:(key,error)=>{if(S.clip&&key==='hl:'+S.clip)leaveClip();else if(String(key).startsWith('rp:'))failReplay(key,error?.message||'That replay could not be reached.');else renderTransport();},onReconnect:(key,detail)=>{const active=document.fullscreenElement||document.webkitFullscreenElement;if(key===pool.visible&&active&&active!==document.querySelector('.stage'))document.querySelector('.stage').classList.add('theater');if(detail?.failover)rotateSource(key);},onAudioLocked:()=>renderTransport()});
 pool.setMuted(saved.muted);
 const selectedTeam=()=>S.league?.teams.find(t=>t.id===saved.teamId);
 const followed=()=>[...new Set((selectedTeam()?.players||[]).filter(p=>p.active).map(p=>p.teamId))];
@@ -213,7 +213,7 @@ function renderTransport(){
  const p=pool.current,g=currentGame(),embed=p?.kind==='embed',slot=pool.get(pool.visible),stage=document.querySelector('.stage');
  const clipOn=!!S.clip,chosen=!p&&!clipOn&&S.mode==='live'&&g?g:null,early=chosen?.state==='pre'&&!S.earlyOpen.has(chosen.id)?chosen:null,away=chosen&&!inlineUrls(chosen).length&&urls(chosen).length?chosen:null;
  setText('playButton',S.playing?'Pause':'Play');$('playButton').dataset.playing=String(S.playing);$('playButton').setAttribute('aria-label',S.playing?'Pause':'Play');
- setText('muteButton',saved.muted?'Turn sound on':'Mute sound');$('muteButton').hidden=embed;$('reloadStream').hidden=typeof p?.reload!=='function';$('nextStream').hidden=!p||!g||inlineUrls(g).length<2;$('nextStream').disabled=!S.playing;
+ setText('muteButton',saved.muted?'Turn sound on':'Mute sound');$('muteButton').hidden=embed&&!p.control?.active;$('reloadStream').hidden=typeof p?.reload!=='function';$('nextStream').hidden=!p||!g||inlineUrls(g).length<2;$('nextStream').disabled=!S.playing;
  $('openStream').hidden=!embed;$('openStream').href=embed?(slot?.source?.page||slot?.url||'#'):'#';$('embedHelp').hidden=!embed;
  const clip=S.clip?S.highlights.find(h=>h.id===S.clip):null,rp=S.mode==='replay'?S.replay:null,replayGame=rp?S.replays?.games.find(x=>x.id===rp.id):null;
  setText('watchTitle',clip?clip.title:replayGame?replayGame.title:g?.name||config.name+' channel');setText('channelMode',clip?'HIGHLIGHT':S.mode==='replay'?'REPLAY':g?gameTime(g):config.label+' LIVE');setText('pictureNote',clip||S.mode==='replay'?'':saved.delay+' sec delay');
@@ -294,6 +294,7 @@ $('refreshStreams').onclick=()=>{streamFinder.cancel();loadGames();};
 const stripStep=dir=>{const list=$('games');if(!list.scrollTo)return;const max=Math.max(0,list.scrollWidth-list.clientWidth),moving=S.stripTarget!==null&&Date.now()-S.stripStartedAt<700&&Math.abs(S.stripTarget-list.scrollLeft)>8,from=moving?Math.min(max,S.stripTarget):list.scrollLeft;S.stripStartedAt=Date.now();S.stripTarget=Math.max(0,Math.min(max,from+dir*Math.max(240,(list.clientWidth||800)*.8)));list.scrollTo({left:S.stripTarget,behavior:'smooth'});};
 for(const name of ['scrollend','pointerdown','touchstart'])$('games').addEventListener?.(name,()=>{S.stripTarget=null;},{passive:true});
 mountGameTiles({$,storage:localStorage});
+mountMatchupRows({$});
 $('stripPrev').onclick=()=>stripStep(-1);$('stripNext').onclick=()=>stripStep(1);$('games').addEventListener?.('scroll',()=>stripEnds($('games'),$('stripPrev'),$('stripNext')),{passive:true});
 $('games').addEventListener?.('wheel',e=>{S.stripTarget=null;const list=$('games');if(Math.abs(e.deltaY)<=Math.abs(e.deltaX)||list.scrollWidth<=list.clientWidth)return;e.preventDefault();list.scrollLeft+=e.deltaY;},{passive:false});
 const RAIL=[['matchup','matchupTab','matchupPanel'],['highlights','highlightsTab','highlightsPanel'],['chat','chatTab','chatPanel']];

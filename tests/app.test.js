@@ -651,6 +651,18 @@ test('family: slow-stream confirmation commits a cut exactly once',()=>{
  const a=app(undefined,{media:true});ready(a);const url='https://example.com/slow.mp4';a.saved.streams={'IND-MIN':url};const video=a.pool.open('A',{url}).player;video.moving=false;a.setPlaying(true);a.step(1000);
  a.time.now=10000;a.step(10000);video.moving=true;a.S.at=1001;a.step(11000);assert.equal(a.S.pending,null);assert.equal(a.S.cuts,1);assert.equal(a.director.lastCut,1001);a.step(12000);assert.equal(a.S.cuts,1);
 });
+test('switching keeps the outgoing live stream playing until incoming footage is moving',()=>{
+ const a=app(undefined,{media:true});ready(a);
+ const b={...game,id:'B',name:'DAL @ NYG',teams:[{abbr:'DAL'},{abbr:'NYG'}]};a.S.games.push(b);
+ a.saved.streams={'IND-MIN':'https://example.test/a.mp4','DAL-NYG':'https://example.test/b.mp4'};
+ a.setPlaying(true);a.cutTo('A',1000);const outgoing=a.pool.current;
+ const incoming=a.pool.open('B',{url:a.saved.streams['DAL-NYG']}).player;incoming.moving=false;
+ a.cutTo('B',2000);assert.equal(a.pool.visible,'A');assert.equal(outgoing.progressing,true);assert.equal(incoming.wantPlay,true);
+ a.cutTo('B',6000);assert.equal(a.pool.visible,'A');assert.equal(outgoing.progressing,true);
+ incoming.moving=true;a.cutTo('B',6500);
+ assert.equal(a.pool.visible,'B');assert.equal(incoming.progressing,true);assert.equal(outgoing.wantPlay,true);assert.equal(a.S.playing,true);assert.equal(a.S.pending,null);
+ a.pool.destroy();
+});
 test('family: live coverage does not count a long gap as watched after a fast replay',()=>{
  const a=app();ready(a);a.S.started=true;a.S.playing=true;a.S.program={kind:'game',id:'A'};a.S.lastAt=990;a.S.at=1000;a.clock.rate=60;a.step(1000);assert.equal(a.coverage.intervals.size,0);
 });
@@ -1617,7 +1629,7 @@ test('Replay week: a week asks for its videos and its play-by-play together',asy
 const stranger=(t,options={})=>{const sim=okru(t,{length:8000,...options}),a=app(undefined,{media:true,provider:sim.create}),g=uncalibrated(a,{team:'NE'});a.saved.highlights=false;a.seekTo(midGame(g));return {sim,a,g};};
 test('NFL replay: a pre-roll suspends the choice of a game with none of your starters, and the game comes back when it ends',t=>{
  const {sim,a,g}=stranger(t,{preroll:15}),at=a.S.at;a.selectGame(g.id);
- run(a,sim,3000);assert.equal(a.S.ads.has(g.id),true);assert.equal(a.S.pinned,g.id,'the ad does not cancel the choice');assert.match(a.el('ovTitle').innerHTML,/Waiting for a game to return/);assert.ok(Math.abs(a.S.at-at)<2,'the clock holds its place, starter or not');
+ run(a,sim,3000);assert.equal(a.S.ads.has(g.id),true);assert.equal(a.S.pinned,g.id,'the ad does not cancel the choice');assert.match(a.el('ovTitle').innerHTML,/Commercial Break in Progress/);assert.ok(Math.abs(a.S.at-at)<2,'the clock holds its place, starter or not');
  run(a,sim,25000);assert.equal(a.S.ads.size,0);assert.equal(a.S.pinned,g.id);assert.equal(a.S.program.id,g.id);assert.equal(a.pool.visible,g.id);assert.equal(sim.sims.length,1,'the finished player is the one on screen');assert.doesNotMatch(a.el('ovTitle').innerHTML,/None of your starters/);a.pool.destroy();
 });
 test('NFL replay: a past tile\'s game with none of your starters comes back after its breaks; a Watch tile still goes automatic',t=>{
@@ -1923,4 +1935,61 @@ test('hiding the game tiles preserves the playing source and restores the guide'
  const a=app(undefined,{media:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/a.mp4'};a.saved.delay=0;a.setPlaying(true);a.step(a.time.now);const before=a.pool.get('A');
  a.el('gameTilesToggle').onclick();assert.equal(a.el('gameTiles').hidden,true);assert.equal(a.el('gameTilesToggle')['aria-expanded'],'false');assert.equal(a.storage.get('fantasy-stream-hide-tiles'),'true');assert.equal(a.pool.get('A'),before);
  a.el('gameTilesToggle').onclick();assert.equal(a.el('gameTiles').hidden,false);assert.equal(a.el('gameTilesToggle')['aria-label'],'Hide game tiles');assert.equal(a.pool.get('A'),before);
+});
+
+ test('website commercial cover preserves the frame and returns without reopening',()=>{
+ const a=embeddedGame();a.pool.current.element.emit('load');const frame=a.pool.current,element=frame.element;
+ a.skipBreak();a.render();assert.equal(a.pool.current,frame);assert.equal(frame.element,element);assert.equal(a.pool.visible,'A');assert.equal(a.S.program.kind,'game');assert.equal(a.el('ovTitle').innerHTML,'Commercial Break in Progress');
+ a.S.breaks.clear();a.S.detectedBreaks.clear();a.updateBreaks();a.render();assert.equal(a.pool.current,frame);assert.equal(frame.element,element);assert.equal(a.S.dimmed,null);
+ });
+
+test('an unrelated live website stays loaded across a manual break and automatic return',()=>{
+ const a=embeddedGame();a.useRoster([{name:'Other player',team:'DAL',position:'QB'}],{teamName:'Other lineup'});a.selectGame('A');
+ const p=a.pool.current,frame=p.element;frame.emit('load');
+ a.skipBreak();a.step(a.time.now);a.render();
+ assert.equal(a.pool.current,p);assert.equal(p.element,frame);assert.equal(a.el('ovTitle').innerHTML,'Commercial Break in Progress');
+ a.S.breaks.clear();a.S.detectedBreaks.clear();a.step(a.time.now);a.render();
+ assert.equal(a.pool.current,p);assert.equal(p.element,frame);assert.equal(frame.navigations.length,1);assert.equal(p.wantPlay,true);assert.equal(a.S.dimmed,null);
+});
+
+test('Show stream corrects a detected timeout without reloading and a new break is covered again',()=>{
+ const a=embeddedGame();const frame=a.pool.current.element;frame.emit('load');
+ const stopped={...game,phase:'break',breakKind:'timeout',lastPlayId:'timeout-1'};
+ a.S.games=[stopped];a.S.live.feed.view=()=>a.S.games;a.updateBreaks();a.render();
+ assert.equal(a.el('ovButton').textContent,'Show stream');assert.match(a.el('games').innerHTML,/Show this stream/);
+ assert.doesNotMatch(a.el('games').innerHTML,/data-game="A"[^>]*disabled/);
+ a.el('ovButton').onclick();assert.equal(a.S.dimmed,null);assert.equal(a.el('overlay').hidden,true);assert.equal(a.pool.current.element,frame);assert.equal(frame.navigations.length,1);
+ a.time.now+=15000;a.step(a.time.now);assert.equal(a.S.dimmed,null);assert.equal(a.S.pinned,'A','the same timeout cannot immediately undo the viewer’s correction');
+ a.S.games=[{...game,lastPlayId:'next-play'}];a.step(a.time.now+500);assert.equal(a.S.revealedBreaks.size,0);
+ a.S.games=[{...stopped,lastPlayId:'timeout-2'}];a.step(a.time.now+1000);a.render();assert.equal(a.el('ovTitle').innerHTML,'Commercial Break in Progress');assert.equal(a.pool.current.element,frame);
+ a.pool.destroy();
+});
+test('a selected replay waiting for Play is revealed over the outgoing player after eight seconds',()=>{
+ const {a,g,p,to,since}=waitingFrame();p.played=false;
+ const old=a.pool.open('old',{url:'https://example.test/old.mp4'}).player;old.play();a.pool.show('old');a.S.program={kind:'game',id:'old'};a.S.pinned=g.id;
+ a.time.now=since+4000;a.cutTo(g.id,a.time.now);assert.equal(a.pool.visible,'old');assert.equal(old.wantPlay,true);
+ a.time.now=since+8250;a.cutTo(g.id,a.time.now);assert.equal(a.pool.visible,g.id);assert.equal(p.wantPlay,true);assert.equal(a.S.unmuteHint,true);
+ a.time.now=since+21000;p.advances=1;a.render();assert.equal(a.el('frameHelp').hidden,false);assert.equal(a.el('frameOpen').href,g.embed,'one unconfirmed report cannot hide the way out');
+ p.moving=true;a.cutTo(g.id,a.time.now+100);assert.equal(a.S.pending,null);assert.equal(a.pool.visible,g.id);assert.equal(p.wantPlay,true);a.pool.destroy();
+});
+test('an automatic switch keeps healthy outgoing footage while the next replay buffers',()=>{
+ const {a,g,p,since}=waitingFrame();
+ const old=a.pool.open('old',{url:'https://example.test/old.mp4'}).player;old.play();a.pool.show('old');a.S.program={kind:'game',id:'old'};a.S.pinned=null;
+ a.time.now=since+8250;a.cutTo(g.id,a.time.now);assert.equal(a.pool.visible,'old');assert.equal(old.wantPlay,true);
+ old.moving=false;a.cutTo(g.id,a.time.now+100);assert.equal(a.pool.visible,g.id,'a stalled outgoing player must not hide the incoming controls');a.pool.destroy();
+});
+
+test('a nested provider fullscreen cannot hide a detected commercial cover',async()=>{
+ const a=embeddedGame();nativeFullscreen(a);const p=a.pool.current;p.element.emit('load');
+ a.page.fullscreenElement=p.element;a.emitPage('fullscreenchange');
+ a.S.games=[{...game,phase:'break',breakKind:'timeout',lastPlayId:'timeout'}];a.S.live.feed.view=()=>a.S.games;
+ a.updateBreaks();a.render();await flush();
+ assert.equal(a.page.fullscreenElement,null);assert.equal(a.stage.classList.contains('theater'),true);assert.equal(a.el('ovTitle').innerHTML,'Commercial Break in Progress');assert.equal(a.pool.current,p);assert.equal(p.wantPlay,true);
+ a.pool.destroy();
+});
+test('switching away from a nested fullscreen frame preserves the channel view before retiring it',()=>{
+ const a=embeddedGame(),old=a.pool.current;old.element.emit('load');a.page.fullscreenElement=old.element;
+ const other={...game,id:'B',teams:[{abbr:'CLE'},{abbr:'NO'}]};a.S.games.push(other);a.S.live.feed.view=()=>[game,other];a.saved.streams['CLE-NO']='https://ntv.st/embed?t=next';
+ a.frameEvents.onNavigate=()=>{assert.equal(a.stage.classList.contains('theater'),true);a.page.fullscreenElement=null;a.emitPage('fullscreenchange');};
+ a.selectGame('B');assert.equal(a.pool.visible,'B');assert.equal(a.stage.classList.contains('theater'),true);assert.equal(a.S.playing,true);a.frameEvents.onNavigate=null;a.pool.destroy();
 });
