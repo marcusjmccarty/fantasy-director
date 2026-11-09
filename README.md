@@ -8,6 +8,14 @@ The channel runs on Cloudflare Workers at **https://fantasy-stream.fantasy-hub.w
 
 Redeploy after a change with `npm run deploy` (builds `dist/` and uploads it with the Cloudflare account that `npx wrangler login` authorized; `wrangler.toml` names the Worker).
 
+## Playback and the unified extension
+
+Direct HLS, MP4 and WebM sources use the site's own player without a browser extension. The next live stream stays muted in the background, and the channel switches only after video is advancing with at least 750 ms buffered. Captions remain disabled as tracks arrive or change. Use the channel's Full screen button once to keep the same container across switches. A browser sound restriction falls back to muted playback and offers Turn sound on.
+
+Provider resolution now checks published player markup for an accessible direct video source. It retains the published embed when a source is not exposed; this does not make opaque third-party players controllable without the optional extension. Media is not proxied, and provider authentication, CORS and DRM still apply.
+
+The download at `/fantasy-stream-extension.zip` combines the original Fantasy Director desk, ESPN import, roster, tab director and replay tools with the playback helper as Fantasy Stream 3.2.0. The previous `/fantasy-stream-playback.zip` URL serves the same package. To preserve existing settings, replace files in the original unpacked extension folder and reload its existing Chrome card. See `extension/README.txt` for details.
+
 ## Run locally
 
 ```bash
@@ -23,7 +31,7 @@ Public leagues import with just the league ID. For private leagues, viewers past
 ## Modes
 
 - **Week 7 replay** – the full 2026 Week 7 slate (14 games, 2,493 timestamped plays, 115 scoring plays) with the original full-game recordings. A deterministic rehearsal of the director: pick a day, press Start, and watch it work. The first visit starts near your lineup’s first action. Historical roster imports and replay lineup edits are kept separate from your saved live lineup; replay-only edits last for the current page session.
-- **Live** – ESPN's public scoreboard, polled every 5 s during games, seen through the stream's delay (below). The viewer supplies a stream link per game: a direct MP4/WebM/HLS link (warmed in the background, switched to when ready, muted and unmuted by the channel) or any https page (embedded as-is and loaded only while on screen, since a hidden page would play its own sound; each cut to it reloads the page). Without a link the game is still tracked and its scores still produce alerts and can have replays when matching footage is available, but there is no live picture for it.
+- **Live** – ESPN's public scoreboard, polled every 5 s during games, seen through the stream's delay (below). The viewer supplies a stream link per game: a direct MP4/WebM/HLS link (warmed in the background and switched to after buffered video advances) or an HTTPS player page (resolved to direct media when published; otherwise preloaded only when the optional helper can control its sound and report playback). Without a link the game is still tracked and its scores still produce alerts and can have replays when matching footage is available, but there is no live picture for it.
 
 ## How the channel decides (`web/director.js`)
 

@@ -1,17 +1,54 @@
 {
   "manifest_version": 3,
-  "name": "Fantasy Stream Playback",
-  "description": "Starts embedded players and keeps fullscreen on the Fantasy Stream channel when games switch.",
-  "version": "1.1.0",
-  "minimum_chrome_version": "106",
-  "permissions": ["scripting"],
-  "host_permissions": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
-  "background": {"service_worker": "background.js"},
-  "content_scripts": [{
-    "matches": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"],
-    "js": ["content.js"],
-    "all_frames": true,
-    "match_about_blank": true,
-    "run_at": "document_start"
-  }]
+  "name": "Fantasy Stream",
+  "version": "3.2.0",
+  "minimum_chrome_version": "120",
+  "description": "Fantasy Director roster, ESPN import, replay desk and embedded Fantasy Stream playback in one extension.",
+  "permissions": [
+    "tabs",
+    "storage",
+    "alarms",
+    "cookies",
+    "offscreen",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://*/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Open Fantasy Stream desk"
+  },
+  "commands": {
+    "stop-director": {
+      "suggested_key": {
+        "default": "Alt+Shift+S",
+        "mac": "Alt+Shift+S"
+      },
+      "description": "Stop automatic stream switching"
+    }
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; media-src 'self' https://espnmedia-cdn.akamaized.net https://media.video-cdn.espn.com"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://*/*",
+        "http://localhost/*",
+        "http://127.0.0.1/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "all_frames": true,
+      "match_about_blank": true,
+      "run_at": "document_start"
+    }
+  ]
 }

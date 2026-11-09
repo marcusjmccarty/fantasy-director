@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {ntvCatalog,publicPlayerURL,embeddedPlayerFromHTML,streamsCatalogAPI,streamsResolveAPI,streamcornerCatalog} from '../server/streams.js';
+import {ntvCatalog,publicPlayerURL,embeddedPlayerFromHTML,streamsCatalogAPI,streamsResolveAPI,streamcornerCatalog,publishedVideo} from '../server/streams.js';
 import {StreamFinder,matchStream,needsPlayerResolution,refusesFrame} from '../web/stream-finder.js';
 import {safeVideo} from '../web/roster.js';
 import {normalizePreferences} from '../web/preferences.js';
@@ -116,7 +116,7 @@ test('StreamCorner catalog accepts published timed events and ignores guessing a
 test('NTV and StreamCorner remain separate exact-match options for the same game',async()=>{
  const other={...entry,id:'sc',provider:'StreamCorner',sources:['https://streamcorner.st/embed/live']};
  const f=new StreamFinder({fetcher:async url=>url.startsWith('/api/streams?')?Response.json({sport:'nfl',entries:[{...entry,provider:'NTV'},other]}):Response.json({page:new URL(url,'https://app.example').searchParams.get('url'),url:embed+(url.includes('source%3D1')?'2':'')})});
- await f.refresh([game],'nfl');assert.equal(f.options(game).length,3);assert.deepEqual(f.urls(game,[],'StreamCorner'),other.sources);assert.deepEqual(f.urls(game,[],'NTV'),[embed,embed+'2']);
+ await f.refresh([game],'nfl');assert.equal(f.options(game).length,3);assert.deepEqual(f.urls(game,[],'StreamCorner'),[embed]);assert.deepEqual(f.urls(game,[],'NTV'),[embed,embed+'2']);
 });
 test('a provider outage does not discard a working independent catalog',async()=>{
  const event={'@type':'SportsEvent',name:entry.title,sport:'NFL',startDate:game.date,url:'/watch/game'};
@@ -129,7 +129,7 @@ test('NTV watch pages resolve to official inline embeds, including host aliases'
  let lookups=0;const f=new StreamFinder({fetcher:async url=>{if(url.includes('/resolve?')){lookups++;return Response.json({page:new URL(url,'https://app.example').searchParams.get('url'),url:embed});}return Response.json({sport:'nfl',entries:[entry]});}});
  await f.refresh([game],'nfl');assert.equal(lookups,2);assert.deepEqual(f.urls(game),[embed]);assert.equal(f.original(embed),page);
  assert.equal(await f.resolve('https://www.ntv.st/watch/raptor/game-1?source=0'),embed);
- assert.equal(f.playable('https://NTV.ST./embed?t=published'),embed);
+ assert.equal(await f.resolve('https://NTV.ST./embed?t=published'),embed);
 });
 test('unresolved NTV pages and invalid provider results keep their fallback instead of loading an arbitrary unsandboxed page',async()=>{
  for(const result of ['https://unrelated.example/embed?t=x','https://ntv.st/','https://ntv.st/embed']){
@@ -141,4 +141,65 @@ test('unresolved NTV pages and invalid provider results keep their fallback inst
 test('stream resolution uses the browser global as the fetch receiver',async()=>{
  const finder=new StreamFinder({fetcher:async function(url){assert.equal(this,globalThis);return finderFetch(url);}});
  const url=await finder.resolve(framed);assert.equal(url,framedEmbed);
+});
+
+test('published direct media replaces an NTV wrapper without executing provider scripts',async()=>{
+ const direct='https://cdn.example/game.m3u8',calls=[];
+ const fetcher=async(url,options)=>{calls.push(url);assert.equal(options.redirect,'manual');assert.deepEqual(Object.keys(options.headers),['Accept']);
+  if(url.includes('/api/get-watch-streams'))return Response.json({success:true,embedUrl:embed});
+  if(url===embed)return new Response('<iframe id="streamIframe" src="https://taifood-blog.asia/embed/game"></iframe>');
+  if(url==='https://taifood-blog.asia/embed/game')return new Response(`<video><source src="${direct}"></video><script>throw Error('never execute')</script>`);
+  throw Error('unexpected fetch');
+ };
+ const data=await (await streamsResolveAPI(request(page),fetcher)).json();assert.equal(data.url,direct);assert.equal(data.playback,'native');assert.equal(data.embed,embed);assert.equal(calls.length,3);
+ const f=new StreamFinder({fetcher:async()=>Response.json(data)});assert.equal(await f.resolve(page),direct);assert.equal(f.original(direct),page);
+});
+test('explicit NTV embed links also attempt native resolution while retaining a usable fallback',async()=>{
+ const direct='https://cdn.example/stream.mp4';let calls=0;
+ const f=new StreamFinder({fetcher:async()=>{calls++;return Response.json({page:embed,url:direct,playback:'native',embed});}});
+ assert.equal(f.playable(embed),embed);assert.equal(await f.resolve(embed),direct);assert.equal(f.playable(embed),direct);assert.equal(calls,1);
+});
+test('native inspection rejects unknown wrappers, private targets, redirect escapes and cycles',async()=>{
+ for(const target of ['https://evil.example/embed/one','https://127.0.0.1/embed/one','http://taifood-blog.asia/embed/one']){
+  let calls=0;assert.equal(await publishedVideo(embed,async()=>{calls++;return new Response(`<iframe id="player" src="${target}"></iframe>`);}),null);assert.equal(calls,1);
+ }
+ let cycles=0;assert.equal(await publishedVideo(embed,async()=>{cycles++;return new Response(`<iframe id="player" src="${embed}"></iframe>`);}),null);assert.equal(cycles,1);
+ let redirects=0;assert.equal(await publishedVideo(embed,async()=>{redirects++;return new Response('',{status:302,headers:{Location:'https://evil.example/player'}});}),null);assert.equal(redirects,1);
+});
+test('opaque provider scripts keep the published embed and never claim native control',async()=>{
+ const data=await (await streamsResolveAPI(request(embed),async()=>new Response('<script>opaquePlayer()</script>'))).json();
+ assert.equal(data.url,embed);assert.equal(data.playback,'embed');assert.equal(data.embed,undefined);
+});
+
+test('native inspection accepts published wrappers above the catalog budget but keeps a hard size limit',async()=>{
+ const direct='https://cdn.example/game.m3u8';
+ const markup=' '.repeat(650000)+`<video src="${direct}"></video>`;
+ assert.equal(await publishedVideo(embed,async()=>new Response(markup)),direct);
+ assert.equal(await publishedVideo(embed,async()=>new Response(' '.repeat(1000001)+markup)),null);
+});
+
+test('native provider candidates retain trusted embeds after explicit primary and backup sources',async()=>{
+ const direct='https://cdn.example/game.m3u8',backup='https://cdn.example/backup.m3u8';let now=0;
+ const f=new StreamFinder({now:()=>now,fetcher:async()=>Response.json({page,url:direct,playback:'native',embed})});
+ await f.resolve(page);
+ assert.deepEqual(f.urls(game,[page]),[direct,embed]);assert.equal(f.original(embed),page);
+ assert.deepEqual(f.urls(game,[page,backup]),[direct,backup,embed]);
+ f.matches.set(game.id,{sources:[page],options:[{provider:'NTV',url:page}]});
+ assert.deepEqual(f.urls(game,[],'NTV'),[direct,embed]);
+ now=100000;f.fetcher=async()=>{throw Error('offline');};await f.resolve(page);
+ assert.deepEqual(f.urls(game,[page,backup]),[direct,backup,embed],'renewal errors retain both working candidates');
+});
+test('native fallback cannot promote an arbitrary or invalid provider player',async()=>{
+ const direct='https://cdn.example/game.m3u8';
+ for(const fallback of ['https://evil.example/embed?t=x','https://ntv.st/','https://ntv.st/embed','http://ntv.st/embed?t=x','https://u:p@ntv.st/embed?t=x','https://ntv.st:8443/embed?t=x']){
+  const f=new StreamFinder({fetcher:async()=>Response.json({page,url:direct,playback:'native',embed:fallback})});await f.resolve(page);
+  assert.deepEqual(f.urls(game,[page]),[direct],fallback);
+ }
+ const sc='https://streamcorner.st/watch/game';
+ for(const fallback of ['https://streamcorner.st/embed/live','https://evil.example/embed/live','https://streamcorner.st/watch/game']){
+  const f=new StreamFinder({fetcher:async()=>Response.json({page:sc,url:direct,playback:'native',embed:fallback})});await f.resolve(sc);
+  assert.deepEqual(f.urls(game,[sc]),fallback.includes('/embed/')&&fallback.startsWith('https://streamcorner.st/')?[direct,fallback]:[direct]);
+ }
+ const explicit=new StreamFinder({fetcher:async()=>Response.json({page:embed,url:direct,playback:'native',embed:'https://evil.example/embed'})});await explicit.resolve(embed);
+ assert.deepEqual(explicit.urls(game,[embed]),[direct,embed],'the validated pasted NTV embed remains a fallback');
 });

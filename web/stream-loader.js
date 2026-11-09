@@ -23,7 +23,8 @@ export async function attachMediaSource(video,source,onFatal=()=>{},{signal}={})
   if(video.canPlayType('application/vnd.apple.mpegurl')){video.src=source.url;video.load();return null;}
   throw new Error('HLS is unavailable in this browser.');
  }
- const controller=new Hls({enableWorker:true,maxBufferLength:24,maxMaxBufferLength:40,backBufferLength:10,capLevelToPlayerSize:true,startLevel:0,lowLatencyMode:false});
+ const controller=new Hls({enableWorker:true,maxBufferLength:24,maxMaxBufferLength:40,backBufferLength:10,capLevelToPlayerSize:true,startLevel:0,lowLatencyMode:false,enableCEA708Captions:false,enableWebVTT:false,enableIMSC1:false});
+ controller.subtitleDisplay=false;controller.subtitleTrack=-1;
  let recoveries=0;
  controller.on(Hls.Events.ERROR,(_,event)=>{if(signal?.aborted||!event.fatal)return;if(event.type===Hls.ErrorTypes.MEDIA_ERROR&&recoveries++<1)controller.recoverMediaError();else onFatal();});
  controller.loadSource(source.url);controller.attachMedia(video);return controller;

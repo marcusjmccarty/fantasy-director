@@ -1,4 +1,4 @@
-node_modules/
+node_modules
 .sites-runtime/
 scripts/scorebug-ocr/frames
 scripts/scorebug-ocr/jobs.tsv

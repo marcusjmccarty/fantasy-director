@@ -123,3 +123,20 @@ test('live recovery: finite replay playback keeps its existing end and error beh
  const h=harness(Promise.resolve(null));h.player.play();await h.player.ready;let ended=0;h.player.on('ended',()=>ended++);h.video.listeners.ended();check(h,900000);
  assert.equal(ended,1);assert.equal(h.attachments.length,1);assert.equal(h.player.reload(),false);h.player.destroy();
 });
+
+test('native switching requires advancing footage and at least 750ms buffered ahead',async()=>{
+ const h=harness(Promise.resolve(null));await h.player.ready;
+ Object.assign(h.video,{currentTime:10,readyState:4,seeking:false,paused:false,buffered:{length:1,start:()=>8,end:()=>10.5}});
+ h.player.play();h.video.listeners.timeupdate();assert.equal(h.player.canPreload,true);assert.equal(h.player.readyToShow,false);
+ h.video.buffered.end=()=>12;assert.equal(h.player.readyToShow,true);
+ h.video.seeking=true;assert.equal(h.player.readyToShow,false);h.video.seeking=false;
+ h.video.readyState=2;assert.equal(h.player.readyToShow,false);h.video.readyState=4;
+ h.time.now=1300;assert.equal(h.player.readyToShow,false,'stale video is not a ready replacement');
+ h.player.destroy();
+});
+test('native autoplay immediately recovers a browser pause on unmute and honors explicit Pause',async()=>{
+ const h=harness(Promise.resolve(null),()=>h.video.muted?Promise.resolve():Promise.reject({name:'NotAllowedError'}));await h.player.ready;
+ h.player.play();h.video.muted=false;h.video.listeners.pause();await Promise.resolve();await Promise.resolve();
+ assert.equal(h.video.muted,true);assert.equal(h.player.audioLocked,true);const count=h.video.calls.length;
+ h.player.pause();h.video.listeners.pause();assert.equal(h.video.calls.length,count+1,'explicit Pause never restarts playback');h.player.destroy();
+});

@@ -515,3 +515,22 @@ test('sports switching retains the current game until the pending video is ready
  assert.equal(a.pool.current,old);assert.equal(a.S.current,'1');assert.equal(a.S.pending.id,'2');a.setPlaying(false);next.ready=true;a.direct();assert.equal(a.pool.current,old);
  a.setPlaying(true);a.direct();assert.equal(a.pool.current,next);assert.equal(a.S.current,'2');assert.equal(a.S.pending,null);
 });
+
+test('pending native startup falls back to its trusted embed without replacing healthy outgoing footage',async()=>{
+ const page='https://ntv.st/watch/raptor/game-2',embed='https://ntv.st/embed?t=game-2',direct='https://cdn.example/game-2.m3u8';
+ const a=app(async url=>url.includes('/resolve?')?Response.json({page,url:direct,playback:'native',embed}):Response.json({...games(),events:[event('1'),event('2')]}));
+ await ready(a);const old=a.pool.current;a.saved.streams['nba:2']={primary:page};await a.streamFinder.resolve(page);
+ const open=a.pool.open.bind(a.pool);a.pool.open=(id,source)=>{open(id,source);if(id==='2')Object.assign(a.pool.get(id).player,{ready:false,canPreload:true});};
+ a.selectGame('2',{manual:true});const failed=a.pool.get('2').player;
+ failed.checkHealth=()=>{failed.ready=true;a.pool.options.onReconnect('2',{failover:true});};a.direct();
+ assert.equal(a.pool.get('2').url,embed);assert.equal(a.pool.current,old);assert.equal(a.S.current,'1');assert.equal(a.S.pending.manual,true);
+ const next=a.pool.get('2').player;a.setPlaying(false);next.ready=true;a.direct();assert.equal(a.pool.current,old);
+ a.setPlaying(true);a.direct();assert.equal(a.pool.current,next);assert.equal(a.S.current,'2');assert.equal(a.S.manual,true);assert.equal(a.S.pending,null);
+});
+test('initial native startup can use a backup before any game is current',async()=>{
+ const a=app(async()=>Response.json(games()));await a.loadGames();a.saved.streams['nba:1']={primary:'https://cdn.example/first.m3u8',backup:'https://cdn.example/backup.m3u8'};
+ const open=a.pool.open.bind(a.pool);a.pool.open=(id,source)=>{open(id,source);a.pool.get(id).player.ready=false;};
+ a.selectGame('1',{manual:false});assert.equal(a.S.current,null);a.pool.options.onReconnect('1',{failover:true});
+ assert.equal(a.pool.get('1').url,'https://cdn.example/backup.m3u8');assert.equal(a.S.pending.manual,false);assert.equal(a.pool.visible,null);
+ a.pool.get('1').player.ready=true;a.direct();assert.equal(a.S.current,'1');assert.equal(a.S.manual,false);
+});

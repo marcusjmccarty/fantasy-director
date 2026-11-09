@@ -5,7 +5,7 @@ import {disableCaptions} from './captions.js';
 export class NativePlayer{
  constructor(source,{now=()=>performance.now()}={}){
   this.destroyed=false;this.kind='native';this.now=now;this.listeners=new Map();this.inAd=false;this.error=null;this.wantPlay=false;this.target=null;this.primed=false;this.lastAdvance=-Infinity;this.lastTime=0;this.audioLocked=false;this.audioWatch=null;this.playGeneration=0;this.audioGeneration=0;
-  this.source=source;this.live=source.live===true;this.visible=false;this.attachGeneration=0;this.recoveryAttempts=0;this.lastReconnectAt=-Infinity;this.recoveryMessage='';this.resetRecovery();
+  this.source=source;this.live=source.live===true;this.canPreload=true;this.visible=false;this.attachGeneration=0;this.recoveryAttempts=0;this.lastReconnectAt=-Infinity;this.recoveryMessage='';this.resetRecovery();
   const v=this.element=document.createElement('video');v.className='layer';v.playsInline=true;v.preload='auto';v.muted=true;v.controls=false;
   this.stopCaptions=disableCaptions(v);
   v.addEventListener('timeupdate',()=>{
@@ -21,6 +21,9 @@ export class NativePlayer{
   // play() before the source is attached is aborted by the load, so ask again once it is, and whenever the element can play.
   this.attach();
   v.addEventListener('canplay',()=>{if(this.wantPlay&&v.paused)this.play();});
+  // Unmuting autoplay can pause without rejecting its earlier play promise.
+  // Retry now; a sound refusal immediately falls back to muted video.
+  v.addEventListener('pause',()=>{if(this.wantPlay&&this.attached&&!this.destroyed&&!v.ended&&!v.error)this.play();});
  }
  retryDelay(){return [10000,15000,30000,60000][Math.min(this.recoveryAttempts,3)];}
  fault(error){if(this.destroyed)return;this.error=error;if(this.live){this.stalledSince??=this.now();this.nextRetryAt??=Math.max(this.now()+3000,this.lastReconnectAt+this.retryDelay());this.recoveryMessage='Stream interrupted · reconnecting…';}this.emit('error',error);}
@@ -71,7 +74,7 @@ export class NativePlayer{
   this.stalledSince=now;this.softTried=false;this.healthySince=null;this.nextRetryAt=now+this.retryDelay();
   this.error=null;this.target=null;this.primed=false;this.lastAdvance=-Infinity;this.lastTime=0;
   this.playGeneration++;this.audioGeneration++;clearTimeout(this.audioWatch);this.audioWatch=null;
-  this.element.pause();this.element.removeAttribute('src');this.element.load();this.attach();return true;
+  this.attached=false;this.element.pause();this.element.removeAttribute('src');this.element.load();this.attach();return true;
  }
  reload(){if(!this.live||!this.visible||!this.wantPlay||this.destroyed)return false;this.resetRecovery();this.recoveryAttempts=0;return this.reconnect('Reloading stream…',{reason:'manual'});}
  on(name,callback){if(!this.listeners.has(name))this.listeners.set(name,new Set());this.listeners.get(name).add(callback);}
@@ -79,6 +82,11 @@ export class NativePlayer{
  get duration(){return this.element.duration;}
  get currentTime(){return this.element.currentTime;}
  get progressing(){return !this.error&&!this.element.paused&&this.now()-this.lastAdvance<1200;}
+ get readyToShow(){
+  const v=this.element;if(!this.progressing||v.seeking||v.readyState<3)return false;
+  try{for(let i=0;i<v.buffered.length;i++)if(v.buffered.start(i)<=v.currentTime+.05&&v.buffered.end(i)-v.currentTime>=.75)return true;}catch{}
+  return false;
+ }
  near(target,tolerance=2.5){const v=this.element;return this.primed&&!this.error&&this.target===null&&!v.seeking&&v.readyState>=3&&(this.progressing||!this.wantPlay)&&Math.abs(v.currentTime-target)<=tolerance;}
  play(){if(this.destroyed)return;this.wantPlay=true;const generation=++this.playGeneration;if(!this.attached)return;this.element.play().catch(error=>{if(this.destroyed||!this.wantPlay||generation!==this.playGeneration)return;if(error.name==='NotAllowedError'){this.audioLocked=true;this.element.muted=true;this.emit('audiolocked');this.element.play().catch(()=>{});}});}
  pause(){this.wantPlay=false;this.playGeneration++;this.audioGeneration++;clearTimeout(this.audioWatch);this.audioWatch=null;this.resetRecovery();this.recoveryMessage='';this.element.pause();}

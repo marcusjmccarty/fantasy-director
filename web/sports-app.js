@@ -194,6 +194,7 @@ function settleSwitch(){
  const pending=S.pending;if(!pending||!S.playing||S.mode!=='live'||S.clip)return;
  const p=pool.get(pending.id)?.player;if(!p){S.pending=null;return;}
  pool.hold?.(pending.id,null,{play:true});p.checkHealth?.({active:true,online:navigator.onLine!==false,foreground:!document.hidden});
+ if(S.pending!==pending||pool.get(pending.id)?.player!==p)return;
  if(p.kind==='embed'&&!p.canPreload||pool.ready?.(pending.id,null)){
   if(S.current!==pending.id)S.lastSwitch=Date.now();S.current=pending.id;S.manual=pending.manual;S.pending=null;pool.show(S.current);$('overlay').hidden=true;renderGuide();return;
  }
@@ -322,7 +323,13 @@ for(const [name,tabId] of RAIL){$(tabId).onclick=()=>showPanel(name);$(tabId).on
 function chatRoom(){if(!S.chat)return;const room=chatRoomFor(sport,saved.leagueId);if(!room&&!$('chatPanel').hidden)showPanel('matchup');S.chat.setRoom(room,room?`${S.league?.name||'Your league'} room`:'');S.chat.suggestName();}
 $('headerScore').onclick=e=>{e.preventDefault();showPanel('matchup');$('scoreboardTitle').focus?.();};
 $('watchFirst').onclick=()=>S.ovRun?.();$('ovBack').onclick=()=>{S.current=null;S.manual=false;setPlaying(true);renderGuide();};$('playButton').onclick=()=>{const pick=!S.playing&&!pool.current&&!S.clip&&!S.current?firstPick():null;if(pick)pick.run();else setPlaying(!S.playing);};$('reloadStream').onclick=()=>{if(S.playing)pool.current?.reload?.();};
-function rotateSource(id,manual=false){if(!S.playing||id!==S.current||!manual&&Date.now()<(S.rotations.get(id)||0))return;const g=currentGame(),links=inlineUrls(g),alternate=links.length>1?links[(links.indexOf(pool.get(id)?.url)+1)%links.length]:null;if(!g||!alternate)return;S.rotations.set(id,Date.now()+60000);selectGame(g.id,{url:alternate,manual:S.manual});}
+function rotateSource(id,manual=false){
+ const pending=S.pending;
+ if(!S.playing||id!==(pending?.id||S.current)||!manual&&Date.now()<(S.rotations.get(id)||0))return;
+ const g=S.games.find(g=>g.id===id),links=inlineUrls(g),alternate=links.length>1?links[(links.indexOf(pool.get(id)?.url)+1)%links.length]:null;
+ if(!g||!alternate)return;S.rotations.set(id,Date.now()+60000);
+ selectGame(g.id,{url:alternate,manual:pending?pending.manual:S.manual});
+}
 $('nextStream').onclick=()=>rotateSource(S.current,true);
 $('muteButton').onclick=()=>{saved.muted=!saved.muted;pool.setMuted(saved.muted);if(!saved.muted)pool.retryAudio();persist();renderTransport();};$('unmute').onclick=()=>{saved.muted=false;pool.setMuted(false);pool.retryAudio();persist();renderTransport();};
 $('autoMode').onclick=()=>{saved.auto=!saved.auto;S.manual=false;persist();direct();renderTransport();};

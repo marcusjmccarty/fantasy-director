@@ -59,7 +59,7 @@ test('fullscreen shim retains activation by never entering the disposable video'
 });
 test('background trusts Chrome tab identity, rejects lookalike sites and targets exact documents',()=>{
  let listener;const injections=[],messages=[];const chrome={runtime:{onMessage:{addListener:f=>listener=f}},scripting:{executeScript:o=>{injections.push(o);return Promise.resolve();}},tabs:{sendMessage:(...args)=>{messages.push(args);return Promise.resolve();}}};
- vm.runInNewContext(readFileSync(new URL('../extension/background.js',import.meta.url),'utf8'),{chrome,URL});
+ vm.runInNewContext(readFileSync(new URL('../extension/playback-background.js',import.meta.url),'utf8'),{chrome,URL});
  const send=(url,type='init')=>{let result;listener({type},{tab:{id:7,url},frameId:2,documentId:'doc-2'},r=>result=r);return result;};
  for(const url of ['https://example.com/','https://fantasy-stream.fantasy-hub.workers.dev.evil.test/','http://fantasy-stream.fantasy-hub.workers.dev/'])assert.equal(send(url),undefined);
  assert.equal(injections.length,0);assert.equal(send('https://fantasy-stream.fantasy-hub.workers.dev/').enabled,true);assert.equal(injections[0].target.documentIds[0],'doc-2');assert.equal(injections[0].world,'MAIN');

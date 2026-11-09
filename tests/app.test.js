@@ -42,7 +42,7 @@ class Element{
  append(e){this.children.push(e);e.parentNode=this;}replaceWith(e){const parent=this.parentNode;if(parent){const i=parent.children.indexOf(this);parent.children[i]=e;e.parentNode=parent;this.parentNode=null;}this.removed=true;}replaceChildren(){this.children=[];}setAttribute(n,v){this[n]=v;}removeAttribute(n){delete this[n];}addEventListener(){}focus(){this.focused=true;}showModal(){this.open=true;}close(){this.open=false;}remove(){if(this.parentNode)this.parentNode.children=this.parentNode.children.filter(e=>e!==this);this.parentNode=null;this.removed=true;}
 }
 class Video extends Element{
- constructor(){super();this.events=new Map();this.paused=true;this.currentTime=0;this.duration=NaN;this.readyState=4;this.seeking=false;this.calls=[];}
+ constructor(){super();this.events=new Map();this.paused=true;this.currentTime=0;this.duration=NaN;this.readyState=4;this.buffered={length:1,start:()=>0,end:()=>this.currentTime+5};this.seeking=false;this.calls=[];}
  addEventListener(name,callback){this.events.set(name,callback);}emit(name){this.events.get(name)?.();}
  play(){this.calls.push('play');this.paused=false;return Promise.resolve();}pause(){this.calls.push('pause');this.paused=true;}load(){}
 }
@@ -57,6 +57,7 @@ class Media{
  constructor(source){this.source=source;this.kind='native';this.element=new Element();this.listeners=new Map();this.target=null;this.currentTime=0;this.primed=true;this.advances=2;this.wantPlay=false;this.moving=true;this.inAd=false;this.muted=true;}
  on(name,fn){this.listeners.set(name,fn);}emit(name,value){if(name==='ad')this.inAd=value;this.listeners.get(name)?.(value);}
  get progressing(){return this.wantPlay&&this.moving&&!this.inAd;}
+ get readyToShow(){return this.progressing;}
  play(){this.wantPlay=true;}pause(){this.wantPlay=false;}seek(at){this.currentTime=at;}near(at,tolerance=2.5){return this.progressing&&Math.abs(this.currentTime-at)<=tolerance;}
  destroy(){this.wantPlay=false;this.destroyed=true;}
 }
@@ -495,16 +496,16 @@ test('site recovery: a live ending can fall back from direct HLS to a page witho
 test('site recovery: a direct source that never starts keeps recovering instead of exhausting the pending load limit',async()=>{
  const a=app(undefined,{media:true,native:true});ready(a);a.saved.streams={'IND-MIN':'https://video.example/live.m3u8'};a.selectGame('A');const p=a.pool.get('A').player;await p.ready;
  for(let now=1000;now<=300000;now+=250){a.time.now=now;a.step(now);await p.ready;assert.equal(p.destroyed,false);assert.equal(a.S.pinned,'A');assert.equal(a.S.cooldown.size,0);}
- assert.equal(a.pool.visible,'A');assert.ok(p.recoveryAttempts>=6);assert.equal(a.S.playing,true);
+ assert.equal(a.pool.visible,null,'unready video stays hidden');assert.ok(p.recoveryAttempts>=6);assert.equal(a.S.playing,true);
 });
 test('site recovery: saving a backup does not reload the healthy primary and both links survive storage',async()=>{
  const a=embeddedGame(),p=a.pool.current;a.render();const fields=a.el('streamInputs').querySelectorAll('input'),backup=fields.find(i=>i.dataset.backup==='true');assert.ok(backup);
  backup.value='https://backup.example/watch';await a.el('saveStreams').onclick();assert.equal(a.pool.current,p);assert.equal(p.destroyed,false);assert.equal(a.saved.streamBackups['IND-MIN'],backup.value);assert.equal(a.saved.streams['IND-MIN'],p.url);
  const stored=JSON.parse(a.storage.get('fantasy-stream-v3'));assert.equal(stored.streamBackups['IND-MIN'],backup.value);assert.equal(a.el('nextStream').hidden,false);
 });
-test('site recovery: a long sleep during initial direct loading still reveals the player for interaction',async()=>{
+test('site recovery: a long sleep never reveals an unbuffered direct player',async()=>{
  const a=app(undefined,{media:true,native:true});ready(a);a.saved.streams={'IND-MIN':'https://video.example/live.m3u8'};a.selectGame('A');const p=a.pool.get('A').player;await p.ready;
- a.time.now=61000;a.step(a.time.now);assert.equal(a.pool.current,p);assert.equal(a.pool.visible,'A');assert.equal(a.S.program.kind,'game');assert.equal(a.S.pinned,'A');assert.equal(a.S.cooldown.size,0);
+ a.time.now=61000;a.step(a.time.now);assert.equal(a.pool.current,null);assert.equal(a.pool.visible,null);assert.equal(a.pool.get('A').player,p);assert.equal(a.S.pending.id,'A');assert.equal(a.S.pinned,'A');assert.equal(a.S.cooldown.size,0);
 });
 test('site recovery: a failed homepage extraction preserves the explicit URL as a page fallback',async()=>{
  const a=embeddedGame(),field=a.el('streamInputs').querySelectorAll('input').find(i=>!i.dataset.backup);field.value='https://streamcorner.st/';await a.el('saveStreams').onclick();
