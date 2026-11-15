@@ -78,7 +78,13 @@ export class NativePlayer{
  emit(name,detail){for(const callback of this.listeners.get(name)||[])callback(detail);}
  get duration(){return this.element.duration;}
  get currentTime(){return this.element.currentTime;}
+ get canPreload(){return true;}
  get progressing(){return !this.error&&!this.element.paused&&this.now()-this.lastAdvance<1200;}
+ get readyToShow(){
+  const v=this.element;if(this.destroyed||!this.progressing||v.seeking||v.readyState<3)return false;
+  for(let i=0;i<(v.buffered?.length||0);i++)if(v.buffered.start(i)<=v.currentTime&&v.buffered.end(i)-v.currentTime>=.5)return true;
+  return false;
+ }
  near(target,tolerance=2.5){const v=this.element;return this.primed&&!this.error&&this.target===null&&!v.seeking&&v.readyState>=3&&(this.progressing||!this.wantPlay)&&Math.abs(v.currentTime-target)<=tolerance;}
  play(){if(this.destroyed)return;this.wantPlay=true;const generation=++this.playGeneration;if(!this.attached)return;this.element.play().catch(error=>{if(this.destroyed||!this.wantPlay||generation!==this.playGeneration)return;if(error.name==='NotAllowedError'){this.audioLocked=true;this.element.muted=true;this.emit('audiolocked');this.element.play().catch(()=>{});}});}
  pause(){this.wantPlay=false;this.playGeneration++;this.audioGeneration++;clearTimeout(this.audioWatch);this.audioWatch=null;this.resetRecovery();this.recoveryMessage='';this.element.pause();}

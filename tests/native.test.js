@@ -66,6 +66,16 @@ test('sound: footage moving with sound on clears a stale lock, and a stalled one
  h.player.muted=false;[...h.timers.values()].at(-1)();assert.equal(h.player.audioLocked,true,'no footage moved after a started stream: still a refusal');assert.equal(h.video.muted,true);
 });
 const liveSource={url:'https://video.example/live.m3u8',type:'application/vnd.apple.mpegurl',live:true};
+test('native cuts require moving, buffered footage, including disjoint live buffer ranges',async()=>{
+ const h=harness(Promise.resolve(null));await h.player.ready;
+ Object.assign(h.video,{currentTime:10,readyState:4,seeking:false,paused:false,buffered:{length:1,start:()=>8,end:()=>10.2}});
+ h.player.play();assert.equal(h.player.readyToShow,false);h.video.listeners.timeupdate();assert.equal(h.player.canPreload,true);assert.equal(h.player.readyToShow,false);
+ h.video.buffered.end=()=>12;assert.equal(h.player.readyToShow,true);
+ h.video.buffered.start=()=>11;assert.equal(h.player.readyToShow,false,'a future buffer range is not playable yet');h.video.buffered.start=()=>8;
+ h.video.seeking=true;assert.equal(h.player.readyToShow,false);h.video.seeking=false;
+ h.video.readyState=2;assert.equal(h.player.readyToShow,false);h.video.readyState=4;
+ h.time.now=1300;assert.equal(h.player.readyToShow,false,'stale time updates cannot authorize a cut');h.player.destroy();
+});
 const check=(h,at,options={})=>{h.time.now=at;h.player.checkHealth({active:true,...options});};
 test('live recovery: uninterrupted advancing video never reloads during a three-hour session',async()=>{
  const h=harness(Promise.resolve(null),undefined,liveSource);h.player.play();await h.player.ready;h.video.paused=false;h.video.currentTime=0;

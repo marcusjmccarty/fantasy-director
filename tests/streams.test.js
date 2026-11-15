@@ -19,7 +19,7 @@ test('catalog uses published source indexes and excludes continuous channels, ma
  assert.equal(entries.length,2);assert.deepEqual(entries[0].sources,entry.sources);assert.equal(entries[1].sport,'nba');assert.equal(ntvCatalog({nonLive:raw.live,all:raw.live}).length,1);assert.deepEqual(ntvCatalog(null),[]);
 });
 test('catalog fetch is restricted to public NTV metadata and does not forward private credentials',async()=>{
- let calls=0;const response=await streamsCatalogAPI(new Request('https://app.example/api/streams?sport=nfl',{headers:{Cookie:'private-espn',Authorization:'private'}}),async(url,options)=>{calls++;assert.ok(['https://ntv.st/api/get-matches?server=raptor&type=both','https://streamcorner.st/'].includes(url));assert.equal(options.redirect,'manual');assert.deepEqual(Object.keys(options.headers),['Accept']);return url==='https://streamcorner.st/'?new Response(''):Response.json(raw);});
+ let calls=0;const response=await streamsCatalogAPI(new Request('https://app.example/api/streams?sport=nfl',{headers:{Cookie:'private-espn',Authorization:'private'}}),async(url,options)=>{calls++;assert.ok(['https://ntv.st/api/get-matches?server=raptor&type=both','https://streamcorner.cloud/'].includes(url));assert.equal(options.redirect,'manual');assert.deepEqual(Object.keys(options.headers),['Accept']);return url==='https://streamcorner.cloud/'?new Response(''):Response.json(raw);});
  assert.equal(response.status,200);assert.equal((await response.json()).entries.length,1);assert.equal(calls,2);assert.equal(response.headers.get('Cache-Control'),'no-store');
 });
 test('unsupported sports and methods never contact a provider',async()=>{
@@ -111,11 +111,11 @@ test('a failed catalog cannot prevent custom page resolution',async()=>{
 test('StreamCorner catalog accepts published timed events and ignores guessing and unrelated pages',()=>{
  const item={'@type':'SportsEvent',name:entry.title,sport:'NFL',startDate:game.date,url:'/watch/colts-vikings'};
  const html='<script type="application/ld+json">'+JSON.stringify({'@graph':[item,{...item,url:'/watch/old',startDate:'invalid'},{...item,url:'https://other.example/game'}]})+'</script>';
- const result=streamcornerCatalog(html);assert.equal(result.length,1);assert.equal(result[0].sources[0],'https://streamcorner.st/watch/colts-vikings');assert.equal(result[0].provider,'StreamCorner');assert.deepEqual(streamcornerCatalog('<a href="/">NFL</a>'),[]);
+ const result=streamcornerCatalog(html);assert.equal(result.length,1);assert.equal(result[0].sources[0],'https://streamcorner.cloud/watch/colts-vikings');assert.equal(result[0].provider,'StreamCorner');assert.deepEqual(streamcornerCatalog('<a href="/">NFL</a>'),[]);
 });
 test('NTV and StreamCorner remain separate exact-match options for the same game',async()=>{
  const other={...entry,id:'sc',provider:'StreamCorner',sources:['https://streamcorner.st/embed/live']};
- const f=new StreamFinder({fetcher:async url=>url.startsWith('/api/streams?')?Response.json({sport:'nfl',entries:[{...entry,provider:'NTV'},other]}):Response.json({page:new URL(url,'https://app.example').searchParams.get('url'),url:embed+(url.includes('source%3D1')?'2':'')})});
+ const f=new StreamFinder({fetcher:async url=>url.startsWith('/api/streams?')?Response.json({sport:'nfl',entries:[{...entry,provider:'NTV'},other]}):Response.json({page:new URL(url,'https://app.example').searchParams.get('url'),url:url.includes('streamcorner.st')?other.sources[0]:embed+(url.includes('source%3D1')?'2':'')})});
  await f.refresh([game],'nfl');assert.equal(f.options(game).length,3);assert.deepEqual(f.urls(game,[],'StreamCorner'),other.sources);assert.deepEqual(f.urls(game,[],'NTV'),[embed,embed+'2']);
 });
 test('a provider outage does not discard a working independent catalog',async()=>{

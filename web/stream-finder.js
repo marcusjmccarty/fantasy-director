@@ -1,4 +1,4 @@
-import {ntvURL,ntvEmbedURL} from './stream-policy.js';
+import {ntvURL,ntvEmbedURL,streamcornerURL} from './stream-policy.js';
 import {safeVideo,streamType} from './roster.js';
 import {publicPlayerURL,embeddedPlayerFromHTML,boundedStreamText} from './stream-html.js';
 const words=s=>String(s||'').toLowerCase().replace(/\bla\b/g,'los angeles').replace(/\bn\.y\.\b/g,'new york').replace(/[^a-z0-9]+/g,' ').trim();
@@ -8,18 +8,25 @@ export function matchStream(game,entries,sport){
  const matches=entries.filter(e=>e&&Array.isArray(e.sources)&&e.sources.length&&e.sport===sport&&Number.isFinite(e.start)&&Math.abs(e.start-start)<=90*60000&&names.every(n=>(' '+words(e.title)+' ').includes(' '+n+' ')));
  return matches.length===1?matches[0]:null;
 }
-const providerPage=url=>!!ntvURL(url)||new URL(url).hostname==='streamcorner.st';
+const providerPage=url=>!!ntvURL(url)||!!streamcornerURL(url);
 // Only a resolved NTV embed plays inline; unresolved watch pages keep a fallback link.
 export function refusesFrame(url){try{return /(?:^|\.)ntv\.st$/i.test(new URL(url).hostname.replace(/\.$/,''))&&!ntvEmbedURL(url);}catch{return false;}}
-export function needsPlayerResolution(url){try{const u=new URL(url);return streamType(url)==='embed/page'&&!/\/(?:embed|player|videoembed)(?:[/.]|$)/i.test(u.pathname);}catch{return false;}}
+export function needsPlayerResolution(url){try{const u=new URL(url);return streamType(url)==='embed/page'&&(!!streamcornerURL(url)||!/\/(?:embed|player|videoembed)(?:[/.]|$)/i.test(u.pathname));}catch{return false;}}
 export class StreamFinder{
  constructor({fetcher=fetch,now=()=>Date.now()}={}){this.fetcher=fetcher.bind(globalThis);this.now=now;this.matches=new Map();this.resolved=new Map();this.catalogs=new Map();this.generation=0;this.status='';this.enabled=true;this.pending=false;this.resolving=new Map();}
  cancel(){this.generation++;this.pending=false;this.matches.clear();}
- playable(url){try{url=safeVideo(url);}catch{return null;}if(!url)return null;if(!needsPlayerResolution(url))return ntvEmbedURL(url)||url;return this.resolved.get(url)?.url||null;}
- options(game){return this.matches.get(String(game.id))?.options||[];}
+ playable(url){try{url=safeVideo(url);}catch{return null;}if(!url)return null;return this.resolved.get(url)?.url||(!needsPlayerResolution(url)||streamcornerURL(url)&&/^\/embed(?:\/|$)/.test(new URL(url).pathname)?ntvEmbedURL(url)||url:null);}
+ options(game){return this.orderedOptions(this.matches.get(String(game.id)));}
+ orderedOptions(match){
+  const rank=option=>{const url=this.playable(option.url);return option.provider==='StreamCorner'&&url&&!['embed/page','provider/ok'].includes(streamType(url))?0:option.provider==='NTV'?1:2;};
+  return [...(match?.options||[])].sort((a,b)=>rank(a)-rank(b));
+ }
  urls(game,manual=[],preference='custom'){
   const match=this.enabled?this.matches.get(String(game.id)):null;
-  const auto=preference==='NTV'||preference==='StreamCorner'?(match?.options||[]).filter(x=>x.provider===preference).map(x=>x.url):match?.sources||[];
+  const options=this.orderedOptions(match);
+  // A StreamCorner webpage/opaque iframe cannot promise click-free playback.
+  // In Auto, promote only direct video; explicit provider/custom choices remain available.
+  const auto=preference==='NTV'||preference==='StreamCorner'?options.filter(x=>x.provider===preference).map(x=>x.url):options.filter(x=>x.provider!=='StreamCorner'||this.playable(x.url)&&!['embed/page','provider/ok'].includes(streamType(this.playable(x.url)))).map(x=>x.url);
   const chosen=preference!=='custom'?auto:manual[0]&&manual[1]?manual:[manual[0],manual[1],...auto];
   // Don't silently promote an automatic source while the custom primary is being inspected.
   if(preference==='custom'&&manual[0]&&!this.playable(manual[0]))return [];

@@ -56,7 +56,7 @@ export class PlayerPool{
   if(p.kind==='native'&&key!==this.visible&&drift>AHEAD){p.pause();return;}
   if(play&&!p.wantPlay)p.play();else if(!play&&p.wantPlay)p.pause();
  }
- ready(key,target,tolerance=TOLERANCE){const p=this.slots.get(key)?.player;return !!p&&(p.kind==='embed'?p.readyToShow:target===null||target===undefined?p.progressing:p.near(target,tolerance));}
+ ready(key,target,tolerance=TOLERANCE){const p=this.slots.get(key)?.player;return !!p&&(p.kind==='embed'?p.readyToShow:target===null||target===undefined?p.kind==='native'?p.readyToShow:p.progressing:p.near(target,tolerance));}
  show(key){
   const slot=this.slots.get(key);if(!slot)return false;
   if(this.visible&&this.visible!==key)this.onBeforeLeave(this.visible);
