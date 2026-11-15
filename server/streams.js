@@ -1,22 +1,41 @@
 import {publicPlayerURL,embeddedPlayerFromHTML,decodeEmbedHTML} from '../web/stream-html.js';
+import {STREAMCORNER_ORIGIN,streamcornerURL} from '../web/stream-policy.js';
 export {publicPlayerURL,embeddedPlayerFromHTML} from '../web/stream-html.js';
 // Public provider metadata only. No ESPN credentials, video proxying, or arbitrary upstream fetches.
-const STREAM_HOSTS=new Set(['ntv.st','streamcorner.st']);
+const STREAM_HOSTS=new Set(['ntv.st','streamcorner.st','streamcorner.cloud']);
+// Only observed provider wrappers are inspected. Never execute provider code
+// or proxy media bytes; arbitrary iframe destinations are not fetched.
+const PLAYER_HOSTS=new Set([...STREAM_HOSTS,'taifood-blog.asia']);
 const STREAM_SERVERS=new Set(['raptor','falcon','phoenix','titan']);
 const streamCache=new Map(),streamPending=new Map();
 const streamJSON=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
-async function providerText(url,fetcher){
+async function providerDocument(url,fetcher,hosts=STREAM_HOSTS,timeout=8000,maxBytes=600000){
+ const signal=AbortSignal.timeout(timeout);
  // Following a provider redirect must never turn this into an open URL proxy.
  for(let hop=0;hop<3;hop++){
-  const u=new URL(url);if(!STREAM_HOSTS.has(u.hostname)||u.protocol!=='https:'||u.port&&u.port!=='443')throw new Error('Unsupported provider redirect.');
-  const response=await fetcher(u.href,{redirect:'manual',signal:AbortSignal.timeout(8000),headers:{Accept:'application/json, text/html'}});
-  if(response.status>=300&&response.status<400){const next=new URL(response.headers.get('Location')||'',u);if(next.hostname!==u.hostname)throw new Error('Provider moved to another site.');url=next.href;continue;}
+  const u=new URL(url);if(!hosts.has(u.hostname)||u.protocol!=='https:'||u.username||u.password||u.port&&u.port!=='443')throw new Error('Unsupported provider redirect.');
+  const response=await fetcher(u.href,{redirect:'manual',signal,headers:{Accept:'application/json, text/html'}});
+  if(response.status>=300&&response.status<400){const next=new URL(response.headers.get('Location')||'',u);if(next.hostname!==u.hostname&&!(streamcornerURL(u.href)&&streamcornerURL(next.href)))throw new Error('Provider moved to another site.');url=next.href;continue;}
   if(!response.ok)throw new Error('Provider unavailable ('+response.status+').');
-  if(Number(response.headers.get('Content-Length'))>600000)throw new Error('Provider response too large.');
-  const reader=response.body.getReader(),parts=[];let size=0;try{for(;;){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>600000)throw new Error('Provider response too large.');parts.push(value);}}finally{await reader.cancel().catch(()=>{});}
-  const bytes=new Uint8Array(size);let offset=0;for(const part of parts){bytes.set(part,offset);offset+=part.length;}return new TextDecoder().decode(bytes);
+  if(Number(response.headers.get('Content-Length'))>maxBytes)throw new Error('Provider response too large.');
+  const reader=response.body.getReader(),parts=[];let size=0;try{for(;;){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>maxBytes)throw new Error('Provider response too large.');parts.push(value);}}finally{await reader.cancel().catch(()=>{});}
+  const bytes=new Uint8Array(size);let offset=0;for(const part of parts){bytes.set(part,offset);offset+=part.length;}return {text:new TextDecoder().decode(bytes),url:u.href};
  }
  throw new Error('Too many provider redirects.');
+}
+async function providerText(...args){return (await providerDocument(...args)).text;}
+const isDirectStream=url=>/\.(?:m3u8|mp4|webm|mov)(?:[?#]|$)/i.test(url);
+export async function publishedVideo(embed,fetcher=fetch){
+ let next=embed;const visited=new Set();
+ for(let hop=0;hop<3;hop++){
+  if(isDirectStream(next))return next;
+  if(visited.has(next)||!PLAYER_HOSTS.has(new URL(next).hostname))break;
+  visited.add(next);
+  // Published NTV wrappers exceed the catalog's 600 KB budget. Bound player
+  // markup separately so those pages can still expose their media source.
+  try{const doc=await providerDocument(next,fetcher,PLAYER_HOSTS,2500,1000000);next=embeddedPlayerFromHTML(doc.text,doc.url);if(!next)break;}catch{break;}
+ }
+ return null;
 }
 async function cachedStream(key,fetcher,loader){
  if(fetcher!==fetch)return loader();const now=Date.now(),hit=streamCache.get(key);if(hit&&hit.until>now)return hit.value;if(streamPending.has(key))return streamPending.get(key);
@@ -37,10 +56,10 @@ export async function streamsCatalogAPI(request,fetcher=fetch){
  if(request.method!=='GET')return streamJSON({error:'Use GET.'},405);const sport=new URL(request.url).searchParams.get('sport');if(!['nfl','nba','nhl','mlb'].includes(sport))return streamJSON({error:'Choose a supported sport.'},400);
  const results=await Promise.allSettled([
   cachedStream('ntv-catalog',fetcher,async()=>{const raw=JSON.parse(await providerText('https://ntv.st/api/get-matches?server=raptor&type=both',fetcher));if(!raw.success)throw new Error('Catalog unavailable.');return ntvCatalog(raw);}),
-  cachedStream('streamcorner-catalog',fetcher,async()=>streamcornerCatalog(await providerText('https://streamcorner.st/',fetcher)))
+  cachedStream('streamcorner-catalog',fetcher,async()=>{const doc=await providerDocument(STREAMCORNER_ORIGIN+'/',fetcher),entries=streamcornerCatalog(doc.text,doc.url);if(!entries.length)throw Object.assign(new Error('No published schedule found.'),{code:'no_published_schedule'});return entries;})
  ]);
  const entries=results.flatMap(r=>r.status==='fulfilled'?r.value:[]).filter(e=>e.sport===sport);
- const providers=results.map((r,i)=>({name:i?'StreamCorner':'NTV',available:r.status==='fulfilled',count:r.status==='fulfilled'?r.value.filter(e=>e.sport===sport).length:0}));
+ const providers=results.map((r,i)=>({name:i?'StreamCorner':'NTV',available:r.status==='fulfilled',count:r.status==='fulfilled'?r.value.filter(e=>e.sport===sport).length:0,...(r.status==='rejected'?{reason:r.reason?.code==='no_published_schedule'?'no_published_schedule':'provider_unavailable'}:{})}));
  return streamJSON({sport,entries,providers,fetchedAt:Date.now(),...(results.every(r=>r.status==='rejected')?{error:'Automatic stream lookup is unavailable. Your saved links still work.'}:{})},results.every(r=>r.status==='rejected')?502:200);
 }
 export async function streamsResolveAPI(request,fetcher=fetch){
@@ -53,19 +72,21 @@ export async function streamsResolveAPI(request,fetcher=fetch){
    const raw=JSON.parse(await providerText('https://ntv.st/api/get-watch-streams?'+new URLSearchParams({server:match[1],match:match[2],source:String(index)}),fetcher));
    const embed=raw.success&&raw.embedUrl&&publicPlayerURL(raw.embedUrl,'https://ntv.st');if(!embed||new URL(embed).hostname!=='ntv.st'||new URL(embed).pathname!=='/embed'||!new URL(embed).searchParams.get('t'))throw new Error('Player not published.');return embed;
   }
-  const embed=embeddedPlayerFromHTML(await providerText(page.href,fetcher),page.href);if(!embed)throw new Error('No unambiguous published player.');return embed;
- });return streamJSON({url,page:page.href,provider:page.hostname==='ntv.st'?'NTV':'StreamCorner',resolvedAt:Date.now()});}
+  const doc=await providerDocument(page.href,fetcher),embed=embeddedPlayerFromHTML(doc.text,doc.url);if(!embed)throw new Error('No unambiguous published player.');return embed;
+ });
+ const direct=await cachedStream('native:'+url,fetcher,()=>publishedVideo(url,fetcher));
+ return streamJSON({url:direct||url,page:page.href,provider:page.hostname==='ntv.st'?'NTV':'StreamCorner',playback:direct?'native':'embed',...(direct?{embed:url}:{}),resolvedAt:Date.now()});}
  catch{return streamJSON({error:'The provider did not expose an accessible player. Paste its iframe embed code or direct player URL instead.',page:page.href},502);}
 }
 
 // Read only explicitly published event URLs and times. Never invent game slugs.
-export function streamcornerCatalog(html){
+export function streamcornerCatalog(html,base=STREAMCORNER_ORIGIN){
  const entries=[],seen=new Set();
  const add=item=>{
   const sport=String(item.sport||item.tournament||item.competition?.name||'').match(/\b(NFL|NBA|NHL|MLB)\b/i)?.[1]?.toLowerCase();
-  const title=String(item.name||item.title||''),url=publicPlayerURL(item.url,'https://streamcorner.st');
+  const title=String(item.name||item.title||''),url=publicPlayerURL(item.url,base);
   const raw=item.startDate??item.start??item.date,start=typeof raw==='number'?(raw<1e12?raw*1000:raw):Date.parse(raw);
-  if(!sport||!title||!Number.isFinite(start)||!url||new URL(url).hostname!=='streamcorner.st'||new URL(url).pathname==='/'||seen.has(url))return;
+  if(!sport||!title||!Number.isFinite(start)||!url||!streamcornerURL(url)||new URL(url).pathname==='/'||seen.has(url))return;
   seen.add(url);entries.push({id:url,provider:'StreamCorner',sport,title:title.slice(0,200),start,sources:[url]});
  };
  const visit=(value,depth=0)=>{if(depth>12||!value||typeof value!=='object')return;if(Array.isArray(value)){for(const v of value.slice(0,500))visit(v,depth+1);return;}if(value['@type']==='SportsEvent'||value.startDate||value.start&&value.url)add(value);for(const key of ['@graph','itemListElement','item','events','matches','props','pageProps','data'])if(value[key])visit(value[key],depth+1);};

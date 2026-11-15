@@ -22,6 +22,16 @@
   const sendState=()=>{if(state)for(const f of frames())f.contentWindow?.postMessage({channel:CHANNEL,type:'state',...state},'*');};
   const pageState=()=>window.dispatchEvent(new CustomEvent('fantasy-stream-media-state',{detail:JSON.stringify(state||{playing:false,visible:false,muted:true,captions:false})}));
   const buffer=video=>{try{for(let i=0;i<video.buffered.length;i++)if(video.buffered.start(i)<=video.currentTime+.05&&video.buffered.end(i)>video.currentTime)return video.buffered.end(i)-video.currentTime;}catch{}return 0;};
+  // Provider players keep their own caption choice (JW Player saves it per site)
+  // and draw captions in their own layer, so disabling the video's text tracks
+  // alone can leave them on screen. Once Fantasy Stream is driving this frame,
+  // save "Off" for JW and hide the players' caption layers.
+  let captionGuard=false;
+  function quietCaptions(){
+   if(captionGuard)return;captionGuard=true;
+   try{localStorage.setItem('jwplayer.captionLabel','Off');}catch{}
+   try{const style=document.createElement('style');style.id='fantasy-stream-no-captions';style.textContent='.jw-captions,.jw-text-track-container{display:none!important}video::-webkit-media-text-track-container{display:none!important}video::cue{color:transparent!important;background:transparent!important}';(document.head||document.documentElement)?.appendChild(style);}catch{}
+  }
   function captionsOff(video){for(const track of video.textTracks||[])if(['subtitles','captions'].includes(track.kind)&&track.mode!=='disabled')track.mode='disabled';}
   function guard(video){
    captionsOff(video);if(!state||!state.visible||state.muted||!state.playing)video.muted=true;
@@ -83,7 +93,7 @@
    if(event.source===window.parent&&d.type==='state'&&typeof d.session==='string'&&typeof d.playing==='boolean'&&typeof d.muted==='boolean'){
     if(state?.session!==d.session){audioLocked=false;clicks=0;childStatus=null;childSeen=-Infinity;lastClick=-Infinity;lastPlay=-Infinity;}
     if(state?.muted!==d.muted||state?.audioRevision!==d.audioRevision)audioLocked=false;
-    lastState=Date.now();state={session:d.session,playing:d.playing,visible:d.visible!==false,muted:d.muted,captions:false,audioRevision:Number(d.audioRevision)||0};tick();return;
+    quietCaptions();lastState=Date.now();state={session:d.session,playing:d.playing,visible:d.visible!==false,muted:d.muted,captions:false,audioRevision:Number(d.audioRevision)||0};tick();return;
    }
    const children=frames(),child=children.find(f=>f.contentWindow===event.source);
    if(!child)return;

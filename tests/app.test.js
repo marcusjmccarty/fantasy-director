@@ -42,7 +42,7 @@ class Element{
  append(e){this.children.push(e);e.parentNode=this;}replaceWith(e){const parent=this.parentNode;if(parent){const i=parent.children.indexOf(this);parent.children[i]=e;e.parentNode=parent;this.parentNode=null;}this.removed=true;}replaceChildren(){this.children=[];}setAttribute(n,v){this[n]=v;}removeAttribute(n){delete this[n];}addEventListener(){}focus(){this.focused=true;}showModal(){this.open=true;}close(){this.open=false;}remove(){if(this.parentNode)this.parentNode.children=this.parentNode.children.filter(e=>e!==this);this.parentNode=null;this.removed=true;}
 }
 class Video extends Element{
- constructor(){super();this.events=new Map();this.paused=true;this.currentTime=0;this.duration=NaN;this.readyState=4;this.seeking=false;this.calls=[];}
+ constructor(){super();this.events=new Map();this.paused=true;this.currentTime=0;this.duration=NaN;this.readyState=4;this.buffered={length:1,start:()=>0,end:()=>this.currentTime+5};this.seeking=false;this.calls=[];}
  addEventListener(name,callback){this.events.set(name,callback);}emit(name){this.events.get(name)?.();}
  play(){this.calls.push('play');this.paused=false;return Promise.resolve();}pause(){this.calls.push('pause');this.paused=true;}load(){}
 }
@@ -57,6 +57,7 @@ class Media{
  constructor(source){this.source=source;this.kind='native';this.element=new Element();this.listeners=new Map();this.target=null;this.currentTime=0;this.primed=true;this.advances=2;this.wantPlay=false;this.moving=true;this.inAd=false;this.muted=true;}
  on(name,fn){this.listeners.set(name,fn);}emit(name,value){if(name==='ad')this.inAd=value;this.listeners.get(name)?.(value);}
  get progressing(){return this.wantPlay&&this.moving&&!this.inAd;}
+ get readyToShow(){return this.progressing;}
  play(){this.wantPlay=true;}pause(){this.wantPlay=false;}seek(at){this.currentTime=at;}near(at,tolerance=2.5){return this.progressing&&Math.abs(this.currentTime-at)<=tolerance;}
  destroy(){this.wantPlay=false;this.destroyed=true;}
 }
@@ -495,16 +496,16 @@ test('site recovery: a live ending can fall back from direct HLS to a page witho
 test('site recovery: a direct source that never starts keeps recovering instead of exhausting the pending load limit',async()=>{
  const a=app(undefined,{media:true,native:true});ready(a);a.saved.streams={'IND-MIN':'https://video.example/live.m3u8'};a.selectGame('A');const p=a.pool.get('A').player;await p.ready;
  for(let now=1000;now<=300000;now+=250){a.time.now=now;a.step(now);await p.ready;assert.equal(p.destroyed,false);assert.equal(a.S.pinned,'A');assert.equal(a.S.cooldown.size,0);}
- assert.equal(a.pool.visible,'A');assert.ok(p.recoveryAttempts>=6);assert.equal(a.S.playing,true);
+ assert.equal(a.pool.visible,null,'unready video stays hidden');assert.ok(p.recoveryAttempts>=6);assert.equal(a.S.playing,true);
 });
 test('site recovery: saving a backup does not reload the healthy primary and both links survive storage',async()=>{
  const a=embeddedGame(),p=a.pool.current;a.render();const fields=a.el('streamInputs').querySelectorAll('input'),backup=fields.find(i=>i.dataset.backup==='true');assert.ok(backup);
  backup.value='https://backup.example/watch';await a.el('saveStreams').onclick();assert.equal(a.pool.current,p);assert.equal(p.destroyed,false);assert.equal(a.saved.streamBackups['IND-MIN'],backup.value);assert.equal(a.saved.streams['IND-MIN'],p.url);
  const stored=JSON.parse(a.storage.get('fantasy-stream-v3'));assert.equal(stored.streamBackups['IND-MIN'],backup.value);assert.equal(a.el('nextStream').hidden,false);
 });
-test('site recovery: a long sleep during initial direct loading still reveals the player for interaction',async()=>{
+test('site recovery: a long sleep never reveals an unbuffered direct player',async()=>{
  const a=app(undefined,{media:true,native:true});ready(a);a.saved.streams={'IND-MIN':'https://video.example/live.m3u8'};a.selectGame('A');const p=a.pool.get('A').player;await p.ready;
- a.time.now=61000;a.step(a.time.now);assert.equal(a.pool.current,p);assert.equal(a.pool.visible,'A');assert.equal(a.S.program.kind,'game');assert.equal(a.S.pinned,'A');assert.equal(a.S.cooldown.size,0);
+ a.time.now=61000;a.step(a.time.now);assert.equal(a.pool.current,null);assert.equal(a.pool.visible,null);assert.equal(a.pool.get('A').player,p);assert.equal(a.S.pending.id,'A');assert.equal(a.S.pinned,'A');assert.equal(a.S.cooldown.size,0);
 });
 test('site recovery: a failed homepage extraction preserves the explicit URL as a page fallback',async()=>{
  const a=embeddedGame(),field=a.el('streamInputs').querySelectorAll('input').find(i=>!i.dataset.backup);field.value='https://streamcorner.st/';await a.el('saveStreams').onclick();
@@ -1104,6 +1105,20 @@ test('score center: a slow fantasy refresh cannot reload video or replace the vi
  assert.equal(a.el('fantasyTotal').textContent,'22.34');assert.match(a.el('fantasyPlayers').innerHTML,/Jonathan Taylor/);assert.equal(a.saved.roster[0].name,'Jonathan Taylor');assert.equal(a.pool.current,video);assert.equal(video.destroyed,undefined);
 });
 
+test('a failed score refresh after good scores stays quiet: no banner or button, a faint stale mark on the week',async()=>{
+ let fail=false;
+ const a=app(async()=>fail?new Response('<html>Bad gateway</html>',{status:502}):Response.json({leagueId:'123',teams:[{id:'1',players:[{name:'Other player'}]}],scoring:{week:8,teams:[{id:'1',points:22.34,complete:true,players:[{...player,points:22.34}]}]}}),{scores:true});
+ ready(a);a.saved.leagueId='123';a.saved.teamId='1';a.render();await flush();a.render();
+ assert.equal(a.el('fantasyTotal').textContent,'22.34');assert.equal(a.el('scoreboardMeta').dataset.stale,'false');
+ fail=true;a.el('retryFantasy').onclick();await flush();a.render();
+ assert.equal(a.el('fantasyTotal').textContent,'22.34');assert.equal(a.el('fantasyStatus').hidden,true);assert.equal(a.el('retryFantasy').hidden,true);
+ assert.equal(a.el('scoreboardMeta').dataset.stale,'true');assert.match(a.el('scoreboardMeta').title,/Last update .* retrying/);
+ fail=false;a.el('retryFantasy').onclick();await flush();a.render();assert.equal(a.el('scoreboardMeta').dataset.stale,'false');
+});
+test('the channel row shows problems, not the routine stream delay',()=>{
+ const a=app();ready(a);a.render();assert.equal(a.el('pictureNote').textContent,'');
+});
+
 test('matchup picker changes followed roster and opponent while rejecting an obsolete import',async()=>{
  const pending=deferred(),a=app(()=>pending.promise);ready(a);
  const other={name:'Justin Jefferson',team:'MIN',position:'WR'};
@@ -1139,14 +1154,14 @@ test('manual choice remains authoritative in RedZone mode until its natural brea
 
 test('fantasy connection: the team selector stays visible and ESPN setup is directly reachable',()=>{
  const a=app();a.render();assert.equal(a.el('scoreTeamPicker').hidden,false);assert.equal(a.el('scoreTeam').disabled,true);
- a.el('lineupButton').onclick();assert.equal(a.el('lineupDialog').open,true);assert.equal(a.el('leagueImport').open,true);assert.equal(a.el('lineupDialog').dataset.connected,'false');
+ a.el('lineupButton').onclick();assert.equal(a.el('lineupDialog').open,true);assert.equal(a.el('lineupDialog').dataset.connected,'false');
 });
 test('fantasy connection: saved players remain visible during loading and an expired-login response',async()=>{
  const pending=deferred(),a=app(()=>pending.promise,{scores:true});ready(a);a.saved.leagueId='123';a.saved.teamId='1';a.render();
  assert.equal(a.el('fantasyTable').hidden,false);assert.match(a.el('fantasyPlayers').innerHTML,/Jonathan Taylor/);assert.equal(a.el('fantasyTotal').textContent,'—');
  pending.resolve(Response.json({error:'Copy fresh ESPN cookies.',code:'ESPN_DENIED'},{status:401}));await flush();a.render();
  assert.match(a.el('fantasyPlayers').innerHTML,/Jonathan Taylor/);assert.match(a.el('fantasyStatus').textContent,/Reconnect ESPN/);assert.equal(a.el('retryFantasy').hidden,false);
- a.el('retryFantasy').onclick();assert.equal(a.el('lineupDialog').open,true);assert.equal(a.el('leagueImport').open,true);assert.equal(a.el('espnSwid').focused,true);
+ a.el('retryFantasy').onclick();assert.equal(a.el('lineupDialog').open,true);assert.equal(a.el('espnSwid').focused,true);
 });
 test('fantasy connection: a league without a selected team can fetch franchises and load a matchup',async()=>{
  let calls=0;const other={name:'Justin Jefferson',team:'MIN',position:'WR'};
@@ -1168,9 +1183,9 @@ test('fantasy connection: a successful import displays players and points withou
 });
 test('embed fallback: opening the original page follows the selected source and hides for native video',async()=>{
  const a=app(undefined,{media:true,embeds:true});ready(a);a.saved.streams={'IND-MIN':'https://example.test/watch/primary'};a.saved.streamBackups={'IND-MIN':'https://example.test/watch/backup'};await Promise.all([...Object.values(a.saved.streams),...Object.values(a.saved.streamBackups)].map(u=>a.streamFinder.resolve(u)));a.selectGame('A');a.render();
- assert.equal(a.el('openStream').hidden,false);assert.equal(a.el('openStream').href,'https://example.test/watch/primary');assert.equal(a.el('embedHelp').hidden,false);
+ assert.equal(a.el('openStream').hidden,false);assert.equal(a.el('openStream').href,'https://example.test/watch/primary');
  a.el('nextStream').onclick();a.render();assert.equal(a.el('openStream').href,'https://example.test/watch/backup');
- a.pool.destroy();a.saved.streams={'IND-MIN':'https://example.test/live.mp4'};a.saved.streamBackups={};a.selectGame('A');a.render();assert.equal(a.el('openStream').hidden,true);assert.equal(a.el('embedHelp').hidden,true);
+ a.pool.destroy();a.saved.streams={'IND-MIN':'https://example.test/live.mp4'};a.saved.streamBackups={};a.selectGame('A');a.render();assert.equal(a.el('openStream').hidden,true);
 });
 
 function discoveryReady(a){ready(a);const g={...game,teams:game.teams.map((t,i)=>({...t,name:i?'Minnesota Vikings':'Indianapolis Colts'}))};a.S.games=[g];a.S.live.games=[g];a.S.live.feed=new live.LiveFeed();a.S.live.feed.push([g],970);a.saved.leagueId='123';a.saved.teamId='1';return g;}
@@ -1223,7 +1238,6 @@ test('Done in Streams leaves untouched games alone: no mode change, no saved bla
 test('Done in Fantasy team acts on a typed league ID instead of discarding it',()=>{
  let imported=0;const a=app(async()=>{imported++;return Response.json({error:'nope'},{status:400});});a.el('lineupButton').onclick();a.el('leagueId').value='123';a.el('saveRoster').onclick();assert.equal(imported,1);assert.equal(a.el('lineupDialog').open,true);
  a.el('leagueId').value='';a.el('saveRoster').onclick();assert.equal(a.el('lineupDialog').open,false);
- a.el('lineupButton').onclick();assert.equal(a.el('leagueImport').open,true);a.el('leagueAction').onclick();assert.equal(a.el('leagueImport').open,false);
 });
 
 // ---------- NFL replay: a game outside the calibrated week ----------
@@ -1886,10 +1900,9 @@ test('Disconnect forgets the login on every league page and in the lineup kept f
  assert.equal(JSON.parse(a.storage.get('fantasy-stream-v3')).espn.s2,'');
  pending.resolve(Response.json({leagueId:'123',name:'L',teams:[{id:'1',name:'T',players:[player]}]},{headers:{'Content-Type':'application/json'}}));await late;assert.equal(a.saved.leagueId,'','a late answer cannot re-save the league');
 });
-test('a private league opens the private step before asking for its fields, so focus never lands on a hidden input',async()=>{
- const a=app(async()=>Response.json({error:'That league is private. Follow the steps below to connect it.',code:'LEAGUE_PRIVATE'},{status:401}));a.el('privateLeague').open=false;a.el('leagueId').value='123';await a.importLeague();assert.equal(a.el('privateLeague').open,true);assert.match(a.el('leagueStatus').textContent,/private/);
- const b=app();b.el('lineupButton').onclick();assert.equal(b.el('privateLeague').open,false,'nobody with no league saved is shown the cookie steps');assert.equal(b.el('leagueImport').open,true);
- const c=app();c.saved.espn={swid:'{a}',s2:'b'};c.el('lineupButton').onclick();assert.equal(c.el('privateLeague').open,true,'saved values are shown so they can be changed');
+test('a private league puts the cursor in the SWID field, which is always visible',async()=>{
+ const a=app(async()=>Response.json({error:'That league is private. Paste your SWID and espn_s2, then connect again.',code:'LEAGUE_PRIVATE'},{status:401}));a.el('leagueId').value='123';await a.importLeague();assert.equal(a.el('espnSwid').focused,true);assert.match(a.el('leagueStatus').textContent,/private/);
+ const c=app();c.saved.espn={swid:'{a}',s2:'b'};c.el('lineupButton').onclick();assert.equal(c.el('espnSwid').value,'{a}','saved values are shown so they can be changed');assert.equal(c.el('espnS2').value,'b');
 });
 test('in a replay with no lineup the team is named as a sample, and a choice made there carries over to Live',async()=>{
  const a=app();sampleReady(a);a.saved.liveLineupMarker=1;await a.setMode('replay');a.render();assert.match(a.el('fantasyStatus').textContent,/sample team/);assert.equal(a.el('fantasyStatus').hidden,false);assert.equal(a.el('retryFantasy').hidden,false);assert.equal(a.el('retryFantasy').textContent,'Connect ESPN');assert.equal(a.el('youHeader').textContent,'Sample team');assert.equal(a.el('fantasyTitle').textContent,'Sample team');assert.doesNotMatch(a.el('ovText').textContent,/Sample lineup/);
