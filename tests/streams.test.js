@@ -25,6 +25,19 @@ test('catalog fetch is restricted to public NTV metadata and does not forward pr
 test('unsupported sports and methods never contact a provider',async()=>{
  const no=()=>{throw Error('unexpected fetch');};assert.equal((await streamsCatalogAPI(new Request('https://app.example/api/streams?sport=bad'),no)).status,400);assert.equal((await streamsCatalogAPI(new Request('https://app.example/api/streams?sport=nfl',{method:'POST'}),no)).status,405);assert.equal((await streamsResolveAPI(new Request('https://app.example/api/streams/resolve',{method:'POST'}),no)).status,405);
 });
+test('a StreamCorner app shell is reported as unavailable while NTV remains usable',async()=>{
+ const response=await streamsCatalogAPI(new Request('https://app.example/api/streams?sport=nfl'),async url=>url.includes('ntv.st')?Response.json(raw):new Response('<div id="root"></div><script type="module" src="/assets/app.js"></script>'));
+ const catalog=await response.json();assert.equal(response.status,200);assert.equal(catalog.entries.length,1);
+ assert.deepEqual(catalog.providers.find(p=>p.name==='StreamCorner'),{name:'StreamCorner',available:false,count:0,reason:'no_published_schedule'});
+ const finder=new StreamFinder({fetcher:async url=>url.startsWith('/api/streams?')?Response.json(catalog):Response.json({page:new URL(url,'https://app.example').searchParams.get('url'),url:embed})});
+ assert.equal(await finder.refresh([game],'nfl'),true);assert.deepEqual(finder.urls(game),[embed]);
+ assert.equal(finder.status,'StreamCorner automatic lookup is unavailable. NTV fallback found for 1 game.');
+});
+test('provider fallback status does not claim matches when none exist and respects disabled lookup',async()=>{
+ const finder=new StreamFinder({fetcher:async()=>Response.json({sport:'nfl',entries:[],providers:[{name:'StreamCorner',available:false,count:0}]})});
+ await finder.refresh([game],'nfl');assert.equal(finder.status,'StreamCorner automatic lookup is unavailable. No NTV fallback matches yet.');
+ finder.enabled=false;await finder.refresh([game],'nfl');assert.equal(finder.status,'Automatic lookup is off.');
+});
 test('NTV watch URLs resolve through its official API to the published embed',async()=>{
  const response=await streamsResolveAPI(request(page),async(url,options)=>{assert.equal(url,'https://ntv.st/api/get-watch-streams?server=raptor&match=game-1&source=0');assert.equal(options.redirect,'manual');return Response.json({success:true,embedUrl:'/embed?t=published'});});assert.equal(response.status,200);assert.equal((await response.json()).url,embed);
  assert.equal((await streamsResolveAPI(request(embed),()=>{throw Error('unnecessary fetch');})).status,200);

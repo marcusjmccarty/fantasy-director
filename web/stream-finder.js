@@ -90,6 +90,10 @@ export class StreamFinder{
    if(generation!==this.generation)return false;this.matches=next;
    const count=games.filter(g=>this.urls(g).length).length,fallback=manual.some(url=>this.resolved.get(url)?.kind==='page');
    this.status=this.enabled?(count?'Streams found for '+count+' game'+(count===1?'':'s')+'.':'No exact automatic matches yet.'):'Automatic lookup is off.';
+   if(this.enabled&&providers.some(p=>p?.name==='StreamCorner'&&p.available===false)){
+    const ntvCount=games.filter(g=>this.urls(g,[],'NTV').length).length;
+    this.status='StreamCorner automatic lookup is unavailable. '+(ntvCount?'NTV fallback found for '+ntvCount+' game'+(ntvCount===1?'':'s')+'.':'No NTV fallback matches yet.');
+   }
    if(fallback)this.status+=' A custom link uses its webpage because no accessible player was found.';
    return true;
   }catch{if(generation===this.generation)this.status='Automatic stream lookup is unavailable. Retrying; your links are kept.';return false;}

@@ -56,10 +56,10 @@ export async function streamsCatalogAPI(request,fetcher=fetch){
  if(request.method!=='GET')return streamJSON({error:'Use GET.'},405);const sport=new URL(request.url).searchParams.get('sport');if(!['nfl','nba','nhl','mlb'].includes(sport))return streamJSON({error:'Choose a supported sport.'},400);
  const results=await Promise.allSettled([
   cachedStream('ntv-catalog',fetcher,async()=>{const raw=JSON.parse(await providerText('https://ntv.st/api/get-matches?server=raptor&type=both',fetcher));if(!raw.success)throw new Error('Catalog unavailable.');return ntvCatalog(raw);}),
-  cachedStream('streamcorner-catalog',fetcher,async()=>{const doc=await providerDocument(STREAMCORNER_ORIGIN+'/',fetcher);return streamcornerCatalog(doc.text,doc.url);})
+  cachedStream('streamcorner-catalog',fetcher,async()=>{const doc=await providerDocument(STREAMCORNER_ORIGIN+'/',fetcher),entries=streamcornerCatalog(doc.text,doc.url);if(!entries.length)throw Object.assign(new Error('No published schedule found.'),{code:'no_published_schedule'});return entries;})
  ]);
  const entries=results.flatMap(r=>r.status==='fulfilled'?r.value:[]).filter(e=>e.sport===sport);
- const providers=results.map((r,i)=>({name:i?'StreamCorner':'NTV',available:r.status==='fulfilled',count:r.status==='fulfilled'?r.value.filter(e=>e.sport===sport).length:0}));
+ const providers=results.map((r,i)=>({name:i?'StreamCorner':'NTV',available:r.status==='fulfilled',count:r.status==='fulfilled'?r.value.filter(e=>e.sport===sport).length:0,...(r.status==='rejected'?{reason:r.reason?.code==='no_published_schedule'?'no_published_schedule':'provider_unavailable'}:{})}));
  return streamJSON({sport,entries,providers,fetchedAt:Date.now(),...(results.every(r=>r.status==='rejected')?{error:'Automatic stream lookup is unavailable. Your saved links still work.'}:{})},results.every(r=>r.status==='rejected')?502:200);
 }
 export async function streamsResolveAPI(request,fetcher=fetch){
