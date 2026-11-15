@@ -75,8 +75,8 @@ export async function leagueAPI(request,env={},fetcher=fetch){
  const signedIn=!!(own||useSaved);
  // Workers throws synchronously for redirect:'error'. Manual also prevents cookie forwarding.
  try{const response=await fetcher(`https://lm-api-reads.fantasy.espn.com/apis/v3/games/ffl/seasons/${year}/segments/0/leagues/${id}?view=mRoster&view=mTeam&view=mSettings&view=mLiveScoring&view=mMatchup&view=mMatchupScore${week===null?'':'&scoringPeriodId='+week}`,{headers,redirect:'manual',signal:AbortSignal.timeout(12000)});
- if(response.status>=300&&response.status<400)return json({error:'ESPN wouldn’t open your league. Your private league steps may need copying again.',code:'ESPN_REDIRECT'},502);
- if([401,403,404].includes(response.status))return json({error:response.status===404?'ESPN has no league with that ID for this season.':signedIn?'ESPN wouldn’t open this league with those values. Copy them again from a browser where you’re signed in to ESPN.':'That league is private. Follow the steps below to connect it.',code:signedIn?'ESPN_DENIED':'LEAGUE_PRIVATE'},response.status===404?404:401);
+ if(response.status>=300&&response.status<400)return json({error:'ESPN wouldn’t open your league. Copy your SWID and espn_s2 again.',code:'ESPN_REDIRECT'},502);
+ if([401,403,404].includes(response.status))return json({error:response.status===404?'ESPN has no league with that ID for this season.':signedIn?'ESPN wouldn’t open this league with those values. Copy them again from a browser where you’re signed in to ESPN.':'That league is private. Paste your SWID and espn_s2, then connect again.',code:signedIn?'ESPN_DENIED':'LEAGUE_PRIVATE'},response.status===404?404:401);
  if(!response.ok)return json({error:'ESPN is temporarily unavailable. Please try again.'},502);
  const raw=await response.json();if(!raw.teams?.length)return json({error:signedIn?'ESPN did not return your roster. The cookies may have expired.':'ESPN did not return this league. Check the ID and league visibility.'},422);
  return json({...normalizedLeague(raw,own?own.swid:useSaved?env.ESPN_SWID:''),scoring:fantasyScores(raw),leagueId:id,season:year});

@@ -28,7 +28,7 @@ test('sports UI requests its selected sport and renders scores and game links',a
 test('sports UI distinguishes a failed feed from a genuinely empty day',async()=>{const a=app(async()=>Response.json({error:'Unavailable'},{status:502}));await a.loadGames();assert.match(a.el('games').innerHTML,/unavailable/);assert.doesNotMatch(a.el('games').innerHTML,/No NBA games scheduled/);assert.equal(a.el('ovTitle').textContent,'Game updates are unavailable.');const b=app(async url=>Response.json({...games('nba',/date=([\d-]+)/.exec(url)[1]),events:[]}));await b.loadGames();assert.match(b.el('games').innerHTML,/No NBA games in the next week/);});
 test('a late day response cannot overwrite the newly selected schedule',async()=>{const pending=deferred();let count=0;const a=app(async()=>++count===1?pending.promise:Response.json(games('nba','2026-11-02')));const old=a.loadGames();a.changeDate('2026-11-02');await new Promise(r=>setTimeout(r,0));pending.resolve(Response.json(games('nba','2026-11-01')));await old;await new Promise(r=>setTimeout(r,5));assert.equal(a.S.date,'2026-11-02');assert.equal(a.S.games.length,1);assert.equal(a.S.gameGeneration,2);});
 test('fantasy requests and team changes cannot reload the playing source',async()=>{const a=app(async url=>Response.json(url.startsWith('/api/sports?')?games():league()));await ready(a);const p=a.pool.current;await a.loadLeague(input);assert.equal(a.pool.current,p);assert.match(a.el('fantasyPlayers').innerHTML,/Starter one/);assert.equal(a.el('fantasyTotal').textContent,'50.00');assert.equal(a.el('opponentTotal').textContent,'60.00');assert.equal(a.el('matchupStatus').textContent,'Behind by 10.00');a.el('scoreTeam').onchange({target:{value:'2'}});assert.equal(a.saved.teamId,'2');assert.equal(a.el('fantasyTitle').textContent,'Other team');assert.match(a.el('fantasyPlayers').innerHTML,/Starter two/);assert.equal(a.pool.current,p);assert.equal(a.pool.opened,1);});
-test('a failed refresh keeps the last fantasy data and labels its stale state',async()=>{let fail=false;const a=app(async()=>fail?Response.json({error:'Reconnect ESPN'},{status:401}):Response.json(league()));await a.loadLeague(input);fail=true;await a.loadLeague();assert.match(a.el('fantasyPlayers').innerHTML,/Starter one/);assert.match(a.el('fantasyStatus').textContent,/Last good update.*Reconnect ESPN/);assert.equal(a.el('retryFantasy').hidden,false);assert.equal(a.el('leagueImport').open,true);});
+test('a failed refresh keeps the last fantasy data and labels its stale state',async()=>{let fail=false;const a=app(async()=>fail?Response.json({error:'Reconnect ESPN'},{status:401}):Response.json(league()));await a.loadLeague(input);fail=true;await a.loadLeague();assert.match(a.el('fantasyPlayers').innerHTML,/Starter one/);assert.match(a.el('fantasyStatus').textContent,/Last good update.*Reconnect ESPN/);assert.equal(a.el('retryFantasy').hidden,false);});
 test('the newest explicit fantasy import wins and old responses cannot change the league',async()=>{const pending=deferred();let count=0;const a=app(async()=>++count===1?pending.promise:Response.json(league('456')));const old=a.loadLeague(input);await a.loadLeague({...input,leagueId:'456'});pending.resolve(Response.json(league()));await old;assert.equal(a.saved.leagueId,'456');assert.equal(a.S.league.leagueId,'456');});
 test('Pause stops source rotation and automatic viewing while retaining fullscreen',async()=>{const a=app(async()=>Response.json(games()));await ready(a);a.stage.classList.add('theater');a.setPlaying(false);a.rotateSource('1',true);a.direct();assert.equal(a.pool.opened,1);assert.equal(a.pool.current.wantPlay,false);assert.equal(a.stage.classList.contains('theater'),true);a.setPlaying(true);a.rotateSource('1',true);assert.equal(a.pool.opened,2);assert.equal(a.el('openStream').href,'https://example.test/embed/backup');});
 test('media errors leave retry timing to the proven adapter instead of reloading immediately',async()=>{const a=app(async()=>Response.json(games()));await ready(a);const p=a.pool.current;a.pool.options.onError('1',new Error('failed'));assert.equal(p.reloads,0);assert.equal(a.pool.current,p);});
@@ -50,11 +50,11 @@ test('every sport renders tiles with team colors, logos and a stream chip',async
   assert.match(html,/--away:#e03a3e/);assert.match(html,new RegExp('teamlogos/'+sport+'/500/atl.png'));assert.match(html,/>Hawks</);assert.match(html,/data-add-stream="1"/);assert.match(html,/TNT/);
   assert.equal(a.el('dayLabel').textContent,'');}
 });
-test('the matchup rail fills from ESPN, lists the bench under the starters and labels the header score',async()=>{
+test('the matchup rail fills from ESPN, lists the bench under the starters and keeps the score out of the header',async()=>{
  const data=league();data.teams[0].players.push({id:'3',name:'Bench guy',team:'NYK',teamId:'18',active:false,slot:'BE',position:'C',points:4});
  const a=app(async url=>Response.json(url.startsWith('/api/sports?')?games():data));await a.loadGames();a.renderFantasy();assert.equal(a.el('scoreboard').dataset.connect,'true');
  await a.loadLeague(input);assert.equal(a.el('scoreboard').dataset.connect,'false');assert.equal(a.el('scoreboard').dataset.state,'behind');assert.match(a.el('fantasyPlayers').innerHTML,/Starter one/);assert.doesNotMatch(a.el('fantasyPlayers').innerHTML,/Bench guy/);assert.match(a.el('fantasyBench').innerHTML,/Bench guy/);assert.match(a.el('fantasyBench').innerHTML,/4\.00/);assert.equal(a.el('benchTable').hidden,false);assert.equal(a.el('fantasyStatus').hidden,true);
- assert.equal(a.el('headerScore').hidden,false);assert.match(a.el('headerScore').innerHTML,/<b>50<\/b>.*<b>60<\/b>/);assert.match(a.el('fantasyPlayers').innerHTML,/player-live-dot/);
+ assert.equal(a.el('fantasyTotal').textContent,'50.00');assert.equal(a.el('opponentTotal').textContent,'60.00');assert.match(a.el('fantasyPlayers').innerHTML,/player-live-dot/);
 });
 test('the league form accepts a pasted league link and Done closes without reloading',async()=>{
  let calls=0;const a=app(async url=>{if(!url.startsWith('/api/sports?'))calls++;return Response.json(url.startsWith('/api/sports?')?games():league());});
@@ -463,10 +463,9 @@ test('Disconnect forgets the login on every league page, stops the timer, and a 
  const nfl=JSON.parse(a.storage.get('fantasy-stream-v3'));assert.deepEqual(nfl.espn,{swid:'',s2:''});assert.equal(nfl.leagueId,'');assert.equal(nfl.league,null);assert.equal(nfl.chatName,'Sam');assert.equal(JSON.parse(a.storage.get('fantasy-stream-nhl-v1')).s2,'');
  const timers=a.timers.size;pending.resolve(Response.json(league()));await late;assert.equal(a.saved.leagueId,'','the late answer is dropped');assert.equal(a.timers.size,timers,'and asks for nothing more');
 });
-test('a private league opens the private step before focusing inside it',async()=>{
- const a=app(async url=>url.startsWith('/api/sports?')?Response.json(games()):Response.json({error:'That league is private. Follow the steps below to connect it.'},{status:401}));a.el('privateLeague').open=false;await a.loadLeague(input);assert.equal(a.el('privateLeague').open,true);assert.match(a.el('leagueError').textContent,/private/);
- const b=app(async()=>Response.json(games()));b.el('fantasyTeamButton').onclick();assert.equal(b.el('privateLeague').open,false,'nobody without a saved login is shown the cookie steps');
- const c=app(async()=>Response.json(games()),{stored:{'fantasy-stream-nba-v1':JSON.stringify({swid:'{a}',s2:'b'})}});c.el('fantasyTeamButton').onclick();assert.equal(c.el('privateLeague').open,true);
+test('a private league explains which fields to fill',async()=>{
+ const a=app(async url=>url.startsWith('/api/sports?')?Response.json(games()):Response.json({error:'That league is private. Paste your SWID and espn_s2, then connect again.'},{status:401}));await a.loadLeague(input);assert.match(a.el('leagueError').textContent,/private/);
+ const c=app(async()=>Response.json(games()),{stored:{'fantasy-stream-nba-v1':JSON.stringify({swid:'{a}',s2:'b'})}});c.el('fantasyTeamButton').onclick();assert.equal(c.el('swid').value,'{a}','saved values are shown so they can be changed');assert.equal(c.el('s2').value,'b');
 });
 test('polls stay silent for screen readers and a failure is said once',async()=>{
  let fail=false;const a=app(async()=>fail?Response.json({error:'x'},{status:502}):Response.json(games()));await a.loadGames();assert.equal(a.el('scheduleStatus').textContent,'');
@@ -514,4 +513,23 @@ test('sports switching retains the current game until the pending video is ready
  const old=a.pool.current;a.pool.open('2',{url:'https://example.test/second.m3u8'});const next=a.pool.get('2').player;next.ready=false;a.selectGame('2');
  assert.equal(a.pool.current,old);assert.equal(a.S.current,'1');assert.equal(a.S.pending.id,'2');a.setPlaying(false);next.ready=true;a.direct();assert.equal(a.pool.current,old);
  a.setPlaying(true);a.direct();assert.equal(a.pool.current,next);assert.equal(a.S.current,'2');assert.equal(a.S.pending,null);
+});
+
+test('pending native startup falls back to its trusted embed without replacing healthy outgoing footage',async()=>{
+ const page='https://ntv.st/watch/raptor/game-2',embed='https://ntv.st/embed?t=game-2',direct='https://cdn.example/game-2.m3u8';
+ const a=app(async url=>url.includes('/resolve?')?Response.json({page,url:direct,playback:'native',embed}):Response.json({...games(),events:[event('1'),event('2')]}));
+ await ready(a);const old=a.pool.current;a.saved.streams['nba:2']={primary:page};await a.streamFinder.resolve(page);
+ const open=a.pool.open.bind(a.pool);a.pool.open=(id,source)=>{open(id,source);if(id==='2')Object.assign(a.pool.get(id).player,{ready:false,canPreload:true});};
+ a.selectGame('2',{manual:true});const failed=a.pool.get('2').player;
+ failed.checkHealth=()=>{failed.ready=true;a.pool.options.onReconnect('2',{failover:true});};a.direct();
+ assert.equal(a.pool.get('2').url,embed);assert.equal(a.pool.current,old);assert.equal(a.S.current,'1');assert.equal(a.S.pending.manual,true);
+ const next=a.pool.get('2').player;a.setPlaying(false);next.ready=true;a.direct();assert.equal(a.pool.current,old);
+ a.setPlaying(true);a.direct();assert.equal(a.pool.current,next);assert.equal(a.S.current,'2');assert.equal(a.S.manual,true);assert.equal(a.S.pending,null);
+});
+test('initial native startup can use a backup before any game is current',async()=>{
+ const a=app(async()=>Response.json(games()));await a.loadGames();a.saved.streams['nba:1']={primary:'https://cdn.example/first.m3u8',backup:'https://cdn.example/backup.m3u8'};
+ const open=a.pool.open.bind(a.pool);a.pool.open=(id,source)=>{open(id,source);a.pool.get(id).player.ready=false;};
+ a.selectGame('1',{manual:false});assert.equal(a.S.current,null);a.pool.options.onReconnect('1',{failover:true});
+ assert.equal(a.pool.get('1').url,'https://cdn.example/backup.m3u8');assert.equal(a.S.pending.manual,false);assert.equal(a.pool.visible,null);
+ a.pool.get('1').player.ready=true;a.direct();assert.equal(a.S.current,'1');assert.equal(a.S.manual,false);
 });

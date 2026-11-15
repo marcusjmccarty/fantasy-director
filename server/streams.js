@@ -3,35 +3,39 @@ import {STREAMCORNER_ORIGIN,streamcornerURL} from '../web/stream-policy.js';
 export {publicPlayerURL,embeddedPlayerFromHTML} from '../web/stream-html.js';
 // Public provider metadata only. No ESPN credentials, video proxying, or arbitrary upstream fetches.
 const STREAM_HOSTS=new Set(['ntv.st','streamcorner.st','streamcorner.cloud']);
+// Only observed provider wrappers are inspected. Never execute provider code
+// or proxy media bytes; arbitrary iframe destinations are not fetched.
+const PLAYER_HOSTS=new Set([...STREAM_HOSTS,'taifood-blog.asia']);
 const STREAM_SERVERS=new Set(['raptor','falcon','phoenix','titan']);
 const streamCache=new Map(),streamPending=new Map();
 const streamJSON=(data,status=200)=>new Response(JSON.stringify(data),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff'}});
-async function providerDocument(url,fetcher,signal=AbortSignal.timeout(8000)){
+async function providerDocument(url,fetcher,hosts=STREAM_HOSTS,timeout=8000,maxBytes=600000){
+ const signal=AbortSignal.timeout(timeout);
  // Following a provider redirect must never turn this into an open URL proxy.
  for(let hop=0;hop<3;hop++){
-  const u=new URL(url);if(!STREAM_HOSTS.has(u.hostname)||u.protocol!=='https:'||u.username||u.password||u.port&&u.port!=='443')throw new Error('Unsupported provider redirect.');
+  const u=new URL(url);if(!hosts.has(u.hostname)||u.protocol!=='https:'||u.username||u.password||u.port&&u.port!=='443')throw new Error('Unsupported provider redirect.');
   const response=await fetcher(u.href,{redirect:'manual',signal,headers:{Accept:'application/json, text/html'}});
   if(response.status>=300&&response.status<400){const next=new URL(response.headers.get('Location')||'',u);if(next.hostname!==u.hostname&&!(streamcornerURL(u.href)&&streamcornerURL(next.href)))throw new Error('Provider moved to another site.');url=next.href;continue;}
   if(!response.ok)throw new Error('Provider unavailable ('+response.status+').');
-  if(Number(response.headers.get('Content-Length'))>600000)throw new Error('Provider response too large.');
-  const reader=response.body.getReader(),parts=[];let size=0;try{for(;;){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>600000)throw new Error('Provider response too large.');parts.push(value);}}finally{await reader.cancel().catch(()=>{});}
+  if(Number(response.headers.get('Content-Length'))>maxBytes)throw new Error('Provider response too large.');
+  const reader=response.body.getReader(),parts=[];let size=0;try{for(;;){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>maxBytes)throw new Error('Provider response too large.');parts.push(value);}}finally{await reader.cancel().catch(()=>{});}
   const bytes=new Uint8Array(size);let offset=0;for(const part of parts){bytes.set(part,offset);offset+=part.length;}return {text:new TextDecoder().decode(bytes),url:u.href};
  }
  throw new Error('Too many provider redirects.');
 }
-async function providerText(url,fetcher){return (await providerDocument(url,fetcher)).text;}
-const directStream=url=>/\.(?:m3u8|mp4|webm|mov)(?:[?#]|$)/i.test(url);
-// Follow only published StreamCorner wrappers. Unknown third-party embeds
-// remain embeds; neither page scripts nor media bytes are executed/proxied.
-async function streamcornerPlayer(page,fetcher){
- let next=page;const seen=new Set(),signal=AbortSignal.timeout(10000);
+async function providerText(...args){return (await providerDocument(...args)).text;}
+const isDirectStream=url=>/\.(?:m3u8|mp4|webm|mov)(?:[?#]|$)/i.test(url);
+export async function publishedVideo(embed,fetcher=fetch){
+ let next=embed;const visited=new Set();
  for(let hop=0;hop<3;hop++){
-  if(directStream(next)||!streamcornerURL(next)||seen.has(next))return next===page?null:next;
-  seen.add(next);
-  try{const doc=await providerDocument(next,fetcher,signal),player=embeddedPlayerFromHTML(doc.text,doc.url);if(!player)return next===page?null:next;next=player;}
-  catch(error){if(next===page)throw error;return next;}
+  if(isDirectStream(next))return next;
+  if(visited.has(next)||!PLAYER_HOSTS.has(new URL(next).hostname))break;
+  visited.add(next);
+  // Published NTV wrappers exceed the catalog's 600 KB budget. Bound player
+  // markup separately so those pages can still expose their media source.
+  try{const doc=await providerDocument(next,fetcher,PLAYER_HOSTS,2500,1000000);next=embeddedPlayerFromHTML(doc.text,doc.url);if(!next)break;}catch{break;}
  }
- return next===page?null:next;
+ return null;
 }
 async function cachedStream(key,fetcher,loader){
  if(fetcher!==fetch)return loader();const now=Date.now(),hit=streamCache.get(key);if(hit&&hit.until>now)return hit.value;if(streamPending.has(key))return streamPending.get(key);
@@ -68,8 +72,10 @@ export async function streamsResolveAPI(request,fetcher=fetch){
    const raw=JSON.parse(await providerText('https://ntv.st/api/get-watch-streams?'+new URLSearchParams({server:match[1],match:match[2],source:String(index)}),fetcher));
    const embed=raw.success&&raw.embedUrl&&publicPlayerURL(raw.embedUrl,'https://ntv.st');if(!embed||new URL(embed).hostname!=='ntv.st'||new URL(embed).pathname!=='/embed'||!new URL(embed).searchParams.get('t'))throw new Error('Player not published.');return embed;
   }
-  const embed=await streamcornerPlayer(page.href,fetcher);if(!embed)throw new Error('No unambiguous published player.');return embed;
- });return streamJSON({url,page:page.href,provider:page.hostname==='ntv.st'?'NTV':'StreamCorner',playback:directStream(url)?'native':'embed',resolvedAt:Date.now()});}
+  const doc=await providerDocument(page.href,fetcher),embed=embeddedPlayerFromHTML(doc.text,doc.url);if(!embed)throw new Error('No unambiguous published player.');return embed;
+ });
+ const direct=await cachedStream('native:'+url,fetcher,()=>publishedVideo(url,fetcher));
+ return streamJSON({url:direct||url,page:page.href,provider:page.hostname==='ntv.st'?'NTV':'StreamCorner',playback:direct?'native':'embed',...(direct?{embed:url}:{}),resolvedAt:Date.now()});}
  catch{return streamJSON({error:'The provider did not expose an accessible player. Paste its iframe embed code or direct player URL instead.',page:page.href},502);}
 }
 

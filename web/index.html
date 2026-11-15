@@ -8,7 +8,6 @@
  <nav class="modes" aria-label="Viewing mode"><button id="liveMode" aria-pressed="true"><span class="mode-dot" id="liveDot" aria-hidden="true"></span>Live</button><button id="replayMode" aria-pressed="false">Replay</button></nav>
  <nav class="sport-nav" aria-label="Sport"><a href="/" aria-current="page">NFL</a><a href="/sports.html?sport=nba">NBA</a><a href="/sports.html?sport=nhl">NHL</a><a href="/sports.html?sport=mlb">MLB</a></nav>
  <div class="bar-actions">
-  <a class="header-score" id="headerScore" href="#scoreboardTitle" hidden aria-label="Your matchup"></a>
   <button id="streamsButton" class="ghost streams-button" aria-haspopup="dialog" aria-controls="streamsDetails"><svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="4" width="15" height="10" rx="2.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8.5 7.2v3.6L11.6 9z" fill="currentColor"/><path d="M6.5 16.5h7" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg><span class="label">Streams</span><span class="count" id="streamsCount"></span></button>
   <button id="lineupButton" class="primary" aria-controls="lineupDialog" aria-haspopup="dialog" aria-expanded="false">Fantasy team</button>
   <button id="settingsButton" class="icon-button" aria-label="Settings" title="Settings"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 6.8a3.2 3.2 0 1 0 0 6.4 3.2 3.2 0 0 0 0-6.4Z" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M8.6 2.5h2.8l.5 2.1 1.6.9 2-.7 1.4 2.4-1.6 1.5v1.8l1.6 1.5-1.4 2.4-2-.7-1.6.9-.5 2.1H8.6l-.5-2.1-1.6-.9-2 .7-1.4-2.4 1.6-1.5V9.2L3.1 7.7l1.4-2.4 2 .7 1.6-.9z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
@@ -58,36 +57,30 @@
     </div></div>
     <button class="unmute" id="unmute" hidden>Turn sound on</button>
     <div class="sound-hint" id="soundHint" hidden><b>Click the video</b> once for sound</div>
-   </div>
-   <div class="now-watching" aria-label="Now watching">
-    <div class="bug" id="bug" hidden><span class="bug-tag" id="bugTag">LIVE</span><span class="bug-game" id="bugGame"></span><span class="bug-clock" id="bugClock"></span></div>
-    <div class="lower" id="lower" hidden><span class="lower-kicker" id="lowerKicker"></span><span class="lower-main" id="lowerMain"></span><span class="lower-meta" id="lowerMeta"></span></div>
+    <div class="toast" id="toast" role="status" hidden></div>
    </div>
    <div class="fullscreen-reveal" aria-hidden="true"></div>
+   <!-- One slim row under the picture: play, what is on, why, then icon controls. -->
    <div class="transport" id="transport">
     <div class="playback-actions">
-     <button id="playButton" class="primary" aria-label="Play">Play</button>
+     <button id="playButton" class="primary icon-button-ctl" aria-label="Play" title="Play or pause (Space)">Play</button>
+     <div class="bug" id="bug" hidden><span class="bug-tag" id="bugTag">LIVE</span><span class="bug-game" id="bugGame"></span><span class="bug-clock" id="bugClock"></span></div>
+     <div class="lower" id="lower" hidden><span class="lower-kicker" id="lowerKicker"></span><span class="lower-main" id="lowerMain"></span><span class="lower-meta" id="lowerMeta"></span></div>
+     <div class="status-line"><span id="autoChip" class="chip on">Automatic</span><span id="reason">Pick a game above.</span><span class="channel-mode sr-only" id="channelMode">Live games</span><span id="pictureNote" role="status"></span></div>
      <span class="spacer"></span>
-     <button id="reloadStream" hidden>Reload stream</button>
-     <a id="openStream" class="stream-original" href="#" target="_blank" rel="noopener noreferrer" hidden>Open stream ↗</a>
-     <button id="nextStream" hidden>Try another link</button>
-     <button id="muteButton" aria-label="Turn sound on">Turn sound on</button>
-     <button id="fullButton" aria-label="Full screen" title="Full screen (F)">Full screen</button>
+     <div class="channel-actions"><button id="pinCurrent" aria-pressed="false" hidden>Stay on this game</button><button id="skipBreak" hidden>Skip break <span aria-hidden="true">→</span></button><button id="undoBreak" hidden>Undo skip</button><button id="leaveHighlight" hidden>Back to games</button></div>
+     <button id="reloadStream" class="icon-button-ctl" title="Reload stream" hidden>Reload stream</button>
+     <button id="nextStream" class="icon-button-ctl" title="Try another link" hidden>Try another link</button>
+     <a id="openStream" class="stream-original icon-button-ctl" href="#" target="_blank" rel="noopener noreferrer" title="Open stream in a new tab" hidden>Open stream in a new tab</a>
+     <button id="muteButton" class="icon-button-ctl" aria-label="Turn sound on" title="Sound (M)">Turn sound on</button>
+     <button id="fullButton" class="icon-button-ctl" aria-label="Full screen" title="Full screen (F)">Full screen</button>
     </div>
-    <p id="streamHealth" class="stream-health" role="status" hidden></p>
-    <p id="embedHelp" class="embed-help" hidden>For automatic starts, preloaded switches and subtitles off, <a href="/playback-setup.html" target="_blank" rel="noopener">set up the Chrome playback helper</a>. Without it, this provider may ask you to press Play.</p>
     <div class="replay-controls" id="replayControls" hidden>
      <div class="replay-seek"><button id="backButton" class="seek-button" aria-label="Back 30 seconds">−30s</button><button id="forwardButton" class="seek-button" aria-label="Forward 30 seconds">+30s</button><button id="nextButton" title="Skip ahead to your next drive">Next drive <span aria-hidden="true">→</span></button></div>
      <div class="replay-progress"><div class="timeline"><div class="ticks" id="ticks" aria-hidden="true"></div><div class="scrub-tip" id="scrubTip" hidden></div><input type="range" id="timeline" min="0" max="1" step="1" value="0" aria-label="Replay time"></div><span class="time" id="timeLabel">—</span></div>
      <details class="replay-settings"><summary title="Replay day and timeline">Options</summary><div class="replay-options"><div><label for="weekSelect">Week</label><select id="weekSelect" aria-label="Replay week"></select></div><div><label for="daySelect">Replay day</label><select id="daySelect" aria-label="Replay day"></select></div><div><label for="scope">Timeline</label><select id="scope" aria-label="Timeline range"><option value="game">This game</option><option value="tight">15 minutes</option><option value="day">Whole day</option></select></div><div id="speedControl" hidden><label for="speed">Speed</label><select id="speed" aria-label="Speed" hidden><option value="1">1×</option><option value="4">4×</option><option value="16">16×</option><option value="60">60×</option></select></div><button id="timingButton" class="ghost">Video out of step?</button></div></details>
     </div>
    </div>
-   <div class="direction-controls">
-    <div class="status-line"><span id="autoChip" class="chip on">Automatic</span><span id="reason">Pick a game above.</span></div>
-    <div class="channel-actions"><button id="pinCurrent" aria-pressed="false" hidden>Stay on this game</button><button id="skipBreak" hidden>Skip this break <span aria-hidden="true">→</span></button><button id="undoBreak" hidden>Undo skip</button><button id="leaveHighlight" hidden>Back to games</button></div>
-    <div class="channel-meta"><span class="channel-mode" id="channelMode">Live games</span><span id="pictureNote" role="status"></span></div>
-   </div>
-   <div class="toast" id="toast" role="status" hidden></div>
   </div>
  </section>
 
@@ -153,17 +146,12 @@
 <dialog id="lineupDialog" class="team-dialog" aria-labelledby="lineupTitle"><form id="lineupForm">
  <div class="dialog-head"><div><h2 id="lineupTitle">Fantasy team</h2><p class="dialog-sub" id="lineupStatus" role="status"></p></div><button type="button" id="closeLineup" class="icon-button" aria-label="Close fantasy team">✕</button></div>
  <section class="dialog-body">
-  <div class="league-line"><span class="connect-badge" aria-hidden="true">ESPN</span><span class="connect-text"><b id="leagueState">Not connected</b><small id="leagueStatus" role="status">Paste your ESPN league link.</small></span><button type="button" id="leagueAction" class="link">Change</button></div>
-  <details id="leagueImport" class="connect-fields"><summary class="sr-only">ESPN connection</summary>
+  <div id="leagueImport" class="connect-fields">
    <label for="leagueId">ESPN league link or ID<input id="leagueId" autocomplete="off" spellcheck="false" placeholder="Paste your league link"></label>
-   <div class="inline"><button type="button" id="importLeague" class="primary">Connect ESPN</button><button type="button" id="addByHand" class="ghost">Add players myself</button></div>
-   <details id="privateLeague" class="plain private-league"><summary>Private league?</summary>
-    <p class="muted small">On a computer, sign in to espn.com and open your browser’s developer tools (F12, or Cmd+Option+I on a Mac). Choose Application (it may be hidden behind &gt;&gt;), then Cookies, then espn.com. Copy SWID and espn_s2 here, then press Connect ESPN. Phones can’t do this step: add your players by hand instead.</p>
-    <div class="cookie-grid"><label>SWID<input type="password" id="espnSwid" autocomplete="off" spellcheck="false" placeholder="{XXXXXXXX-…}"></label><label>espn_s2<input type="password" id="espnS2" autocomplete="off" spellcheck="false" placeholder="AEB…"></label></div>
-    <p class="muted small">They’re saved in this browser only. Each time your league or scores load, they pass through Fantasy Stream’s server to reach ESPN, and the server doesn’t keep them. Treat them like a password: they sign in to your ESPN account.</p>
-   </details>
+   <div class="cookie-grid connect-row" id="privateLeague"><label>SWID<input type="password" id="espnSwid" autocomplete="off" spellcheck="false" placeholder="{XXXXXXXX-…}" title="Saved in this browser only. They pass through Fantasy Stream’s server to reach ESPN, which doesn’t keep them. Treat them like a password."></label><label>espn_s2<input type="password" id="espnS2" autocomplete="off" spellcheck="false" placeholder="AEB…" title="Saved in this browser only. They pass through Fantasy Stream’s server to reach ESPN, which doesn’t keep them. Treat them like a password."></label><button type="button" id="importLeague" class="primary">Connect ESPN</button></div>
    <button type="button" id="forgetESPN" class="link" hidden>Disconnect ESPN and forget my login</button>
-  </details>
+   <small id="leagueStatus" class="league-status" role="status"></small>
+  </div>
   <div class="team-picker"><label id="scoreTeamPicker" for="scoreTeam">Your team</label><select id="scoreTeam" aria-label="Your fantasy team"><option value="">Connect ESPN to choose a team</option></select></div>
   <div class="roster-list" id="manualEditor"><div class="roster-head"><b>Players the channel follows</b><small id="playersState"></small></div><div id="rosterRows"></div><button type="button" id="addPlayer" class="ghost small-button">+ Add a player</button></div>
  </section>

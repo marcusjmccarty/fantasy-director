@@ -270,7 +270,7 @@ details.plain>summary{display:inline-flex;align-items:center;gap:6px;font-size:1
 .connect-badge{flex:none;display:grid;place-items:center;width:42px;height:28px;border-radius:7px;background:var(--panel-3);font-size:10.5px;font-weight:900;letter-spacing:.6px;color:var(--muted)}
 .connect-text{flex:1;min-width:0;display:grid}.connect-text b{font-size:14px}.connect-text small{font-size:12.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .league-line{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--bg-2)}.league-line .connect-text b{font-size:14px;display:block}.league-line .connect-text small{display:block;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.league-line .link{flex:none;min-height:30px;font-size:12.5px}
-.connect-fields{display:grid;gap:10px;padding:2px 2px 0}.connect-fields:not([open]){display:none}.connect-fields label{margin:0;display:grid;gap:5px}.connect-fields p{margin:0}.private-league:not([open]){padding-bottom:2px}.private-league[open]{display:grid;gap:10px}.private-league>summary{margin-bottom:0}.private-league[open]>summary{margin-bottom:0}.private-league .season-field{max-width:180px}.connect-fields>.link{justify-self:start}
+.connect-fields{display:grid;gap:10px;padding:2px 2px 0}.connect-fields label{margin:0;display:grid;gap:5px}.connect-fields p{margin:0}.private-league:not([open]){padding-bottom:2px}.private-league[open]{display:grid;gap:10px}.private-league>summary{margin-bottom:0}.private-league[open]>summary{margin-bottom:0}.private-league .season-field{max-width:180px}.connect-fields>.link{justify-self:start}
 details.advanced[open]{display:grid;gap:14px}
 .inline{display:flex;gap:8px;align-items:flex-end}.inline>input{flex:1;min-width:0}.inline>label.grow{flex:1;min-width:0}.season-field{flex:0 0 96px}.inline>input.season{flex:0 0 92px;width:92px}
 .cookie-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.cookie-grid label{margin:0;display:grid;gap:5px}
@@ -449,3 +449,104 @@ dialog{border-radius:20px;border-color:rgba(255,255,255,.09);box-shadow:0 50px 1
 .h2h-player small.h2h-stats{color:var(--text);font-size:10.5px;line-height:1.2;font-variant-numeric:tabular-nums}
 #matchupPanel:has(.h2h-stats){--matchup-min-row-height:54px}
 .h2h-name:has(.h2h-stats){padding-block:4px}
+
+/* ---------- November 15: one slim row under the picture ----------
+   Play, the game on screen, why the channel is there, then icon controls.
+   The lower third, help paragraph, mode label and delay note are gone, so the
+   picture takes the height they used. Labels stay as each control's
+   accessible name and tooltip; the icons are drawn from the same state. */
+.now-watching,.direction-controls,.lower{display:none!important}
+.transport{padding:6px 8px;border-top:1px solid var(--line)}
+.stage .transport .playback-actions{flex-wrap:nowrap;gap:6px;min-width:0}
+.stage .transport .playback-actions .spacer{display:block;flex:1 1 0;min-width:0}
+.stage .transport .playback-actions .bug{flex:none;gap:8px;padding:0 4px 0 2px}
+.stage .transport .playback-actions .bug-tag{font-size:10px;padding:3px 6px}
+.stage .transport .playback-actions .bug-game{font-size:13px}
+.stage .transport .playback-actions .bug-game b{font-size:16px}
+.stage .transport .playback-actions .bug-clock{font-size:12px;padding-left:8px}
+.stage .transport .playback-actions .status-line{flex:0 1 auto;min-width:0;display:flex;align-items:center;flex-wrap:nowrap;gap:8px;font-size:12.5px;color:var(--muted);overflow:hidden;padding-left:8px;border-left:1px solid var(--line-2)}
+.stage .transport .playback-actions .status-line #reason{flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage .transport .playback-actions #pictureNote{flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--gold);font-weight:600}
+.stage .transport .playback-actions #pictureNote:empty{display:none}
+.stage .transport .playback-actions .chip{font-size:11.5px;gap:6px}
+.stage .transport .playback-actions .channel-actions{flex:none;flex-wrap:nowrap;gap:6px}
+.stage .transport .playback-actions .channel-actions button{flex:none;min-height:32px;padding:4px 10px;font-size:12.5px;background:transparent}
+.stage .transport .playback-actions .icon-button-ctl{flex:none;display:inline-grid;place-items:center;width:34px;min-width:0;height:34px;min-height:34px;padding:0;border-radius:9px;font-size:0;line-height:0;letter-spacing:0;color:var(--muted);background:transparent;border-color:transparent;overflow:hidden;text-decoration:none}
+.stage .transport .playback-actions .icon-button-ctl:hover{color:var(--text);background:var(--panel-2);border-color:var(--line-2)}
+.stage .transport .playback-actions .icon-button-ctl::before{content:'';display:block;width:19px;height:19px;background:currentColor;-webkit-mask:var(--ico) center/contain no-repeat;mask:var(--ico) center/contain no-repeat}
+.stage .transport .playback-actions #playButton{--ico:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M7 4.6v14.8L19.8 12z'/%3E%3C/svg%3E");width:40px;min-width:0;color:var(--gold-ink);background:var(--gold);border-color:var(--gold)}
+.stage .transport .playback-actions #playButton[data-playing=true]{--ico:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M6 4.5h4.2v15H6zM13.8 4.5H18v15h-4.2z'/%3E%3C/svg%3E")}
+.stage .transport .playback-actions #reloadStream{--ico:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M19.5 12a7.5 7.5 0 1 1-2.2-5.3'/%3E%3Cpath d='M19.5 4.5v4.8h-4.8'/%3E%3C/svg%3E")}
+.stage .transport .playback-actions #nextStream{--ico:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 8h14.5M15 4.5 18.5 8 15 11.5M20 16H5.5M9 12.5 5.5 16 9 19.5'/%3E%3C/svg%3E")}
+.stage .transport .playback-actions #openStream{--ico:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 4h6v6M20 4l-8.5 8.5M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5'/%3E%3C/svg%3E")}
+.stage .transport .playback-actions #muteButton{--ico:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3.5 9.2v5.6h3.8l5 4.2V5l-5 4.2z'/%3E%3Cpath d='M15.6 9.2a4 4 0 0 1 0 5.6M18.4 6.4a8 8 0 0 1 0 11.2' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")}
+.stage .transport .playback-actions #muteButton[aria-label="Turn sound on"]{--ico:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3.5 9.2v5.6h3.8l5 4.2V5l-5 4.2z'/%3E%3Cpath d='M16 9.5l5 5M21 9.5l-5 5' fill='none' stroke='black' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E")}
+.stage .transport .playback-actions #fullButton{--ico:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5'/%3E%3C/svg%3E")}
+.stage .transport .playback-actions #fullButton[aria-label="Exit full screen"]{--ico:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5'/%3E%3C/svg%3E")}
+.stage .transport .playback-actions .icon-button-ctl[hidden]{display:none}
+/* Messages float over the picture instead of pushing it up. */
+.screen>.toast{position:absolute;top:12px;right:12px;z-index:7;margin:0;max-width:min(60%,440px);box-shadow:0 10px 30px -12px #000}
+/* The week label in the matchup carries a faint dot while ESPN refreshes are retrying; details are in its tooltip. */
+#scoreboardMeta[data-stale=true]::after,#leagueMeta[data-stale=true]::after{content:'';display:inline-block;width:5px;height:5px;margin-left:5px;border-radius:50%;background:var(--gold);opacity:.7;vertical-align:1px}
+/* Full screen keeps only the controls in its floating bar. */
+.stage:is(:fullscreen,:-webkit-full-screen,.theater) .playback-actions :is(.bug,.status-line,.channel-actions){display:none}
+.stage:is(:fullscreen,:-webkit-full-screen,.theater) .transport .playback-actions .icon-button-ctl{min-height:34px;padding:0;font-size:0;border-radius:99px}
+/* Replay: the seek controls share the row; the reason drops to its own line. */
+body[data-mode=replay] .stage .transport .playback-actions .status-line{order:20;flex:1 1 100%;border-left:0;padding-left:2px}
+body[data-mode=replay] .stage .transport .playback-actions .spacer{display:none}
+@media(max-width:600px){
+ .stage .transport .playback-actions{flex-wrap:wrap}
+ .stage .transport .playback-actions .status-line{order:10;flex:1 1 100%;border-left:0;padding-left:2px}
+ .stage .transport .playback-actions .icon-button-ctl{flex:none;width:38px;height:38px}
+ .stage .transport .playback-actions .channel-actions button{min-height:36px}
+}
+/* With a game chosen, its button already says which way the channel is steering. */
+.stage .transport .playback-actions:has(#pinCurrent:not([hidden])) #autoChip{display:none}
+/* Phones: play and the score on top, channel buttons and icons below, the reason last. */
+@media(max-width:600px){
+ .stage .transport .playback-actions .spacer{order:1;flex:1 1 100%;height:0}
+ .stage .transport .playback-actions .channel-actions{order:2;margin-right:auto}
+ .stage .transport .playback-actions .icon-button-ctl:not(#playButton){order:3}
+ .stage .transport .playback-actions .status-line{order:10}
+}
+/* The older play/pause glyph was drawn with borders; the icon mask replaces it. */
+.stage .transport .playback-actions #playButton::before,.stage .transport .playback-actions #playButton[data-playing=true]::before{width:19px;height:19px;margin:0;border:0;box-sizing:content-box}
+/* Fantasy team: league link, the two ESPN cookies and Connect, always in view. */
+.connect-fields .inline{display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px}
+.league-status{font-size:12.5px;color:var(--muted);line-height:1.4}
+.league-status:empty{display:none}
+/* Fantasy team: Connect ESPN ends the SWID / espn_s2 row, level with the boxes. */
+.cookie-grid.connect-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr) auto;align-items:end;gap:8px}
+.cookie-grid.connect-row #importLeague{height:40px;min-height:40px;padding:0 16px;white-space:nowrap}
+.connect-fields>#forgetESPN{justify-self:start;min-height:0;padding:2px 0;font-size:12.5px}
+@media(max-width:600px){.cookie-grid.connect-row{grid-template-columns:1fr}.cookie-grid.connect-row #importLeague{width:100%}}
+/* Control row: every control the same height, icons centered in their buttons,
+   text on one line height with matching dividers. */
+.transport{padding:7px 10px}
+.stage .transport .playback-actions{gap:8px;align-items:center}
+.stage .transport .playback-actions .icon-button-ctl{position:relative;display:inline-block;width:32px;height:32px;min-height:32px;border-radius:8px}
+.stage .transport .playback-actions .icon-button-ctl::before{position:absolute;inset:0;margin:auto;width:18px;height:18px}
+.stage .transport .playback-actions #playButton{width:32px;height:32px}
+.stage .transport .playback-actions #playButton::before,.stage .transport .playback-actions #playButton[data-playing=true]::before{width:16px;height:16px;margin:auto}
+.stage .transport .playback-actions .channel-actions{gap:8px}
+.stage .transport .playback-actions .channel-actions button{height:32px;min-height:32px;padding:0 12px;line-height:1;border-radius:8px}
+.stage .transport .playback-actions .bug,.stage .transport .playback-actions .status-line{align-items:center;line-height:1;gap:8px}
+.stage .transport .playback-actions .bug-tag{line-height:1;padding:4px 6px;border-radius:5px}
+.stage .transport .playback-actions .bug-game{line-height:1;display:inline-flex;align-items:baseline;gap:4px}
+.stage .transport .playback-actions .bug-game b{line-height:1;margin:0}
+.stage .transport .playback-actions .bug-clock{line-height:1;border-left:0;padding-left:0;display:inline-flex;align-items:center;gap:8px}
+.stage .transport .playback-actions .status-line{border-left:0;padding-left:0}
+.stage .transport .playback-actions .bug-clock::before,.stage .transport .playback-actions .status-line::before{content:'';flex:none;width:1px;height:16px;background:var(--line-2)}
+.stage .transport .playback-actions .status-line #reason,.stage .transport .playback-actions #pictureNote,.stage .transport .playback-actions .chip{line-height:1}
+@media(max-width:600px){
+ .stage .transport .playback-actions .icon-button-ctl{width:36px;height:36px}
+ .stage .transport .playback-actions .channel-actions button{height:36px}
+ .stage .transport .playback-actions .status-line::before{display:none}
+}
+/* Phones: play + score; the channel buttons sharing a row; then the reason beside the icons. */
+@media(max-width:600px){
+ .stage .transport .playback-actions .channel-actions{order:2;flex:1 1 100%;margin-right:0}
+ .stage .transport .playback-actions .channel-actions button{flex:1 1 0}
+ .stage .transport .playback-actions .status-line{order:3;flex:1 1 0;min-width:0}
+ .stage .transport .playback-actions .icon-button-ctl:not(#playButton){order:4}
+}

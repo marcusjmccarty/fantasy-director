@@ -47,13 +47,14 @@ test('automatic preference promotes native StreamCorner and retains NTV as backu
  const calls=[];const f=new StreamFinder({fetcher:async url=>{
   calls.push(url);
   if(url.startsWith('/api/streams?'))return Response.json({sport:'nfl',entries:[{...entry,provider:'NTV',sources:[ntv]},{...entry,provider:'StreamCorner',sources:[cloud]}]});
+  if(url.includes('ntv.st'))return Response.json({page:ntv,url:ntv});
   assert.ok(url.startsWith('/api/streams/resolve?'));assert.equal(new URL(url,'https://site.example').searchParams.get('url'),cloud);
   return Response.json({page:cloud,url:native,playback:'native'});
  }});
  await f.refresh([game],'nfl');assert.deepEqual(f.urls(game,[],'auto'),[native,ntv]);assert.deepEqual(f.urls(game),[native,ntv]);
  assert.equal(f.options(game)[0].provider,'StreamCorner');assert.equal(f.original(native),cloud);
  assert.deepEqual(f.urls(game,['https://media.example/manual.mp4']),['https://media.example/manual.mp4',native,ntv]);
- assert.deepEqual(f.urls(game,[],'NTV'),[ntv]);assert.equal(calls.length,2);
+ assert.deepEqual(f.urls(game,[],'NTV'),[ntv]);assert.equal(calls.length,3);
 });
 
 test('opaque or unavailable StreamCorner never displaces NTV in Auto',async()=>{
